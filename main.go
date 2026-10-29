@@ -13,11 +13,12 @@ var version = "0.0.1"
 
 func main() {
 	// Rex passes context as flags on every subcommand.
-	var session, block, client string
+	var session, block, client, title string
 	fs := flag.NewFlagSet("raptor", flag.ExitOnError)
 	fs.StringVar(&session, "session", os.Getenv("REX_SESSION"), "origin session id")
 	fs.StringVar(&block, "block", os.Getenv("REX_BLOCK"), "origin block id")
 	fs.StringVar(&client, "client", "", "origin client id")
+	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: raptor [dirs|wt|direct|last] [flags] [-- extra flags per command]\n")
 		fs.PrintDefaults()
@@ -34,13 +35,13 @@ func main() {
 
 	switch fs.Args()[0] {
 	case "dirs":
-		ctx := ctxFrom(session, block, client)
+		ctx := ctxFrom(session, block, client, title)
 		os.Exit(runDirs(ctx, cfg))
 	case "wt":
 		rest := flag.NewFlagSet("wt", flag.ExitOnError)
 		repo := rest.String("repo", "", "repo path (default: origin block's cwd, else picker)")
 		_ = rest.Parse(fs.Args()[1:])
-		ctx := ctxFrom(session, block, client)
+		ctx := ctxFrom(session, block, client, title)
 		os.Exit(runWorktrees(ctx, cfg, *repo))
 	case "direct":
 		// raptor -session X -block Y -client Z direct <target> <dir>
@@ -49,13 +50,13 @@ func main() {
 			fmt.Fprintln(os.Stderr, "usage: raptor direct <target> <dir>")
 			os.Exit(2)
 		}
-		ctx := ctxFrom(session, block, client)
+		ctx := ctxFrom(session, block, client, title)
 		if err := dispatch(args[0], args[1], ctx, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	case "last":
-		ctx := ctxFrom(session, block, client)
+		ctx := ctxFrom(session, block, client, title)
 		sid, err := lastSession()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -79,10 +80,11 @@ type Ctx struct {
 	Session string
 	Block   string
 	Client  string
+	Title   string
 }
 
-func ctxFrom(session, block, client string) Ctx {
-	return Ctx{Session: session, Block: block, Client: client}
+func ctxFrom(session, block, client, title string) Ctx {
+	return Ctx{Session: session, Block: block, Client: client, Title: title}
 }
 
 // fixPath makes rex, gh, git, eza findable when launched from the Rex

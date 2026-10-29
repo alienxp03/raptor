@@ -7,7 +7,8 @@ A compact directory and worktree picker for [Rex](https://www.superlogical.com/r
 `raptor dirs` searches your zoxide directories. A single-column list shows home-relative paths, with a soft selection highlight. Long paths shorten on the left to keep the destination visible. Long queries scroll to keep the cursor visible.
 
 - Type to fuzzy-filter; arrows or Ctrl+J/K navigate.
-- Tab / Shift+Tab cycle the target: session, tab, pane right, pane below, or cd here.
+- Tab / Shift+Tab cycle the target: tab, cd here, or session.
+- Ctrl+P enters split mode. Then h/j/k/l or Left/Down/Up/Right opens the selected directory in that direction, relative to the origin pane. Esc cancels split mode without clearing the query. Outside split mode, letters search and arrows navigate. No Alt or Shift direction shortcuts.
 - Enter opens the selection. Session mode reuses a matching session label or creates one.
 - Ctrl+W on a git repository opens its worktrees; returning resumes your directory query, selection, and opening target.
 - Esc clears the query, then closes the picker.
@@ -33,15 +34,34 @@ Worktrees live under `<worktree_root>/<primary-repo>/<folder>`. Branch `feat/log
 
 ## Rex integration
 
-Copy `rex/raptor.lua` to `~/.config/rex/raptor.lua`, then add `require("raptor")` to `init.lua` and run `rex config reload`.
+Install the Rex plugin and Go binary:
 
-- **Cmd+Shift+O** / **Raptor**: directory picker.
-- **Ctrl+Shift+W** / **Raptor Worktrees**: worktree picker.
-- **Raptor: Last Session**: toggle between sessions switched through the picker.
+```sh
+git clone https://github.com/alienxp03/raptor ~/.config/rex/raptor
+cd ~/.config/rex/raptor && make install
+```
+
+Keep the Rex config small. Setup registers actions; choose and change key bindings in your own `~/.config/rex/init.lua`:
+
+```lua
+require("raptor").setup{}
+rex.bind("shift+cmd+o", "raptor")
+rex.bind("shift+ctrl+w", "raptor_wt")
+```
+
+Change either binding to any key you prefer. The actions are also available in Rex's command palette. Run `rex config reload` after changing the config.
+
+Optional setup settings override popup bounds or the binary path:
+
+```lua
+require("raptor").setup{
+  bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
+  mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },
+  bin = os.getenv("HOME") .. "/.local/bin/raptor",
+}
+```
 
 Direct mode: `rex do raptor target=tab dir=/path/to/project`.
-
-The Lua wrapper opens a focused floating terminal layer. Its binary path and popup bounds are configurable there.
 
 ## Configuration
 
@@ -51,8 +71,10 @@ Optional `~/.config/raptor/config.toml`:
 worktree_root = "~/Workspace/worktrees"
 slug_len = 24
 enter = "tab"
-targets = ["session", "tab", "pane", "pane_below", "here"]
+targets = ["tab", "here", "session"]
 ```
+
+Custom target lists can still include `pane` (right), `pane_left`, `pane_above`, and `pane_below`.
 
 Last-session state lives at `$XDG_CACHE_HOME/rex/raptor-last` (default `~/.cache/rex/raptor-last`).
 

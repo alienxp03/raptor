@@ -67,6 +67,9 @@ func TestCompactPalette(t *testing.T) {
 		if !strings.Contains(ansi.Strip(lines[2]), "romhandbook") {
 			t.Fatal("missing directory name in result row")
 		}
+		if strings.Count(plain, "romhandbook") != 1 || strings.Contains(plain, "1/1") {
+			t.Fatal("unexpected selected-path or result-count footer")
+		}
 		if !strings.Contains(plain, "Open as: session") {
 			t.Fatal("target missing from footer")
 		}
@@ -76,7 +79,7 @@ func TestCompactPalette(t *testing.T) {
 		if strings.Contains(plain, "enter open") {
 			t.Fatal("unexpected Enter hint")
 		}
-		if !strings.Contains(plain, "directory ❯ ") {
+		if !strings.Contains(plain, "dir ❯ ") {
 			t.Fatal("missing search prompt")
 		}
 		if strings.Contains(plain, "╭") {

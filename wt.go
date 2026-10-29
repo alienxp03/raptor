@@ -95,7 +95,7 @@ func newWtModel(ctx Ctx, cfg Config, repo string) *wtModel {
 	m.applyFilter()
 	return m
 }
-func (m *wtModel) Init() tea.Cmd       { return nil }
+func (m *wtModel) Init() tea.Cmd       { return m.ctx.titleCommand() }
 func (m *wtModel) destination() string { return filepath.Join(m.root, worktreeFolder(m.branch)) }
 func (m *wtModel) applyFilter() {
 	m.view = nil
@@ -435,7 +435,7 @@ func (m *wtModel) View() string {
 		}
 	} else if m.confirm {
 		r := m.selected()
-		lines = append(lines, line(text.Bold(true).Render("Remove worktree?")), line(""))
+		lines = append(lines, line(styErr.Bold(true).Render("Remove worktree?")), line(""))
 		if r != nil {
 			lines = append(lines, line(text.Render(r.Branch)), line(dim.Render(homeRelative(r.Path))))
 		}
@@ -476,6 +476,10 @@ func (m *wtModel) View() string {
 	for _, path := range pathLines {
 		lines = append(lines, line(dim.Render(path)))
 	}
-	lines = append(lines, line(dim.Render(footer)))
+	footer = dim.Render(footer)
+	if m.confirm && m.err == "" && !m.busy {
+		footer = styErr.Bold(true).Render("↵ Remove") + dim.Render("   esc Cancel")
+	}
+	lines = append(lines, line(footer))
 	return strings.Join(lines, "\n")
 }

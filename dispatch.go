@@ -54,14 +54,11 @@ func dispatch(target, dir string, ctx Ctx, cfg Config) error {
 		}
 		return nil
 
-	case "pane", "pane_below":
+	case "pane", "pane_left", "pane_above", "pane_below":
 		if ctx.Block == "" {
 			return fmt.Errorf("no block context")
 		}
-		dirFlag := "--split=right"
-		if target == "pane_below" {
-			dirFlag = "--split=below"
-		}
+		dirFlag := "--split=" + splitDirection(target)
 		out, err := rexRun("split", "-s", ctx.Session, "-b", ctx.Block, dirFlag, "-c", dir, "--json")
 		if err != nil {
 			return err
@@ -102,6 +99,10 @@ func targetLabel(t string) string {
 		return "tab"
 	case "pane":
 		return "pane →"
+	case "pane_left":
+		return "pane ←"
+	case "pane_above":
+		return "pane ↑"
 	case "pane_below":
 		return "pane ↓"
 	case "here":
@@ -111,7 +112,22 @@ func targetLabel(t string) string {
 	}
 }
 
-var targetOrderHint = []string{"session", "tab", "pane", "pane_below", "here"}
+func splitDirection(target string) string {
+	switch target {
+	case "pane":
+		return "right"
+	case "pane_left":
+		return "left"
+	case "pane_above":
+		return "above"
+	case "pane_below":
+		return "below"
+	default:
+		return ""
+	}
+}
+
+var targetOrderHint = []string{"tab", "here", "session"}
 
 // nextTarget cycles within cfg.Targets.
 func nextTarget(cfg Config, cur string, forward bool) string {

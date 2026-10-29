@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 func TestWorktreeRemovalShortcut(t *testing.T) {
@@ -22,6 +23,42 @@ func TestWorktreeRemovalShortcut(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
 	if !m.confirm {
 		t.Fatal("Ctrl+X must request removal confirmation")
+	}
+}
+
+func TestWorktreeRemovalDangerStyle(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+	for _, size := range [][2]int{{80, 20}, {40, 12}, {24, 8}} {
+		m := &wtModel{width: size[0], height: size[1], confirm: true, rows: []worktree{{Branch: "feat/login", Path: "/tmp/login"}}, view: []int{0}}
+		view := m.View()
+		for _, label := range []string{"Remove worktree?", "↵ Remove"} {
+			if !strings.Contains(view, styErr.Bold(true).Render(label)) {
+				t.Fatalf("%v: destructive label is not red: %q", size, label)
+			}
+		}
+		if !strings.Contains(view, pickerMuted.Render("   esc Cancel")) {
+			t.Fatalf("%v: cancel must stay muted", size)
+		}
+		lines := strings.Split(view, "\n")
+		if len(lines) != m.height {
+			t.Fatalf("%v: got %d rows", size, len(lines))
+		}
+		for _, line := range lines {
+			if lipgloss.Width(line) > m.width {
+				t.Fatalf("%v: row overflow: %q", size, line)
+			}
+		}
+		for _, state := range []string{"busy", "error"} {
+			m.busy, m.err = state == "busy", ""
+			if state == "error" {
+				m.err = "Cannot remove worktree"
+			}
+			if strings.Contains(m.View(), styErr.Bold(true).Render("↵ Remove")) {
+				t.Fatalf("%v: remove action must not replace %s feedback", size, state)
+			}
+		}
 	}
 }
 

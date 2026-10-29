@@ -54,7 +54,7 @@ func pickRepo(ctx Ctx, cfg Config) string {
 		}
 		return view
 	}
-	m := &repoPickModel{rows: rows, view: view, sel: &sel, filter: &filter, apply: apply}
+	m := &repoPickModel{ctx: ctx, rows: rows, view: view, sel: &sel, filter: &filter, apply: apply}
 	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
 		return ""
 	}
@@ -67,6 +67,7 @@ func pickRepo(ctx Ctx, cfg Config) string {
 type rrow struct{ label, path string }
 
 type repoPickModel struct {
+	ctx    Ctx
 	rows   []rrow
 	view   []int
 	sel    *int
@@ -77,7 +78,7 @@ type repoPickModel struct {
 	height int
 }
 
-func (m *repoPickModel) Init() tea.Cmd { return nil }
+func (m *repoPickModel) Init() tea.Cmd { return m.ctx.titleCommand() }
 
 func (m *repoPickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {

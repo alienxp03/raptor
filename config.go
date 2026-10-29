@@ -19,7 +19,7 @@ func defaultConfig() Config {
 		WorktreeRoot: filepath.Join(home, "Workspace", "worktrees"),
 		SlugLen:      24,
 		Enter:        "tab",
-		Targets:      []string{"session", "tab", "pane", "pane_below", "here"},
+		Targets:      []string{"tab", "here", "session"},
 	}
 }
 

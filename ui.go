@@ -35,16 +35,17 @@ type row struct {
 }
 
 type dirModel struct {
-	cfg    Config
-	ctx    Ctx
-	rows   []row // full set
-	view   []int // indices into rows after filtering
-	filter string
-	sel    int
-	target string
-	err    string
-	width  int
-	height int
+	cfg       Config
+	ctx       Ctx
+	rows      []row // full set
+	view      []int // indices into rows after filtering
+	filter    string
+	sel       int
+	target    string
+	splitMode bool
+	err       string
+	width     int
+	height    int
 	// result of the interaction, read after the program exits
 	picked   *row   // non-nil when a dir/session was chosen
 	next     string // "wt" when bridging with a repo path in nextRepo
@@ -106,7 +107,7 @@ func runDirs(ctx Ctx, cfg Config) int {
 	return 0
 }
 
-func (m *dirModel) Init() tea.Cmd { return nil }
+func (m *dirModel) Init() tea.Cmd { return m.ctx.titleCommand() }
 func (m *dirModel) applyFilter() {
 	m.view = m.view[:0]
 	if m.filter == "" {
@@ -152,6 +153,28 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		m.err = ""
+		if m.splitMode {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc", "ctrl+p":
+				m.splitMode = false
+				return m, nil
+			}
+			target := map[string]string{
+				"h": "pane_left", "left": "pane_left",
+				"j": "pane_below", "down": "pane_below",
+				"k": "pane_above", "up": "pane_above",
+				"l": "pane", "right": "pane",
+			}[msg.String()]
+			if target != "" {
+				if r := m.selected(); r != nil && r.kind == "dir" {
+					m.target, m.picked = target, r
+					return m, tea.Quit
+				}
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -182,6 +205,17 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.sel < len(m.view)-1 {
 				m.sel++
 			}
+			return m, nil
+		case "ctrl+p":
+			r := m.selected()
+			if r == nil || r.kind != "dir" {
+				return m, nil
+			}
+			if m.ctx.Block == "" {
+				m.err = "no block context"
+				return m, nil
+			}
+			m.splitMode = true
 			return m, nil
 		case "tab", "shift+tab":
 			m.target = nextTarget(m.cfg, m.target, msg.String() == "tab")
@@ -223,11 +257,8 @@ func (m *dirModel) View() string {
 	}
 	width := m.width - 2
 	blank := pickerLine("", width)
-	lines := []string{pickerSearch(m.filter, width, "directory"), blank}
+	lines := []string{pickerSearch(m.filter, width, "dir"), blank}
 	footerRows := 2
-	if m.height >= 10 {
-		footerRows = 3
-	}
 	maxRows := maxInt(m.height-len(lines)-footerRows, 0)
 	start := maxInt(m.sel-maxRows+1, 0)
 	for n := 0; n < maxRows; n++ {
@@ -244,20 +275,21 @@ func (m *dirModel) View() string {
 		lines = append(lines, pickerDirectory(r.path, width, vi == m.sel))
 	}
 	lines = append(lines, pickerRule(width))
-	if footerRows == 3 {
-		detail := "No directory selected"
-		if r := m.selected(); r != nil {
-			detail = homeRelative(r.path)
-		}
-		lines = append(lines, pickerFooter(pickerMuted.Render(" "+detail), pickerMuted.Render(fmt.Sprintf("%d/%d ", len(m.view), len(m.rows))), detail, width))
-	}
 	target := pickerAccent.Bold(true).Render(targetLabel(m.target))
 	left := pickerMuted.Render("Open as: ") + target
 	if lipgloss.Width(left) > width {
 		left = target
 	}
-	right := pickerText.Render("ctrl+w") + pickerMuted.Render(" worktrees")
+	splitHint := pickerText.Render("^p") + pickerMuted.Render(" split")
+	right := splitHint + "  " + pickerText.Render("ctrl+w") + pickerMuted.Render(" worktrees")
+	if width-lipgloss.Width(left)-lipgloss.Width(right) < 2 {
+		right = splitHint
+	}
 	footer := pickerFooter(left, right, left, width)
+	if m.splitMode {
+		directions := pickerAccent.Bold(true).Render("h← j↓ k↑ l→")
+		footer = pickerFooter(pickerMuted.Render("Split: ")+directions, pickerMuted.Render("esc cancel"), directions+pickerMuted.Render(" · esc"), width)
+	}
 	if m.err != "" {
 		footer = pickerLine(styErr.Render(m.err), width)
 	}
