@@ -230,19 +230,17 @@ func (m *dirModel) View() string {
 	for vi := start; vi < len(m.view) && shown < maxRows; vi, shown = vi+1, shown+1 {
 		r := m.rows[m.view[vi]]
 		prefix := "  "
-		label := r.label
+		var text string
+		if r.kind == "session" {
+			text = stySession.Render("● ") + r.label
+		} else {
+			text = homeRelative(r.path)
+		}
 		if vi == m.sel {
 			prefix = stySel.Render("> ")
-			label = stySel.Render(label)
+			text = stySel.Render(text)
 		}
-		if r.kind == "session" {
-			label = stySession.Render("● ") + label
-		}
-		right := ""
-		if r.kind == "dir" {
-			right = "   " + styDim.Render(homeRelative(r.path))
-		}
-		line := prefix + label + right
+		line := prefix + text
 		if w := lipgloss.Width(line); w > m.width {
 			line = truncateW(line, m.width)
 		}
