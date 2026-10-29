@@ -27,10 +27,10 @@ type wtModel struct {
 	repo    string
 	repoURL string
 
-	rows    []wtRow
-	view    []int
-	filter  string
-	sel     int
+	rows   []wtRow
+	view   []int
+	filter string
+	sel    int
 
 	loading bool // gh fetch in flight
 	err     string
@@ -180,14 +180,14 @@ func pickRepo(ctx Ctx, cfg Config) string {
 type rrow struct{ label, path string }
 
 type repoPickModel struct {
-	rows    []rrow
-	view    []int
-	sel     *int
-	filter  *string
-	apply   func()
-	chosen  string
-	width   int
-	height  int
+	rows   []rrow
+	view   []int
+	sel    *int
+	filter *string
+	apply  func()
+	chosen string
+	width  int
+	height int
 }
 
 func (m *repoPickModel) Init() tea.Cmd { return nil }
@@ -563,7 +563,7 @@ func (m *wtModel) View() string {
 	var b strings.Builder
 	title := "  " + basename(m.repo) + styDim.Render(" — worktrees")
 	if m.repoURL != "" {
-		title += styDim.Render("   "+m.repoURL)
+		title += styDim.Render("   " + m.repoURL)
 	}
 	b.WriteString(styTitle.Render(title) + "\n")
 
@@ -622,7 +622,7 @@ func (m *wtModel) View() string {
 		if r.wt.Dirty {
 			what += styDirty.Render(" (dirty — will force)")
 		}
-		foot = "\n" + styErr.Render("  "+what)+"\n"+styDim.Render("  y confirm · n cancel") + "\n"
+		foot = "\n" + styErr.Render("  "+what) + "\n" + styDim.Render("  y confirm · n cancel") + "\n"
 	} else {
 		hints := "  enter open/create · x remove · o browser · esc dirs"
 		if m.err != "" {

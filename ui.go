@@ -47,8 +47,8 @@ type dirModel struct {
 	width   int
 	height  int
 	// result of the interaction, read after the program exits
-	picked *row    // non-nil when a dir/session was chosen
-	next   string  // "wt" when bridging with a repo path in nextRepo
+	picked   *row   // non-nil when a dir/session was chosen
+	next     string // "wt" when bridging with a repo path in nextRepo
 	nextRepo string
 }
 
