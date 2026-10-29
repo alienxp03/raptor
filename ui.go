@@ -207,9 +207,9 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *dirModel) View() string {
 	var b strings.Builder
-	b.WriteString(styTitle.Render("  /") + m.filter + "\n")
+	b.WriteString(m.searchBox() + "\n")
 
-	maxRows := m.height - 3
+	maxRows := m.height - 5
 	if maxRows < 1 {
 		maxRows = 1
 	}
@@ -250,6 +250,32 @@ func (m *dirModel) View() string {
 	}
 	b.WriteString(hints)
 	return b.String()
+}
+
+// searchBox renders the rounded input box with a block cursor.
+func (m *dirModel) searchBox() string {
+	inner := 20
+	if w := m.width - 6; w > inner {
+		inner = w
+	}
+	text := m.filter
+	placeholder := "type to search…"
+	var content string
+	if text == "" {
+		content = styDim.Render(placeholder)
+	} else {
+		content = text + stySel.Render("▊")
+	}
+	if len([]rune(text)) > inner-2 {
+		r := []rune(text)
+		content = string(r[len(r)-inner+3:]) + stySel.Render("▊")
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Padding(0, 1).
+		Width(inner)
+	return box.Render("❯ " + content)
 }
 
 func padRight(s string, w int) string {
