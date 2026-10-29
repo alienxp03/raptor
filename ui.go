@@ -56,14 +56,6 @@ type previewMsg struct {
 
 func loadDirRows(ctx Ctx) []row {
 	var rows []row
-	seen := map[string]bool{}
-	for _, s := range rexSessions() {
-		if s.Label == "" {
-			continue
-		}
-		rows = append(rows, row{kind: "session", label: s.Label, path: "", sessionID: s.SessionID})
-		seen[s.Label] = true
-	}
 	for _, d := range zoxideList() {
 		rows = append(rows, row{kind: "dir", label: basename(d), path: d})
 	}

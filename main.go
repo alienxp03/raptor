@@ -9,7 +9,7 @@ import (
 )
 
 // version is set at build time.
-var version = "dev"
+var version = "0.0.1"
 
 func main() {
 	// Rex passes context as flags on every subcommand.
