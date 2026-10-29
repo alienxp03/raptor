@@ -61,7 +61,7 @@ local function open_layer(ctx, args)
   if layer == nil then error(err, 0) end
 
   if layer.block_ids ~= nil and layer.block_ids[1] ~= nil then
-    rex.session.set_block_label{ block_id = layer.block_ids[1], label = "zpick" }
+    rex.session.set_block_label{ block_id = layer.block_ids[1], label = "" }
     rex.session.focus_block{ block_id = layer.block_ids[1] }
   end
   if ctx.client_id ~= nil and win_id ~= nil then

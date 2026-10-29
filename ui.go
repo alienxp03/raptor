@@ -97,7 +97,7 @@ func runDirs(ctx Ctx, cfg Config) int {
 	return 0
 }
 
-func (m *dirModel) Init() tea.Cmd { return tea.SetWindowTitle("zpick") }
+func (m *dirModel) Init() tea.Cmd { return nil }
 func (m *dirModel) applyFilter() {
 	m.view = m.view[:0]
 	if m.filter == "" {
