@@ -1,4 +1,4 @@
-BIN    := zpick
+BIN    := raptor
 PREFIX := $(HOME)/.local
 
 .PHONY: build install clean

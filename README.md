@@ -1,66 +1,62 @@
-# zpick
+# Raptor
 
-sesh-style session picker for [Rex](https://www.superlogical.com/rex/docs), written in Go with Bubble Tea. Picks from your zoxide list, live Rex sessions, and git worktrees — then opens the pick as a session, tab, split pane, or `cd` in place.
+A compact directory and worktree picker for [Rex](https://www.superlogical.com/rex/docs), built with Go and Bubble Tea.
 
-## Flows
+## Directory picker
 
-**`zpick dirs`** — directories & sessions.
+`raptor dirs` searches your zoxide directories. Paths use `~`, with a soft selection highlight and no preview.
 
-```
-  zpick   dirs & sessions
-> castty        ~/Workspace/Projects     │ master ●
-  dotfiles      ~/Workspace/Projects     │ ├── apps
-                                      …  │ └── docs
-  open as: [session] tab pane→ pane↓ cd here
-  tab⇄ target · w worktrees · enter open · esc quit
-```
+- Type to fuzzy-filter; arrows or Ctrl+J/K navigate.
+- Tab / Shift+Tab cycle the target: session, tab, pane right, pane below, or cd here.
+- Enter opens the selection. Session mode reuses a matching session label or creates one.
+- W on a git repository opens its worktrees.
+- Esc clears the query, then closes the picker.
 
-- type to fuzzy-filter, `tab`/`shift+tab` cycle the open-as target
-- `w` on a git repo row bridges into the worktree flow
-- live sessions are marked `●` and switch directly
+`here` only sends a cd command when the origin pane's foreground process is a shell.
 
-**`zpick wt [repo]`** — worktrees for a repo (auto-detected from the
-current pane, else a repo picker). Existing worktrees with dirty state,
-open issues/PRs via `gh` (enter creates the worktree + session), and a
-ghost row when you type an issue number. `x` removes a worktree (+branch,
-+session), `o` opens it in the browser, `esc` returns to dirs.
+## Worktree picker
 
-New worktrees are created under `worktree_root` as
-`<repo>/<number>-<slug>` with branch `<number>-<slug>`; sessions are named
-`<repo>#<number>` so re-opening is just Enter.
+`raptor wt --repo /path/to/repo` shows existing worktrees and open GitHub issues/PRs through `gh`. Without `--repo`, it detects the repository from the origin pane, falling back to a repository picker.
+
+- Enter opens an existing worktree or creates one for the selected issue number.
+- Type an issue number to offer a new worktree.
+- X offers removal of a worktree and its associated session/branch. Review the confirmation carefully: dirty worktrees can be force-removed.
+- O opens an issue/PR in the browser.
+- Esc clears the query, then returns to directories.
+
+New worktrees use `<worktree_root>/<repo>/<number>-<slug>` and sessions use `<repo>#<number>`. Creation currently branches from the local checkout; selecting a PR does not check out its remote head.
 
 ## Rex integration
 
-Run through a small `init.lua` wrapper (see `rex/zpick.lua` in my
-dotfiles) that opens the binary in a floating layer:
+Copy `rex/raptor.lua` to `~/.config/rex/raptor.lua`, then add `require("raptor")` to `init.lua` and run `rex config reload`.
 
-- `zpick` — ⇧⌃N or palette, the dir picker
-- `zpick_wt` — ⇧⌃W or palette, the worktree picker
-- `zpick_last` — jump back to the previous session (A↔B toggle)
-- `rex do zpick target=tab dir=~/proj` — head-less open
+- **Cmd+Shift+P** / **Raptor**: directory picker.
+- **Ctrl+Shift+W** / **Raptor Worktrees**: worktree picker.
+- **Raptor: Last Session**: toggle between sessions switched through the picker.
 
-Works from the command palette on the iOS app too.
+Direct mode: `rex do raptor target=tab dir=/path/to/project`.
 
-Actions `zpick` (⇧⌃N), `zpick_wt` (⇧⌃W), `zpick_last` (jump back to the
-previous session, A↔B toggle) run the binary in a floating layer and work
-from the command palette — including the iOS app.
+The Lua wrapper opens a focused floating terminal layer. Its binary path and popup bounds are configurable there.
 
-## Config
+## Configuration
 
-`~/.config/zpick/config.toml`:
+Optional `~/.config/raptor/config.toml`:
 
 ```toml
 worktree_root = "~/Workspace/worktrees"
-slug_len      = 24
-enter         = "session"          # default target for Enter
-targets       = ["session", "tab", "pane", "pane_below", "here"]
+slug_len = 24
+enter = "session"
+targets = ["session", "tab", "pane", "pane_below", "here"]
 ```
+
+Last-session state lives at `$XDG_CACHE_HOME/rex/raptor-last` (default `~/.cache/rex/raptor-last`).
 
 ## Build
 
 ```sh
-make            # builds to ./zpick
-make install    # builds to ~/.local/bin/zpick
+make          # ./raptor
+make install  # ~/.local/bin/raptor
+go test ./...
 ```
 
-Requires `rex`, `zoxide` on PATH; `gh` for issue rows; `eza` optional for previews.
+Requires `rex`, `zoxide`, and `git`; `gh` adds issue/PR discovery. Development version stays **0.0.1**.

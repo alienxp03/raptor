@@ -188,7 +188,7 @@ func statePath() string {
 		home, _ := os.UserHomeDir()
 		cache = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(cache, "rex", "zpick-last")
+	return filepath.Join(cache, "rex", "raptor-last")
 }
 
 func lastSession() (string, error) {

@@ -1,4 +1,4 @@
-module github.com/alienxp03/zpick
+module github.com/alienxp03/raptor
 
 go 1.27.1
 

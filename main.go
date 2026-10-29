@@ -14,12 +14,12 @@ var version = "0.0.1"
 func main() {
 	// Rex passes context as flags on every subcommand.
 	var session, block, client string
-	fs := flag.NewFlagSet("zpick", flag.ExitOnError)
+	fs := flag.NewFlagSet("raptor", flag.ExitOnError)
 	fs.StringVar(&session, "session", os.Getenv("REX_SESSION"), "origin session id")
 	fs.StringVar(&block, "block", os.Getenv("REX_BLOCK"), "origin block id")
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: zpick [dirs|wt|direct|last] [flags] [-- extra flags per command]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [dirs|wt|direct|last] [flags] [-- extra flags per command]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -43,10 +43,10 @@ func main() {
 		ctx := ctxFrom(session, block, client)
 		os.Exit(runWorktrees(ctx, cfg, *repo))
 	case "direct":
-		// zpick -session X -block Y -client Z direct <target> <dir>
+		// raptor -session X -block Y -client Z direct <target> <dir>
 		args := fs.Args()[1:]
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: zpick direct <target> <dir>")
+			fmt.Fprintln(os.Stderr, "usage: raptor direct <target> <dir>")
 			os.Exit(2)
 		}
 		ctx := ctxFrom(session, block, client)

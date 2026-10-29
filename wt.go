@@ -51,10 +51,10 @@ type ghGhostMsg struct {
 }
 
 func dbg(msg string) {
-	if os.Getenv("ZPICK_DEBUG") == "" {
+	if os.Getenv("RAPTOR_DEBUG") == "" {
 		return
 	}
-	f, err := os.OpenFile("/tmp/zpick-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile("/tmp/raptor-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err == nil {
 		fmt.Fprintln(f, msg)
 		f.Close()

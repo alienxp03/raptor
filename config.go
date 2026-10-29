@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 )
 
-// Config is read from ~/.config/zpick/config.toml (all optional).
+// Config is read from ~/.config/raptor/config.toml (all optional).
 type Config struct {
 	WorktreeRoot string // where new worktrees are created
 	SlugLen      int    // max slug characters in branch/dir names
@@ -27,7 +27,7 @@ func defaultConfig() Config {
 func loadConfig() Config {
 	cfg := defaultConfig()
 	home, _ := os.UserHomeDir()
-	data, err := os.ReadFile(filepath.Join(home, ".config", "zpick", "config.toml"))
+	data, err := os.ReadFile(filepath.Join(home, ".config", "raptor", "config.toml"))
 	if err != nil {
 		return cfg
 	}
