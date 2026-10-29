@@ -1,48 +1,35 @@
 # Raptor
 
-A compact directory and worktree picker for [Rex](https://www.superlogical.com/rex/docs), built with Go and Bubble Tea.
+Raptor is a directory and Git worktree picker for [Rex](https://www.superlogical.com/rex/docs). It uses Go and Bubble Tea.
 
-## Directory picker
+Pick a saved directory or worktree, then open it in a tab, session, pane, or the current shell.
 
-`raptor dirs` searches your zoxide directories. A single-column list shows home-relative paths, with a soft selection highlight. Long paths shorten on the left to keep the destination visible. Long queries scroll to keep the cursor visible.
+## Screenshots
 
-- Type to fuzzy-filter; arrows or Ctrl+J/K navigate.
-- Tab / Shift+Tab cycle the target: tab, cd here, or session.
-- Ctrl+P enters split mode. Then h/j/k/l or Left/Down/Up/Right opens the selected directory in that direction, relative to the origin pane. Esc cancels split mode without clearing the query. Outside split mode, letters search and arrows navigate. No Alt or Shift direction shortcuts.
-- Enter opens the selection. Session mode reuses a matching session label or creates one.
-- Ctrl+T on a git repository opens its worktrees; returning resumes your directory query, selection, and opening target.
-- Esc clears the query, then closes the picker.
+Screenshots show Raptor over an illustrative Rex workspace. Project names, paths, and terminal output are synthetic.
 
-`here` only sends a cd command when the origin pane's foreground process is a shell.
+<table>
+  <tr>
+    <td><img width="100%" src="docs/screenshots/directories.png" alt="Directory picker over a synthetic Rex workspace"></td>
+    <td><img width="100%" src="docs/screenshots/worktrees.png" alt="Worktree picker with synthetic branches"></td>
+  </tr>
+  <tr>
+    <td><img width="100%" src="docs/screenshots/split-mode.png" alt="Pane split mode over a synthetic Rex workspace"></td>
+    <td><img width="100%" src="docs/screenshots/create-worktree.png" alt="Create-worktree form with synthetic data"></td>
+  </tr>
+</table>
 
-## Worktree picker
+## Install
 
-`raptor wt --repo /path/to/repo` shows local worktrees only: branch name and path, without status badges or GitHub requests. Without `--repo`, it detects the repository from the origin pane, falling back to a repository picker.
-
-- Branches and paths use two columns; paths start at a fixed position near the middle. Long paths shorten on the left, not the folder end. Narrow panes show branches only.
-- The selected path uses the full width below the list, wrapping across up to three rows when space allows.
-- Type to search branches and paths; arrows or Ctrl+J/K navigate.
-- Tab / Shift+Tab cycle the open target, as in the directory picker. Enter opens the selected worktree with that target (tab, session, here, or configured pane target).
-- Ctrl+P enters split mode; h/j/k/l or arrows opens the selected worktree in that pane direction. Esc cancels.
-- Ctrl+N (or F2) opens the creation form: branch name, local base branch, and a live full destination path preview.
-- Tab / Shift+Tab move between Branch name, Base branch, and the explicit Create & open button.
-- Enter advances from the branch name, opens the searchable local-base chooser from Base branch, and only submits when Create & open is focused. The worktree opens using the selected target.
-- Esc backs out of the base chooser to the form, or cancels the form without changing the worktree list query/selection.
-- Ctrl+X (or Delete) offers worktree removal with confirmation. The branch is kept; Git refuses uncommitted changes and locked worktrees. The primary worktree cannot be removed.
-- Esc clears the query, then returns to directories.
-
-Worktrees live under `<worktree_root>/<visible-primary-repo>/<folder>`. Leading dots are removed from the primary repository name so worktree folders are not hidden. Branch `feat/login` becomes folder `feature-login`; other slashes become hyphens (`fix/crash` → `fix-crash`, `chore/deps` → `chore-deps`). The branch name is preserved. Existing branches/destinations and invalid names are rejected with errors in the form.
-
-## Rex integration
-
-Install the Rex plugin and Go binary:
+Clone the plugin and install the Go binary:
 
 ```sh
 git clone https://github.com/alienxp03/raptor ~/.config/rex/raptor
-cd ~/.config/rex/raptor && make install
+cd ~/.config/rex/raptor
+make install
 ```
 
-Keep the Rex config small. Setup registers actions; choose and change key bindings in your own `~/.config/rex/init.lua`:
+Add setup and your own key bindings to `~/.config/rex/init.lua`:
 
 ```lua
 require("raptor").setup{}
@@ -50,9 +37,81 @@ rex.bind("shift+cmd+o", "raptor")
 rex.bind("shift+cmd+t", "raptor_wt")
 ```
 
-Change either binding to any key you prefer. The actions are also available in Rex's command palette. Run `rex config reload` after changing the config.
+These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_wt`, and `raptor_last` to the Rex command palette. Reload the Rex config after you change it.
 
-Optional setup settings override popup bounds or the binary path:
+## Directory picker
+
+Run `raptor dirs` from a Rex session, or use the `raptor` action.
+
+| Key | Action |
+| --- | --- |
+| Type | Filter saved directories and sessions |
+| ↑ / ↓, Ctrl+J / Ctrl+K | Move through results |
+| Tab / Shift+Tab | Change the open target |
+| Enter | Open the selected result |
+| Ctrl+P, then H/J/K/L or arrow | Open in a pane split |
+| Ctrl+T | Open worktrees for the selected Git repository |
+| Esc | Clear the filter, then close the picker |
+
+`here` changes directory only when the current pane is at a shell prompt. Session mode reuses a matching session or creates one.
+
+## Worktree picker
+
+Run `raptor wt` to use the current Git repository. Use `raptor wt --repo /path/to/repo` to choose a repository directly. Without a repository in the current pane, Raptor shows a repository picker.
+
+| Key | Action |
+| --- | --- |
+| Type | Filter worktree branches and paths |
+| ↑ / ↓, Ctrl+J / Ctrl+K | Move through worktrees |
+| Tab / Shift+Tab | Change the open target |
+| Enter | Open the selected worktree with that target |
+| Ctrl+P, then H/J/K/L or arrow | Open in a pane split |
+| Ctrl+N or F2 | Create a worktree |
+| Ctrl+X or Delete | Remove a worktree after confirmation |
+| Esc | Clear the filter, then return to directories |
+
+The create form asks for a branch and local base branch. It shows the destination before you create the worktree. Tab moves between fields; Enter selects the base or creates the worktree when the create button is selected. New worktrees open with the target selected in the picker.
+
+Raptor lists local worktrees only. It keeps the branch when you remove a worktree. Git blocks removal when the worktree has uncommitted changes or is locked. You cannot remove the primary worktree.
+
+Worktrees use this layout:
+
+```text
+<worktree_root>/<primary-repo>/<branch-folder>
+```
+
+`feat/login` becomes `feature-login`; other slashes become hyphens. Leading dots are removed from the primary repository name so the folder is not hidden. The Git branch name does not change.
+
+## Open targets
+
+Use Tab / Shift+Tab to cycle through the configured targets. The default list is:
+
+| Target | Opens the worktree or directory… |
+| --- | --- |
+| `tab` | In a new tab |
+| `here` | In the current shell |
+| `session` | In a matching or new session |
+| `pane`, `pane_left`, `pane_above`, `pane_below` | In a pane split |
+
+Pane targets can be added to the target list. Ctrl+P also opens the selected item in a pane split; choose the direction with H/J/K/L or arrow keys.
+
+## Configuration
+
+All settings are optional. Save them in `~/.config/raptor/config.toml`:
+
+```toml
+worktree_root = "~/Workspace/worktrees"
+enter = "tab"
+targets = ["tab", "here", "session"]
+```
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `worktree_root` | `~/Workspace/worktrees` | Parent folder for new worktrees |
+| `enter` | `tab` | Target selected when a picker opens |
+| `targets` | `tab`, `here`, `session` | Targets cycled by Tab / Shift+Tab |
+
+The Rex plugin also accepts optional popup settings:
 
 ```lua
 require("raptor").setup{
@@ -62,29 +121,18 @@ require("raptor").setup{
 }
 ```
 
-Direct mode: `rex do raptor target=tab dir=/path/to/project`.
-
-## Configuration
-
-Optional `~/.config/raptor/config.toml`:
-
-```toml
-worktree_root = "~/Workspace/worktrees"
-slug_len = 24
-enter = "tab"
-targets = ["tab", "here", "session"]
-```
-
-Custom target lists can still include `pane` (right), `pane_left`, `pane_above`, and `pane_below`.
-
-Last-session state lives at `$XDG_CACHE_HOME/rex/raptor-last` (default `~/.cache/rex/raptor-last`).
-
-## Build
+For a direct open without the picker:
 
 ```sh
-make          # ./raptor
-make install  # ~/.local/bin/raptor
-go test ./...
+rex do raptor target=tab dir=/path/to/project
 ```
 
-Requires `rex`, `zoxide`, and `git`. Development version stays **0.0.1**.
+## Requirements and development
+
+Raptor needs Rex, Git, and zoxide. Go is needed to build it.
+
+```sh
+make          # Build ./raptor
+make install  # Install ~/.local/bin/raptor
+go test ./...
+```
