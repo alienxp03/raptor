@@ -9,22 +9,23 @@ A compact directory and worktree picker for [Rex](https://www.superlogical.com/r
 - Type to fuzzy-filter; arrows or Ctrl+J/K navigate.
 - Tab / Shift+Tab cycle the target: session, tab, pane right, pane below, or cd here.
 - Enter opens the selection. Session mode reuses a matching session label or creates one.
-- W on a git repository opens its worktrees.
+- Ctrl+W on a git repository opens its worktrees.
 - Esc clears the query, then closes the picker.
 
 `here` only sends a cd command when the origin pane's foreground process is a shell.
 
 ## Worktree picker
 
-`raptor wt --repo /path/to/repo` shows existing worktrees and open GitHub issues/PRs through `gh`. Without `--repo`, it detects the repository from the origin pane, falling back to a repository picker.
+`raptor wt --repo /path/to/repo` shows local worktrees only: branch name and path, without status badges or GitHub requests. Without `--repo`, it detects the repository from the origin pane, falling back to a repository picker.
 
-- Enter opens an existing worktree or creates one for the selected issue number.
-- Type an issue number to offer a new worktree.
-- X offers removal of a worktree and its associated session/branch. Review the confirmation carefully: dirty worktrees can be force-removed.
-- O opens an issue/PR in the browser.
+- Type to search branches and paths; arrows or Ctrl+J/K navigate.
+- Enter opens an existing worktree as a session.
+- Ctrl+N (or F2) opens the creation form: branch name, local base branch, and a live full destination path preview.
+- Tab switches fields; arrows choose a base branch. Enter creates and opens; Esc cancels.
+- Ctrl+D (or Delete) offers worktree removal with confirmation. The branch is kept; Git refuses uncommitted changes and locked worktrees. The primary worktree cannot be removed.
 - Esc clears the query, then returns to directories.
 
-New worktrees use `<worktree_root>/<repo>/<number>-<slug>` and sessions use `<repo>#<number>`. Creation currently branches from the local checkout; selecting a PR does not check out its remote head.
+Worktrees live under `<worktree_root>/<primary-repo>/<folder>`. Branch `feat/login` becomes folder `feature-login`; other slashes become hyphens (`fix/crash` → `fix-crash`, `chore/deps` → `chore-deps`). The branch name is preserved. Existing branches/destinations and invalid names are rejected with errors in the form.
 
 ## Rex integration
 
@@ -59,4 +60,4 @@ make install  # ~/.local/bin/raptor
 go test ./...
 ```
 
-Requires `rex`, `zoxide`, and `git`; `gh` adds issue/PR discovery. Development version stays **0.0.1**.
+Requires `rex`, `zoxide`, and `git`. Development version stays **0.0.1**.

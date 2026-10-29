@@ -1,7 +1,7 @@
 -- raptor — sesh-style zoxide + worktree picker for Rex (Go + Bubble Tea).
 --
 --   shift+cmd+p     dir picker (zoxide + sessions; tab cycles target,
---                    w on a git repo opens the worktree flow)
+--                    Ctrl+W on a git repo opens the worktree flow)
 --   shift+ctrl+w     worktree picker for the current repo
 --   palette          "Raptor", "Raptor Worktrees", "Raptor: Last Session"
 --
@@ -105,9 +105,9 @@ rex.action{
 rex.action{
   name        = "raptor_wt",
   title       = "Raptor Worktrees",
-  description = "Pick a worktree or an open issue/PR; creates the worktree and opens a session.",
+  description = "Browse local worktrees or create one with a branch name and full path preview.",
   category    = "Navigate",
-  keywords    = "worktree git issue pr branch gh",
+  keywords    = "worktree git local branch create",
   run = function(ctx)
     if ctx.session_id == nil then
       error("raptor: no session context", 0)

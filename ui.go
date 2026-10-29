@@ -146,7 +146,7 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		m.err = ""
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			return m, tea.Quit
 		case "esc":
 			if m.filter != "" {
@@ -185,7 +185,7 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.picked = r
 			}
 			return m, tea.Quit
-		case "w":
+		case "ctrl+w":
 			r := m.selected()
 			if r != nil && r.kind == "dir" && isGitRepo(r.path) {
 				m.next = "wt"
@@ -212,9 +212,9 @@ func (m *dirModel) View() string {
 		return ""
 	}
 	width := maxInt(m.width-4, 1)
-	surface := lipgloss.Color("#1C1C1E")
+	var surface lipgloss.TerminalColor = lipgloss.NoColor{}
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#88888F")).Background(surface)
-	paint := func(content string, bg lipgloss.Color) string {
+	paint := func(content string, bg lipgloss.TerminalColor) string {
 		content = padRight(ansi.Truncate(content, width, "…"), width)
 		return lipgloss.NewStyle().Background(surface).Render("  ") +
 			lipgloss.NewStyle().Background(bg).Render(content) +
@@ -249,7 +249,7 @@ func (m *dirModel) View() string {
 	}
 	lines = append(lines, blank)
 	left := muted.Render("tab ") + search.Render(targetLabel(m.target))
-	right := muted.Render("w worktrees   ↵ open")
+	right := muted.Render("^W worktrees   ↵ open")
 	if m.err != "" {
 		right = styErr.Render(m.err)
 	}

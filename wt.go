@@ -4,300 +4,100 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 )
 
-// wtRow is one entry in the worktree picker.
-type wtRow struct {
-	kind    string // "worktree" | "issue" | "ghost"
-	wt      worktree
-	item    ghItem // for issue rows
-	ghostNo string // for ghost rows
-	label   string
-}
-
 type wtModel struct {
-	cfg     Config
-	ctx     Ctx
-	repo    string
-	repoURL string
-
-	rows   []wtRow
-	view   []int
-	filter string
-	sel    int
-
-	loading bool // gh fetch in flight
-	err     string
-	confirm int // -1 none, else index into view for removal confirm
-
-	// results
-	action string // "open" | "back" | "quit" | "browser"
-	chosen *wtRow
-
+	cfg           Config
+	ctx           Ctx
+	repo          string
+	root          string
+	rows          []worktree
+	view          []int
+	filter        string
+	sel           int
 	width, height int
+	err           string
+	form          bool
+	field         int
+	branch        string
+	base          string
+	branches      []string
+	confirm       bool
+	busy          bool
+	action        string
+	chosen        *worktree
 }
-
-type ghLoadedMsg struct{ items []ghItem }
-type ghGhostMsg struct {
-	no   string
-	item ghItem
-	ok   bool
+type wtCreatedMsg struct {
+	path string
+	err  error
 }
-
-func dbg(msg string) {
-	if os.Getenv("RAPTOR_DEBUG") == "" {
-		return
-	}
-	f, err := os.OpenFile("/tmp/raptor-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err == nil {
-		fmt.Fprintln(f, msg)
-		f.Close()
-	}
-}
+type wtRemovedMsg struct{ err error }
 
 func runWorktrees(ctx Ctx, cfg Config, repo string) int {
-	dbg("wt enter")
 	if repo == "" {
-		// autodetect from the origin block's cwd
-		if p := blockCwd(ctx.Block); p != "" {
-			dbg("wt autodetect cwd=" + p)
-			repo = repoRoot(p)
-		}
+		repo = repoRoot(blockCwd(ctx.Block))
 	}
-	dbg("wt after autodetect repo=" + repo)
 	if repo == "" || !isGitRepo(repo) {
-		dbg("wt picking repo")
 		repo = pickRepo(ctx, cfg)
-		dbg("wt picked repo=" + repo)
 		if repo == "" {
 			return 0
 		}
 	}
-	for {
-		dbg("wt new model repo=" + repo)
-		m := newWtModel(ctx, cfg, repo)
-		dbg("wt before run")
-		p := tea.NewProgram(m, tea.WithAltScreen())
-		final, err := p.Run()
-		if err != nil {
+	m := newWtModel(ctx, cfg, repo)
+	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	model := final.(*wtModel)
+	if model.action == "back" {
+		return runDirs(ctx, cfg)
+	}
+	if model.chosen != nil {
+		if err := dispatch("session", model.chosen.Path, ctx, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		wm := final.(*wtModel)
-		switch wm.action {
-		case "back": // esc → dir flow
-			return runDirs(ctx, cfg)
-		case "browser":
-			repo = wm.repo
-			continue
-		case "open":
-			return wtDispatch(wm, ctx, cfg)
-		default:
-			return 0
-		}
 	}
+	return 0
 }
-
 func newWtModel(ctx Ctx, cfg Config, repo string) *wtModel {
-	m := &wtModel{cfg: cfg, ctx: ctx, repo: repo, confirm: -1, loading: true}
-	if o, n, ok := ghRepoCoords(repo); ok {
-		m.repoURL = o + "/" + n
+	m := &wtModel{ctx: ctx, cfg: cfg, repo: repo, branches: localBranches(repo)}
+	m.rows = listWorktrees(repo)
+	primary := repo
+	if len(m.rows) > 0 {
+		primary = m.rows[0].Path
 	}
-	for _, w := range listWorktrees(repo) {
-		label := w.Branch
-		if w.IsMain {
-			label = "main"
-		} else if w.Short != "" {
-			label = w.Short
-		}
-		m.rows = append(m.rows, wtRow{kind: "worktree", wt: w, label: label})
+	m.root = filepath.Join(cfg.WorktreeRoot, basename(primary))
+	m.base, _ = gitOut(repo, "branch", "--show-current")
+	if m.base == "" && len(m.branches) > 0 {
+		m.base = m.branches[0]
 	}
 	m.applyFilter()
 	return m
 }
-
-// pickRepo asks for a repo when none is in context: git dirs from zoxide.
-func pickRepo(ctx Ctx, cfg Config) string {
-	var rows []rrow
-	seen := map[string]bool{}
-	for _, d := range zoxideList() {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err != nil {
-			continue
-		}
-		r := repoRoot(d)
-		if r != "" && !seen[r] {
-			seen[r] = true
-			rows = append(rows, rrow{label: basename(r), path: r})
-		}
-	}
-	if len(rows) == 0 {
-		return ""
-	}
-	sel := 0
-	filter := ""
-	view := make([]int, len(rows))
-	for i := range rows {
-		view[i] = i
-	}
-	apply := func() {
-		view = view[:0]
-		if filter == "" {
-			for i := range rows {
-				view = append(view, i)
-			}
-		} else {
-			hs := make([]string, len(rows))
-			for i, r := range rows {
-				hs[i] = r.label + " " + homeRelative(r.path)
-			}
-			for _, mt := range fuzzy.Find(filter, hs) {
-				view = append(view, mt.Index)
-			}
-		}
-		if sel >= len(view) {
-			sel = len(view) - 1
-		}
-		if sel < 0 {
-			sel = 0
-		}
-	}
-	m := &repoPickModel{rows: rows, view: view, sel: &sel, filter: &filter, apply: apply}
-	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
-		return ""
-	}
-	if m.chosen == "" {
-		return ""
-	}
-	return m.chosen
-}
-
-type rrow struct{ label, path string }
-
-type repoPickModel struct {
-	rows   []rrow
-	view   []int
-	sel    *int
-	filter *string
-	apply  func()
-	chosen string
-	width  int
-	height int
-}
-
-func (m *repoPickModel) Init() tea.Cmd { return nil }
-
-func (m *repoPickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "esc", "q":
-			return m, tea.Quit
-		case "up", "ctrl+k":
-			if *m.sel > 0 {
-				*m.sel--
-			}
-		case "down", "ctrl+j":
-			if *m.sel < len(m.view)-1 {
-				*m.sel++
-			}
-		case "backspace":
-			if *m.filter != "" {
-				r := []rune(*m.filter)
-				*m.filter = string(r[:len(r)-1])
-				m.apply()
-			}
-		case "ctrl+u":
-			*m.filter = ""
-			m.apply()
-		case "enter":
-			if len(m.view) > 0 {
-				m.chosen = m.rows[m.view[*m.sel]].path
-			}
-			return m, tea.Quit
-		default:
-			if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-				*m.filter += string(msg.Runes)
-				m.apply()
-			}
-		}
-	}
-	return m, nil
-}
-
-func (m *repoPickModel) View() string {
-	var b strings.Builder
-	b.WriteString(styTitle.Render("  pick a repo") + "\n")
-	maxRows := m.height - 4
-	shown := 0
-	for vi := 0; vi < len(m.view) && shown < maxRows; vi, shown = vi+1, shown+1 {
-		r := m.rows[m.view[vi]]
-		prefix, label := "  ", r.label
-		if vi == *m.sel {
-			prefix, label = stySel.Render("> "), stySel.Render(r.label)
-		}
-		b.WriteString(prefix + label + "   " + styDim.Render(homeRelative(r.path)) + "\n")
-	}
-	b.WriteString("\n" + styTarget.Render("  /"+*m.filter) + "\n")
-	b.WriteString(styDim.Render("  enter select · esc cancel"))
-	return b.String()
-}
-
-func (m *wtModel) Init() tea.Cmd {
-	return func() tea.Msg {
-		repo := m.repo
-		return ghLoadedMsg{items: ghIssues(repo)}
-	}
-}
-
+func (m *wtModel) Init() tea.Cmd       { return nil }
+func (m *wtModel) destination() string { return filepath.Join(m.root, worktreeFolder(m.branch)) }
 func (m *wtModel) applyFilter() {
-	// strip stale ghosts first so view indices stay valid
-	rows := m.rows[:0]
-	for _, r := range m.rows {
-		if r.kind != "ghost" {
-			rows = append(rows, r)
-		}
-	}
-	m.rows = rows
-
-	// numeric filter → add a ghost row for creating that issue's worktree
-	filter := strings.TrimSpace(m.filter)
-	ghostIdx := -1
-	if allDigits(filter) {
-		m.rows = append(m.rows, wtRow{kind: "ghost", ghostNo: filter, label: "#" + filter + "  new worktree…"})
-		ghostIdx = len(m.rows) - 1
-	}
-
-	m.view = m.view[:0]
+	m.view = nil
 	if m.filter == "" {
 		for i := range m.rows {
 			m.view = append(m.view, i)
 		}
 	} else {
-		hs := make([]string, len(m.rows))
+		entries := make([]string, len(m.rows))
 		for i, r := range m.rows {
-			hs[i] = r.label + " " + r.wt.Path
+			entries[i] = r.Branch + " " + homeRelative(r.Path)
 		}
-		for _, mt := range fuzzy.Find(m.filter, hs) {
-			m.view = append(m.view, mt.Index)
+		for _, match := range fuzzy.Find(m.filter, entries) {
+			m.view = append(m.view, match.Index)
 		}
-	}
-	// pin the ghost row to the top when present
-	if ghostIdx >= 0 {
-		var rest []int
-		for _, i := range m.view {
-			if i != ghostIdx {
-				rest = append(rest, i)
-			}
-		}
-		m.view = append([]int{ghostIdx}, rest...)
 	}
 	if m.sel >= len(m.view) {
 		m.sel = len(m.view) - 1
@@ -306,116 +106,130 @@ func (m *wtModel) applyFilter() {
 		m.sel = 0
 	}
 }
-
-func allDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func (m *wtModel) selected() *wtRow {
-	if len(m.view) == 0 || m.sel < 0 || m.sel >= len(m.view) {
+func (m *wtModel) selected() *worktree {
+	if m.sel < 0 || m.sel >= len(m.view) {
 		return nil
 	}
 	return &m.rows[m.view[m.sel]]
 }
-
 func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-	case ghLoadedMsg:
-		m.loading = false
-		for _, it := range msg.items {
-			kind := "issue"
-			label := fmt.Sprintf("#%d  %s", it.Number, it.Title)
-			if it.IsPR {
-				label = "⎇ " + label
-			}
-			m.rows = append(m.rows, wtRow{kind: kind, item: it, label: label})
+	case wtCreatedMsg:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err.Error()
+			return m, nil
 		}
-		// sort: existing worktrees first, then number desc
-		sort.SliceStable(m.rows, func(i, j int) bool {
-			rank := func(r wtRow) int {
-				switch r.kind {
-				case "worktree":
-					return 0
-				case "issue", "ghost":
-					return 1
-				}
-				return 2
-			}
-			return rank(m.rows[i]) < rank(m.rows[j])
-		})
-		m.applyFilter()
-		return m, nil
-	case ghGhostMsg:
-		if msg.ok {
-			m.err = ""
-			// remember the title on the ghost row
-			for i := range m.rows {
-				if m.rows[i].kind == "ghost" && m.rows[i].ghostNo == msg.no {
-					m.rows[i].item = msg.item
-					m.rows[i].label = fmt.Sprintf("#%s  %s", msg.no, msg.item.Title)
-				}
-			}
+		m.chosen = &worktree{Path: msg.path, Branch: m.branch}
+		return m, tea.Quit
+	case wtRemovedMsg:
+		m.busy = false
+		m.confirm = false
+		if msg.err != nil {
+			m.err = msg.err.Error()
+		} else {
+			m.rows = listWorktrees(m.repo)
+			m.applyFilter()
 		}
-		return m, nil
 	case tea.KeyMsg:
-		if m.confirm >= 0 {
-			switch msg.String() {
-			case "y", "Y", "enter":
-				r := &m.rows[m.view[m.confirm]]
-				m.confirm = -1
-				force := r.wt.Dirty
-				if err := removeWorktree(m.repo, r.wt, force); err != nil {
-					m.err = err.Error()
+		if m.busy {
+			return m, nil
+		}
+		key := msg.String()
+		if key == "ctrl+c" {
+			return m, tea.Quit
+		}
+		if m.confirm {
+			switch key {
+			case "esc", "n":
+				m.confirm = false
+				m.err = ""
+			case "enter", "y":
+				r := m.selected()
+				if r == nil {
 					return m, nil
 				}
-				// close its session if open
-				if sid, ok := sessionByLabel(wtSessionName(m, r)); ok {
-					rexRunQuiet("kill", sid)
-				}
-				// rebuild rows
-				m2 := newWtModel(m.ctx, m.cfg, m.repo)
-				m2.loading = m.loading
-				m2.rows = stripIssues(m2.rows)
-				m2.applyFilter()
-				return m2, m.Init()
-			case "n", "N", "esc":
-				m.confirm = -1
-				return m, nil
+				w := *r
+				repo := m.repo
+				m.busy = true
+				return m, func() tea.Msg { return wtRemovedMsg{removeWorktree(repo, w)} }
 			}
 			return m, nil
 		}
-		m.err = ""
-		switch msg.String() {
-		case "ctrl+c", "q":
-			m.action = "quit"
-			return m, tea.Quit
+		if m.form {
+			switch key {
+			case "esc":
+				m.form = false
+				m.err = ""
+			case "tab", "shift+tab":
+				m.field = 1 - m.field
+			case "up", "down", "ctrl+j", "ctrl+k":
+				if m.field == 1 && len(m.branches) > 0 {
+					index := 0
+					for i, b := range m.branches {
+						if b == m.base {
+							index = i
+							break
+						}
+					}
+					delta := 1
+					if key == "up" || key == "ctrl+k" {
+						delta = -1
+					}
+					m.base = m.branches[(index+delta+len(m.branches))%len(m.branches)]
+				}
+			case "enter":
+				repo, branch, base, path := m.repo, m.branch, m.base, m.destination()
+				if err := validateWorktree(repo, branch, base, path); err != nil {
+					m.err = err.Error()
+					return m, nil
+				}
+				m.busy = true
+				m.err = ""
+				return m, func() tea.Msg { return wtCreatedMsg{path, createLocalWorktree(repo, branch, base, path)} }
+			default:
+				value := &m.branch
+				if m.field == 1 {
+					value = &m.base
+				}
+				if key == "backspace" {
+					r := []rune(*value)
+					if len(r) > 0 {
+						*value = string(r[:len(r)-1])
+					}
+				} else if key == "ctrl+u" {
+					*value = ""
+				} else if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+					*value += string(msg.Runes)
+				}
+				m.err = ""
+			}
+			return m, nil
+		}
+		switch key {
 		case "esc":
 			if m.filter != "" {
 				m.filter = ""
 				m.applyFilter()
-				return m, nil
+			} else {
+				m.action = "back"
+				return m, tea.Quit
 			}
-			m.action = "back"
-			return m, tea.Quit
-		case "backspace":
-			if m.filter != "" {
-				r := []rune(m.filter)
-				m.filter = string(r[:len(r)-1])
-				m.applyFilter()
+		case "ctrl+n", "f2":
+			m.form = true
+			m.field = 0
+			m.branch = ""
+			m.err = ""
+		case "ctrl+d", "delete":
+			if r := m.selected(); r != nil {
+				if r.IsMain {
+					m.err = "Cannot remove the primary worktree"
+				} else {
+					m.confirm = true
+				}
 			}
-		case "ctrl+u":
-			m.filter = ""
-			m.applyFilter()
 		case "up", "ctrl+k":
 			if m.sel > 0 {
 				m.sel--
@@ -424,216 +238,117 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.sel < len(m.view)-1 {
 				m.sel++
 			}
-		case "o":
-			if r := m.selected(); r != nil && (r.kind == "issue") {
-				ghOpenBrowser(m.repo, r.item.Number, r.item.IsPR)
-			}
-		case "x":
-			if r := m.selected(); r != nil && r.kind == "worktree" && !r.wt.IsMain {
-				m.confirm = m.sel
-			} else if r != nil {
-				m.err = "cannot remove"
-			}
 		case "enter":
 			if r := m.selected(); r != nil {
-				m.chosen = r
-				m.action = "open"
+				w := *r
+				m.chosen = &w
 				return m, tea.Quit
 			}
+		case "backspace":
+			r := []rune(m.filter)
+			if len(r) > 0 {
+				m.filter = string(r[:len(r)-1])
+				m.applyFilter()
+			}
+		case "ctrl+u":
+			m.filter = ""
+			m.applyFilter()
 		default:
 			if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 				m.filter += string(msg.Runes)
 				m.applyFilter()
-				// numeric filter → fetch ghost title in background
-				if allDigits(strings.TrimSpace(m.filter)) {
-					no := strings.TrimSpace(m.filter)
-					repo := m.repo
-					return m, func() tea.Msg {
-						it, ok := ghTitle(repo, atoiSafe(no))
-						return ghGhostMsg{no: no, item: it, ok: ok}
-					}
-				}
 			}
 		}
 	}
 	return m, nil
 }
 
-func stripIssues(rows []wtRow) []wtRow {
-	var out []wtRow
-	for _, r := range rows {
-		if r.kind == "worktree" {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-func atoiSafe(s string) int {
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0
-		}
-		n = n*10 + int(r-'0')
-	}
-	return n
-}
-
-// wtSessionName computes the session label for a row.
-func wtSessionName(m *wtModel, r *wtRow) string {
-	if r.wt.Short != "" {
-		return r.wt.Short
-	}
-	if r.item.Number > 0 {
-		return fmt.Sprintf("%s#%d", basename(m.repo), r.item.Number)
-	}
-	return basename(r.wt.Path)
-}
-
-// wtDispatch runs after the wt picker exits with a chosen row.
-func wtDispatch(m *wtModel, ctx Ctx, cfg Config) int {
-	r := m.chosen
-	if r == nil {
-		return 0
-	}
-	switch r.kind {
-	case "worktree":
-		if err := dispatch("session", r.wt.Path, ctx, cfg); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		// rename the session to repo#num for label-reuse
-		if r.wt.Short != "" {
-			if sid, ok := sessionByLabel(basename(r.wt.Path)); ok {
-				if _, err := rexRun("session", "rename", sid, r.wt.Short); err != nil {
-					dbg("rename wt: " + err.Error())
-				} else {
-					dbg("rename wt ok: " + sid + " -> " + r.wt.Short)
-				}
-			} else {
-				dbg("rename wt: session not found: " + basename(r.wt.Path))
-			}
-		}
-		return 0
-	case "issue":
-		title := r.item.Title
-		wtDir, _, err := createWorktree(m.repo, fmt.Sprint(r.item.Number), title, cfg)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		if err := dispatch("session", wtDir, ctx, cfg); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		name := fmt.Sprintf("%s#%d", basename(m.repo), r.item.Number)
-		if sid, ok := sessionByLabel(basename(wtDir)); ok {
-			rexRunQuiet("session", "rename", sid, name)
-		}
-		return 0
-	case "ghost":
-		no := r.ghostNo
-		title := r.item.Title
-		if title == "" {
-			// fetch synchronously once more
-			if it, ok := ghTitle(m.repo, atoiSafe(no)); ok {
-				title = it.Title
-			} else {
-				title = no
-			}
-		}
-		wtDir, _, err := createWorktree(m.repo, no, title, cfg)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		if err := dispatch("session", wtDir, ctx, cfg); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		name := basename(m.repo) + "#" + no
-		if sid, ok := sessionByLabel(basename(wtDir)); ok {
-			rexRunQuiet("session", "rename", sid, name)
-		}
-		return 0
-	}
-	return 0
-}
-
 func (m *wtModel) View() string {
-	var b strings.Builder
-	title := "  " + basename(m.repo) + styDim.Render(" — worktrees")
-	if m.repoURL != "" {
-		title += styDim.Render("   " + m.repoURL)
+	if m.width < 1 || m.height < 1 {
+		return ""
 	}
-	b.WriteString(styTitle.Render(title) + "\n")
-
-	maxRows := m.height - 4
-	if maxRows < 1 {
-		maxRows = 1
+	width := maxInt(m.width-4, 1)
+	var bg lipgloss.TerminalColor = lipgloss.NoColor{}
+	text := lipgloss.NewStyle().Foreground(lipgloss.Color("#E6E6EA")).Background(bg)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#88888F")).Background(bg)
+	line := func(s string) string {
+		return lipgloss.NewStyle().Background(bg).Render("  " + padRight(ansi.Truncate(s, width, "…"), width) + "  ")
 	}
-	start := 0
-	if m.sel >= maxRows {
-		start = m.sel - maxRows + 1
-	}
-	shown := 0
-	for vi := start; vi < len(m.view) && shown < maxRows; vi, shown = vi+1, shown+1 {
-		r := m.rows[m.view[vi]]
-		prefix, label := "  ", r.label
-		if vi == m.sel {
-			prefix, label = stySel.Render("> "), stySel.Render(r.label)
+	lines := []string{}
+	footer := "ctrl+n New   ctrl+d Remove   ↵ Open"
+	if m.form {
+		name, base := m.branch, m.base
+		if m.field == 0 {
+			name += "│"
+		} else {
+			base += "│"
 		}
-		meta := ""
-		switch r.kind {
-		case "worktree":
-			if r.wt.IsMain {
-				meta = styDim.Render("  main")
-			} else {
-				if r.wt.Dirty {
-					meta = styDirty.Render("  dirty ⚠")
-				} else {
-					meta = styDim.Render("  clean")
-				}
-				meta += styDim.Render("  " + homeRelative(r.wt.Path))
-			}
-		case "issue":
-			if r.item.IsPR {
-				meta = styDim.Render("  PR · enter creates")
-			} else {
-				meta = styDim.Render("  issue · enter creates")
-			}
-		case "ghost":
-			meta = styDim.Render("  fetch + create")
-			label = styGhost.Render(label)
+		folder := m.destination()
+		lines = append(lines, line(text.Bold(true).Render("New worktree")), line(""), line(dim.Render("Branch")), line(text.Render(name)), line(""), line(dim.Render("Base branch  ·  ↑↓ choose")), line(text.Render(base)), line(""), line(dim.Render("Full path")))
+		for _, wrapped := range strings.Split(lipgloss.NewStyle().Width(width).Render(homeRelative(folder)), "\n") {
+			lines = append(lines, line(text.Render(wrapped)))
 		}
-		line := prefix + label + meta
-		if w := lipgloss.Width(line); w > m.width {
-			line = truncateW(line, m.width)
+		footer = "tab Field   ↵ Create & open   esc Cancel"
+	} else if m.confirm {
+		r := m.selected()
+		lines = append(lines, line(text.Bold(true).Render("Remove worktree?")), line(""))
+		if r != nil {
+			lines = append(lines, line(text.Render(r.Branch)), line(dim.Render(homeRelative(r.Path))))
 		}
-		b.WriteString(line + "\n")
-	}
-
-	if m.loading {
-		b.WriteString(styDim.Render("  … loading issues") + "\n")
-	}
-	foot := "\n" + styTarget.Render("  /"+m.filter) + "\n"
-	if m.confirm >= 0 {
-		r := &m.rows[m.view[m.confirm]]
-		what := "remove worktree " + r.wt.Branch + " and its branch?"
-		if r.wt.Dirty {
-			what += styDirty.Render(" (dirty — will force)")
-		}
-		foot = "\n" + styErr.Render("  "+what) + "\n" + styDim.Render("  y confirm · n cancel") + "\n"
+		lines = append(lines, line(""), line(dim.Render("Branch is kept. Git refuses uncommitted changes.")))
+		footer = "↵ Remove   esc Cancel"
 	} else {
-		hints := "  enter open/create · x remove · o browser · esc dirs"
-		if m.err != "" {
-			hints += "   " + styErr.Render(m.err)
+		lines = append(lines, line(text.Render("⌕  "+m.filter+"│")), line(""))
+		count := maxInt(m.height-4, 0)
+		start := maxInt(m.sel-count+1, 0)
+		branchWidth := 14
+		for _, r := range m.rows {
+			if w := lipgloss.Width(r.Branch); w > branchWidth {
+				branchWidth = w
+			}
 		}
-		foot += hints
+		if branchWidth > width/2 {
+			branchWidth = width / 2
+		}
+		for n := 0; n < count; n++ {
+			vi := start + n
+			if vi >= len(m.view) {
+				if n == 0 {
+					lines = append(lines, line(dim.Render("No local worktrees")))
+				} else {
+					lines = append(lines, line(""))
+				}
+				continue
+			}
+			r := m.rows[m.view[vi]]
+			rowBg := bg
+			if vi == m.sel {
+				rowBg = lipgloss.Color("#343438")
+			}
+			branchStyle := text.Background(rowBg)
+			pathStyle := dim.Background(rowBg)
+			branch := ansi.Truncate(r.Branch, branchWidth, "…")
+			pathWidth := maxInt(width-lipgloss.Width(branch)-2, 0)
+			path := ansi.Truncate(homeRelative(r.Path), pathWidth, "…")
+			gap := maxInt(width-lipgloss.Width(branch)-lipgloss.Width(path), 2)
+			content := branchStyle.Render(branch) + pathStyle.Render(strings.Repeat(" ", gap)+path)
+			content = padRight(ansi.Truncate(content, width, "…"), width)
+			lines = append(lines, lipgloss.NewStyle().Background(bg).Render("  ")+lipgloss.NewStyle().Background(rowBg).Render(content)+lipgloss.NewStyle().Background(bg).Render("  "))
+		}
 	}
-	b.WriteString(foot)
-	return b.String()
+	if m.err != "" {
+		footer = m.err
+	}
+	if m.busy {
+		footer = "Working…"
+	}
+	// Keep form errors in view and the action row anchored to the bottom.
+	if len(lines) > m.height-1 {
+		lines = lines[:maxInt(m.height-1, 0)]
+	}
+	for len(lines) < m.height-1 {
+		lines = append(lines, line(""))
+	}
+	lines = append(lines, line(dim.Render(footer)))
+	return strings.Join(lines, "\n")
 }
-
-var _ = filepath.Join

@@ -4,9 +4,30 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
+
+func TestSearchDoesNotConsumeLetters(t *testing.T) {
+	m := &dirModel{cfg: defaultConfig()}
+	for _, letter := range "wqnx" {
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{letter}})
+		if cmd != nil {
+			t.Fatalf("%c triggered an action", letter)
+		}
+	}
+	if m.filter != "wqnx" {
+		t.Fatalf("query = %q", m.filter)
+	}
+	repo := fixtureRepo(t)
+	m.rows = []row{{kind: "dir", path: repo}}
+	m.view = []int{0}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	if m.next != "wt" || cmd == nil {
+		t.Fatal("Ctrl+W did not open worktrees")
+	}
+}
 
 func TestCompactPalette(t *testing.T) {
 	for _, size := range [][2]int{{80, 20}, {40, 12}, {24, 8}} {
