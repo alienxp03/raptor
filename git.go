@@ -64,13 +64,21 @@ func worktreeFolder(branch string) string {
 	}
 	return strings.ReplaceAll(branch, "/", "-")
 }
+func worktreeRepoFolder(name string) string {
+	name = strings.TrimLeft(name, ".")
+	if name == "" {
+		return "repository"
+	}
+	return name
+}
+
 func worktreePath(repo, branch string, cfg Config) string {
 	// Always use the primary repository's name, even when launched inside a worktree.
 	name := basename(repo)
 	if trees := listWorktrees(repo); len(trees) > 0 {
 		name = basename(trees[0].Path)
 	}
-	return filepath.Join(cfg.WorktreeRoot, name, worktreeFolder(branch))
+	return filepath.Join(cfg.WorktreeRoot, worktreeRepoFolder(name), worktreeFolder(branch))
 }
 func validateNewBranch(repo, branch string) error {
 	if branch == "" {

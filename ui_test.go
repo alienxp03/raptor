@@ -23,9 +23,9 @@ func TestSearchDoesNotConsumeLetters(t *testing.T) {
 	repo := fixtureRepo(t)
 	m.rows = []row{{kind: "dir", path: repo}}
 	m.view = []int{0}
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
 	if m.next != "wt" || cmd == nil {
-		t.Fatal("Ctrl+W did not open worktrees")
+		t.Fatal("Ctrl+T did not open worktrees")
 	}
 }
 

@@ -2,7 +2,7 @@
 --
 --   require("raptor").setup{}
 --   rex.bind("shift+cmd+o", "raptor")
---   rex.bind("shift+ctrl+w", "raptor_wt")
+--   rex.bind("shift+cmd+t", "raptor_wt")
 
 local M = {}
 

@@ -17,7 +17,7 @@ func TestWorktreeRemovalShortcut(t *testing.T) {
 		t.Fatal("Ctrl+D must not remove worktrees")
 	}
 	footer := ansi.Strip(m.View())
-	if !strings.Contains(footer, "^n New   ^x Remove") {
+	if !strings.Contains(footer, "^n new") || !strings.Contains(footer, "^x remove") {
 		t.Fatal("missing lowercase shortcut hints")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
@@ -78,7 +78,7 @@ func TestWorktreeSelectedPathDetail(t *testing.T) {
 func TestWorktreeListFitsViewports(t *testing.T) {
 	for _, path := range []string{"/tmp/sample-project", "/tmp/" + strings.Repeat("parent/", 60) + "feature-login", "/tmp/" + strings.Repeat("界/", 80)} {
 		for _, size := range [][2]int{{80, 20}, {40, 12}, {39, 10}, {24, 8}, {3, 3}} {
-			m := &wtModel{width: size[0], height: size[1], rows: []worktree{{Branch: "feat/login", Path: path}}, view: []int{0}}
+			m := &wtModel{width: size[0], height: size[1], target: "tab", rows: []worktree{{Branch: "feat/login", Path: path}}, view: []int{0}}
 			lines := strings.Split(m.View(), "\n")
 			if len(lines) != m.height {
 				t.Fatalf("%v: got %d rows", size, len(lines))
@@ -90,6 +90,13 @@ func TestWorktreeListFitsViewports(t *testing.T) {
 			}
 			if m.height >= 10 && !strings.Contains(ansi.Strip(lines[2]), "▍ feat/login") {
 				t.Fatalf("%v: selected row missing", size)
+			}
+			footer := strings.TrimSpace(ansi.Strip(lines[len(lines)-1]))
+			if size[0] >= 40 && (!strings.Contains(footer, "Open: tab") || strings.Contains(footer, "⇥ target")) {
+				t.Fatalf("%v: target footer is not concise: %q", size, footer)
+			}
+			if size[0] >= 50 && (!strings.Contains(footer, "^n new") || !strings.Contains(footer, "^x remove") || !strings.Contains(footer, "↵")) {
+				t.Fatalf("%v: footer actions are not readable: %q", size, footer)
 			}
 		}
 	}

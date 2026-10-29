@@ -65,7 +65,7 @@ func TestSplitModeCancelAndIgnoreOtherKeys(t *testing.T) {
 	for _, cancel := range []tea.KeyType{tea.KeyEsc, tea.KeyCtrlP} {
 		m := splitFixture()
 		m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
-		for _, key := range []tea.KeyMsg{{Type: tea.KeyTab}, {Type: tea.KeyEnter}, {Type: tea.KeyCtrlW}, {Type: tea.KeyRunes, Runes: []rune("x")}} {
+		for _, key := range []tea.KeyMsg{{Type: tea.KeyTab}, {Type: tea.KeyEnter}, {Type: tea.KeyCtrlT}, {Type: tea.KeyRunes, Runes: []rune("x")}} {
 			_, cmd := m.Update(key)
 			if cmd != nil || !m.splitMode || m.filter != "project" || m.target != "tab" || m.picked != nil {
 				t.Fatal("unbound keys must not affect search or submit in split mode")

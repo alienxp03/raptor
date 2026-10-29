@@ -24,6 +24,18 @@ func fixtureRepo(t *testing.T) string {
 	}
 	return dir
 }
+func TestWorktreeRepoFolder(t *testing.T) {
+	for input, want := range map[string]string{
+		".dotfiles": "dotfiles",
+		"raptor":    "raptor",
+		"...":       "repository",
+	} {
+		if got := worktreeRepoFolder(input); got != want {
+			t.Errorf("worktreeRepoFolder(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestLocalWorktreeLifecycle(t *testing.T) {
 	repo := fixtureRepo(t)
 	cfg := defaultConfig()

@@ -226,7 +226,7 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.picked = r
 			}
 			return m, tea.Quit
-		case "ctrl+w":
+		case "ctrl+t":
 			r := m.selected()
 			if r != nil && r.kind == "dir" && isGitRepo(r.path) {
 				m.next = "wt"
@@ -281,7 +281,7 @@ func (m *dirModel) View() string {
 		left = target
 	}
 	splitHint := pickerText.Render("^p") + pickerMuted.Render(" split")
-	right := splitHint + "  " + pickerText.Render("ctrl+w") + pickerMuted.Render(" worktrees")
+	right := splitHint + "  " + pickerText.Render("ctrl+t") + pickerMuted.Render(" worktrees")
 	if width-lipgloss.Width(left)-lipgloss.Width(right) < 2 {
 		right = splitHint
 	}

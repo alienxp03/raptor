@@ -10,7 +10,7 @@ A compact directory and worktree picker for [Rex](https://www.superlogical.com/r
 - Tab / Shift+Tab cycle the target: tab, cd here, or session.
 - Ctrl+P enters split mode. Then h/j/k/l or Left/Down/Up/Right opens the selected directory in that direction, relative to the origin pane. Esc cancels split mode without clearing the query. Outside split mode, letters search and arrows navigate. No Alt or Shift direction shortcuts.
 - Enter opens the selection. Session mode reuses a matching session label or creates one.
-- Ctrl+W on a git repository opens its worktrees; returning resumes your directory query, selection, and opening target.
+- Ctrl+T on a git repository opens its worktrees; returning resumes your directory query, selection, and opening target.
 - Esc clears the query, then closes the picker.
 
 `here` only sends a cd command when the origin pane's foreground process is a shell.
@@ -22,15 +22,16 @@ A compact directory and worktree picker for [Rex](https://www.superlogical.com/r
 - Branches and paths use two columns; paths start at a fixed position near the middle. Long paths shorten on the left, not the folder end. Narrow panes show branches only.
 - The selected path uses the full width below the list, wrapping across up to three rows when space allows.
 - Type to search branches and paths; arrows or Ctrl+J/K navigate.
-- Enter opens an existing worktree as a session.
+- Tab / Shift+Tab cycle the open target, as in the directory picker. Enter opens the selected worktree with that target (tab, session, here, or configured pane target).
+- Ctrl+P enters split mode; h/j/k/l or arrows opens the selected worktree in that pane direction. Esc cancels.
 - Ctrl+N (or F2) opens the creation form: branch name, local base branch, and a live full destination path preview.
 - Tab / Shift+Tab move between Branch name, Base branch, and the explicit Create & open button.
-- Enter advances from the branch name, opens the searchable local-base chooser from Base branch, and only submits when Create & open is focused.
+- Enter advances from the branch name, opens the searchable local-base chooser from Base branch, and only submits when Create & open is focused. The worktree opens using the selected target.
 - Esc backs out of the base chooser to the form, or cancels the form without changing the worktree list query/selection.
 - Ctrl+X (or Delete) offers worktree removal with confirmation. The branch is kept; Git refuses uncommitted changes and locked worktrees. The primary worktree cannot be removed.
 - Esc clears the query, then returns to directories.
 
-Worktrees live under `<worktree_root>/<primary-repo>/<folder>`. Branch `feat/login` becomes folder `feature-login`; other slashes become hyphens (`fix/crash` → `fix-crash`, `chore/deps` → `chore-deps`). The branch name is preserved. Existing branches/destinations and invalid names are rejected with errors in the form.
+Worktrees live under `<worktree_root>/<visible-primary-repo>/<folder>`. Leading dots are removed from the primary repository name so worktree folders are not hidden. Branch `feat/login` becomes folder `feature-login`; other slashes become hyphens (`fix/crash` → `fix-crash`, `chore/deps` → `chore-deps`). The branch name is preserved. Existing branches/destinations and invalid names are rejected with errors in the form.
 
 ## Rex integration
 
@@ -46,7 +47,7 @@ Keep the Rex config small. Setup registers actions; choose and change key bindin
 ```lua
 require("raptor").setup{}
 rex.bind("shift+cmd+o", "raptor")
-rex.bind("shift+ctrl+w", "raptor_wt")
+rex.bind("shift+cmd+t", "raptor_wt")
 ```
 
 Change either binding to any key you prefer. The actions are also available in Rex's command palette. Run `rex config reload` after changing the config.

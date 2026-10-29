@@ -34,6 +34,8 @@ type wtModel struct {
 	branches      []string
 	confirm       bool
 	busy          bool
+	splitMode     bool
+	target        string
 	action        string
 	chosen        *worktree
 }
@@ -73,7 +75,7 @@ func runWorktreeFlow(ctx Ctx, cfg Config, repo string, fromDirectories bool) int
 		return runDirs(ctx, cfg)
 	}
 	if model.chosen != nil {
-		if err := dispatch("session", model.chosen.Path, ctx, cfg); err != nil {
+		if err := dispatch(model.target, model.chosen.Path, ctx, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
@@ -81,13 +83,13 @@ func runWorktreeFlow(ctx Ctx, cfg Config, repo string, fromDirectories bool) int
 	return 0
 }
 func newWtModel(ctx Ctx, cfg Config, repo string) *wtModel {
-	m := &wtModel{ctx: ctx, cfg: cfg, repo: repo, branches: localBranches(repo), errField: -1}
+	m := &wtModel{ctx: ctx, cfg: cfg, repo: repo, branches: localBranches(repo), errField: -1, target: cfg.Enter}
 	m.rows = listWorktrees(repo)
 	primary := repo
 	if len(m.rows) > 0 {
 		primary = m.rows[0].Path
 	}
-	m.root = filepath.Join(cfg.WorktreeRoot, basename(primary))
+	m.root = filepath.Join(cfg.WorktreeRoot, worktreeRepoFolder(basename(primary)))
 	m.base, _ = gitOut(repo, "branch", "--show-current")
 	if m.base == "" && len(m.branches) > 0 {
 		m.base = m.branches[0]
@@ -194,6 +196,30 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "ctrl+c" {
 			return m, tea.Quit
 		}
+		if m.splitMode {
+			switch key {
+			case "esc", "ctrl+p":
+				m.splitMode = false
+			case "h", "left":
+				m.target = "pane_left"
+			case "j", "down":
+				m.target = "pane_below"
+			case "k", "up":
+				m.target = "pane_above"
+			case "l", "right":
+				m.target = "pane"
+			default:
+				return m, nil
+			}
+			if key != "esc" && key != "ctrl+p" {
+				if r := m.selected(); r != nil {
+					w := *r
+					m.chosen = &w
+					return m, tea.Quit
+				}
+			}
+			return m, nil
+		}
 		if m.confirm {
 			switch key {
 			case "esc", "n":
@@ -288,6 +314,17 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "tab", "shift+tab":
+			m.target = nextTarget(m.cfg, m.target, key == "tab")
+		case "ctrl+p":
+			if m.selected() == nil {
+				return m, nil
+			}
+			if m.ctx.Block == "" {
+				m.err = "no block context"
+				return m, nil
+			}
+			m.splitMode = true
 		case "esc":
 			if m.filter != "" {
 				m.filter = ""
@@ -367,7 +404,7 @@ func (m *wtModel) View() string {
 	text, dim := pickerText, pickerMuted
 	line := func(s string) string { return pickerLine(s, width) }
 	lines := []string{}
-	footer := "^n New   ^x Remove   ↵ Open session"
+	footer := "^n New   ^x Remove   ↵ Open"
 	if m.baseSelecting {
 		lines = append(lines, pickerSearch(m.baseQuery, width, "base"), line(dim.Render("Local base branch")))
 		choices := m.baseChoices()
@@ -416,7 +453,7 @@ func (m *wtModel) View() string {
 		if len(lines) > m.height-4 {
 			lines = lines[:maxInt(m.height-4, 0)]
 		}
-		button := " Create & open "
+		button := " Create & open as " + targetLabel(m.target) + " "
 		if m.field == 2 {
 			button = pickerSelected.Bold(true).Render(button)
 		} else {
@@ -431,7 +468,7 @@ func (m *wtModel) View() string {
 			footer = "↵ Choose base   tab Next field   esc Cancel"
 		}
 		if m.field == 2 {
-			footer = "↵ Create & open   ⇧tab Back   esc Cancel"
+			footer = "↵ Create & open as " + targetLabel(m.target) + "   ⇧tab Back   esc Cancel"
 		}
 	} else if m.confirm {
 		r := m.selected()
@@ -457,6 +494,14 @@ func (m *wtModel) View() string {
 			}
 			r := m.rows[m.view[vi]]
 			lines = append(lines, pickerEntry(r.Branch, homeRelative(r.Path), width, vi == m.sel))
+		}
+		left := pickerMuted.Render("Open: ") + pickerAccent.Bold(true).Render(targetLabel(m.target))
+		footer = pickerLine(left+pickerMuted.Render(" · ^p split · ^n new · ^x remove · ↵"), width)
+		if width < 50 {
+			footer = pickerLine(left+pickerMuted.Render(" · ↵"), width)
+		}
+		if m.splitMode {
+			footer = pickerLine(pickerMuted.Render("Split: ")+pickerAccent.Bold(true).Render("h← j↓ k↑ l→ · esc cancel"), width)
 		}
 	}
 	if m.err != "" && !m.form {
