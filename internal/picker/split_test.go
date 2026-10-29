@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"strings"
@@ -6,11 +6,15 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/dispatch"
+	"github.com/alienxp03/raptor/internal/rex"
 )
 
 func splitFixture() *dirModel {
 	return &dirModel{
-		ctx: Ctx{Block: "origin-pane"}, target: "tab", filter: "project",
+		ctx: rex.Ctx{Block: "origin-pane"}, target: "tab", filter: "project",
 		rows: []row{{kind: "dir", path: "/tmp/project"}}, view: []int{0},
 		width: 80, height: 16,
 	}
@@ -41,7 +45,7 @@ func TestSplitModeDirections(t *testing.T) {
 			if _, ok := cmd().(tea.QuitMsg); !ok {
 				t.Fatal("direction must submit immediately")
 			}
-			if got := splitDirection(m.target); got != tt.direction {
+			if got := dispatch.SplitDirection(m.target); got != tt.direction {
 				t.Fatalf("split direction = %q, want %q", got, tt.direction)
 			}
 		}
@@ -50,9 +54,9 @@ func TestSplitModeDirections(t *testing.T) {
 
 func TestSplitModeWithoutSelectionOrOrigin(t *testing.T) {
 	for _, m := range []*dirModel{
-		{ctx: Ctx{Block: "origin-pane"}, target: "tab"},
+		{ctx: rex.Ctx{Block: "origin-pane"}, target: "tab"},
 		{target: "tab", rows: []row{{kind: "dir", path: "/tmp/project"}}, view: []int{0}},
-		{ctx: Ctx{Block: "origin-pane"}, target: "tab", rows: []row{{kind: "session"}}, view: []int{0}},
+		{ctx: rex.Ctx{Block: "origin-pane"}, target: "tab", rows: []row{{kind: "session"}}, view: []int{0}},
 	} {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 		if cmd != nil || m.splitMode || m.picked != nil || m.target != "tab" {
@@ -126,19 +130,19 @@ func TestPlainArrowsStillNavigate(t *testing.T) {
 }
 
 func TestDefaultTargetCycle(t *testing.T) {
-	cfg := defaultConfig()
+	cfg := config.Default()
 	if cfg.Enter != "tab" {
 		t.Fatal("default target must remain tab")
 	}
-	for _, config := range []Config{cfg, {}} {
+	for _, config := range []config.Config{cfg, {}} {
 		target := "tab"
 		for _, want := range []string{"here", "session", "tab"} {
-			target = nextTarget(config, target, true)
+			target = dispatch.NextTarget(config, target, true)
 			if target != want {
 				t.Fatalf("next target = %q, want %q", target, want)
 			}
 		}
-		if nextTarget(config, "tab", false) != "session" {
+		if dispatch.NextTarget(config, "tab", false) != "session" {
 			t.Fatal("reverse cycling must wrap to session")
 		}
 	}

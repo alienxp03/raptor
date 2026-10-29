@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"fmt"
@@ -10,6 +10,12 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sahilm/fuzzy"
+
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/dispatch"
+	"github.com/alienxp03/raptor/internal/paths"
+	"github.com/alienxp03/raptor/internal/rex"
+	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
 
 var (
@@ -29,14 +35,14 @@ var (
 // row is one list entry in the dir picker.
 type row struct {
 	kind      string // "session" | "dir"
-	label     string // basename
+	label     string // paths.Basename
 	path      string // full path (for sessions: best-effort cwd)
 	sessionID string // set for sessions
 }
 
 type dirModel struct {
-	cfg       Config
-	ctx       Ctx
+	cfg       config.Config
+	ctx       rex.Ctx
 	rows      []row // full set
 	view      []int // indices into rows after filtering
 	filter    string
@@ -57,15 +63,15 @@ type previewMsg struct {
 	text string
 }
 
-func loadDirRows(ctx Ctx) []row {
+func loadDirRows(ctx rex.Ctx) []row {
 	var rows []row
-	for _, d := range zoxideList() {
-		rows = append(rows, row{kind: "dir", label: basename(d), path: d})
+	for _, d := range rex.ZoxideList() {
+		rows = append(rows, row{kind: "dir", label: paths.Basename(d), path: d})
 	}
 	return rows
 }
 
-func runDirs(ctx Ctx, cfg Config) int {
+func RunDirs(ctx rex.Ctx, cfg config.Config) int {
 	m := &dirModel{cfg: cfg, ctx: ctx, rows: loadDirRows(ctx), target: cfg.Enter}
 	m.applyFilter()
 	var dm *dirModel
@@ -93,21 +99,21 @@ func runDirs(ctx Ctx, cfg Config) int {
 	r := dm.picked
 	if r.kind == "session" {
 		if ctx.Session != "" && ctx.Session != r.sessionID {
-			writeLast(ctx.Session)
+			rex.WriteLast(ctx.Session)
 		}
 		if ctx.Client != "" {
-			_ = rexDo(ctx.Client, "session.select", "session_id="+r.sessionID)
+			_ = rex.Do(ctx.Client, "session.select", "session_id="+r.sessionID)
 		}
 		return 0
 	}
-	if err := dispatch(dm.target, r.path, ctx, cfg); err != nil {
+	if err := dispatch.Dispatch(dm.target, r.path, ctx, cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
 }
 
-func (m *dirModel) Init() tea.Cmd { return m.ctx.titleCommand() }
+func (m *dirModel) Init() tea.Cmd { return m.ctx.TitleCommand() }
 func (m *dirModel) applyFilter() {
 	m.view = m.view[:0]
 	if m.filter == "" {
@@ -119,7 +125,7 @@ func (m *dirModel) applyFilter() {
 	type cand struct{ idx, score int }
 	haystack := make([]string, len(m.rows))
 	for i, r := range m.rows {
-		haystack[i] = r.label + " " + homeRelative(r.path)
+		haystack[i] = r.label + " " + paths.HomeRelative(r.path)
 	}
 	matches := fuzzy.Find(m.filter, haystack)
 	for _, mt := range matches {
@@ -218,7 +224,7 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.splitMode = true
 			return m, nil
 		case "tab", "shift+tab":
-			m.target = nextTarget(m.cfg, m.target, msg.String() == "tab")
+			m.target = dispatch.NextTarget(m.cfg, m.target, msg.String() == "tab")
 			return m, nil
 		case "enter":
 			r := m.selected()
@@ -228,9 +234,9 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "ctrl+t":
 			r := m.selected()
-			if r != nil && r.kind == "dir" && isGitRepo(r.path) {
+			if r != nil && r.kind == "dir" && worktreepkg.IsGitRepo(r.path) {
 				m.next = "wt"
-				m.nextRepo = repoRoot(r.path)
+				m.nextRepo = worktreepkg.RepoRoot(r.path)
 				return m, tea.Quit
 			}
 			if r != nil {
@@ -275,7 +281,7 @@ func (m *dirModel) View() string {
 		lines = append(lines, pickerDirectory(r.path, width, vi == m.sel))
 	}
 	lines = append(lines, pickerRule(width))
-	target := pickerAccent.Bold(true).Render(targetLabel(m.target))
+	target := pickerAccent.Bold(true).Render(dispatch.TargetLabel(m.target))
 	left := pickerMuted.Render("Open as: ") + target
 	if lipgloss.Width(left) > width {
 		left = target
@@ -297,10 +303,10 @@ func (m *dirModel) View() string {
 	return strings.Join(lines, "\n")
 }
 
-func renderTargets(cfg Config, active string) string {
+func renderTargets(cfg config.Config, active string) string {
 	parts := []string{"  " + styDim.Render("OPEN AS")}
 	for _, target := range cfg.Targets {
-		label := strings.ToUpper(targetLabel(target))
+		label := strings.ToUpper(dispatch.TargetLabel(target))
 		if target == "pane" {
 			label = "PANE →"
 		} else if target == "pane_below" {

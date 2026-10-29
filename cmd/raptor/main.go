@@ -6,6 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/dispatch"
+	"github.com/alienxp03/raptor/internal/picker"
+	"github.com/alienxp03/raptor/internal/rex"
 )
 
 // version is set at build time.
@@ -31,18 +36,17 @@ func main() {
 	}
 
 	fixPath()
-	cfg := loadConfig()
+	cfg := config.Load()
+	ctx := rex.NewContext(session, block, client, title)
 
 	switch fs.Args()[0] {
 	case "dirs":
-		ctx := ctxFrom(session, block, client, title)
-		os.Exit(runDirs(ctx, cfg))
+		os.Exit(picker.RunDirs(ctx, cfg))
 	case "wt":
 		rest := flag.NewFlagSet("wt", flag.ExitOnError)
 		repo := rest.String("repo", "", "repo path (default: origin block's cwd, else picker)")
 		_ = rest.Parse(fs.Args()[1:])
-		ctx := ctxFrom(session, block, client, title)
-		os.Exit(runWorktrees(ctx, cfg, *repo))
+		os.Exit(picker.RunWorktrees(ctx, cfg, *repo))
 	case "direct":
 		// raptor -session X -block Y -client Z direct <target> <dir>
 		args := fs.Args()[1:]
@@ -50,21 +54,19 @@ func main() {
 			fmt.Fprintln(os.Stderr, "usage: raptor direct <target> <dir>")
 			os.Exit(2)
 		}
-		ctx := ctxFrom(session, block, client, title)
-		if err := dispatch(args[0], args[1], ctx, cfg); err != nil {
+		if err := dispatch.Dispatch(args[0], args[1], ctx, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	case "last":
-		ctx := ctxFrom(session, block, client, title)
-		sid, err := lastSession()
+		sid, err := rex.LastSession()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		swapLast(ctx.Session)
+		rex.SwapLast(ctx.Session)
 		if ctx.Client != "" {
-			_ = rexDo(ctx.Client, "session.select", "session_id="+sid)
+			_ = rex.Do(ctx.Client, "session.select", "session_id="+sid)
 		}
 		fmt.Println(sid)
 	case "version":
@@ -73,18 +75,6 @@ func main() {
 		fs.Usage()
 		os.Exit(2)
 	}
-}
-
-// Ctx carries where the action was invoked from.
-type Ctx struct {
-	Session string
-	Block   string
-	Client  string
-	Title   string
-}
-
-func ctxFrom(session, block, client, title string) Ctx {
-	return Ctx{Session: session, Block: block, Client: client, Title: title}
 }
 
 // fixPath makes rex, gh, git, eza findable when launched from the Rex

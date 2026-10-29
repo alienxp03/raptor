@@ -1,25 +1,31 @@
-package main
+package picker
 
 import (
-	"github.com/charmbracelet/bubbletea"
-	"github.com/sahilm/fuzzy"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/charmbracelet/bubbletea"
+	"github.com/sahilm/fuzzy"
+
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/paths"
+	"github.com/alienxp03/raptor/internal/rex"
+	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
 
 // pickRepo asks for a repo when none is in context: git dirs from zoxide.
-func pickRepo(ctx Ctx, cfg Config) string {
+func pickRepo(ctx rex.Ctx, cfg config.Config) string {
 	var rows []rrow
 	seen := map[string]bool{}
-	for _, d := range zoxideList() {
+	for _, d := range rex.ZoxideList() {
 		if _, err := os.Stat(filepath.Join(d, ".git")); err != nil {
 			continue
 		}
-		r := repoRoot(d)
+		r := worktreepkg.RepoRoot(d)
 		if r != "" && !seen[r] {
 			seen[r] = true
-			rows = append(rows, rrow{label: basename(r), path: r})
+			rows = append(rows, rrow{label: paths.Basename(r), path: r})
 		}
 	}
 	if len(rows) == 0 {
@@ -40,7 +46,7 @@ func pickRepo(ctx Ctx, cfg Config) string {
 		} else {
 			hs := make([]string, len(rows))
 			for i, r := range rows {
-				hs[i] = r.label + " " + homeRelative(r.path)
+				hs[i] = r.label + " " + paths.HomeRelative(r.path)
 			}
 			for _, mt := range fuzzy.Find(filter, hs) {
 				view = append(view, mt.Index)
@@ -67,7 +73,7 @@ func pickRepo(ctx Ctx, cfg Config) string {
 type rrow struct{ label, path string }
 
 type repoPickModel struct {
-	ctx    Ctx
+	ctx    rex.Ctx
 	rows   []rrow
 	view   []int
 	sel    *int
@@ -78,7 +84,7 @@ type repoPickModel struct {
 	height int
 }
 
-func (m *repoPickModel) Init() tea.Cmd { return m.ctx.titleCommand() }
+func (m *repoPickModel) Init() tea.Cmd { return m.ctx.TitleCommand() }
 
 func (m *repoPickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {

@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
+
+	"github.com/alienxp03/raptor/internal/config"
 )
 
 func TestPickerPaintRestoresBackground(t *testing.T) {
@@ -97,7 +99,7 @@ func TestPickerSearchKeepsCursorVisible(t *testing.T) {
 }
 
 func TestDirectoryPickerScrollAndEmptyState(t *testing.T) {
-	m := &dirModel{width: 40, height: 12, cfg: defaultConfig(), target: "session"}
+	m := &dirModel{width: 40, height: 12, cfg: config.Default(), target: "session"}
 	for i := 0; i < 30; i++ {
 		m.rows = append(m.rows, row{label: fmt.Sprintf("project-%02d", i), path: fmt.Sprintf("/workspace/project-%02d", i)})
 	}

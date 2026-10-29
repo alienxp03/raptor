@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"strings"
@@ -7,10 +7,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/alienxp03/raptor/internal/config"
 )
 
 func TestSearchDoesNotConsumeLetters(t *testing.T) {
-	m := &dirModel{cfg: defaultConfig()}
+	m := &dirModel{cfg: config.Default()}
 	for _, letter := range "wqnx" {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{letter}})
 		if cmd != nil {
@@ -49,7 +51,7 @@ func TestDirectoryRowLayout(t *testing.T) {
 
 func TestCompactPalette(t *testing.T) {
 	for _, size := range [][2]int{{80, 20}, {52, 16}, {40, 12}, {24, 8}, {18, 5}} {
-		m := &dirModel{width: size[0], height: size[1], cfg: defaultConfig(), target: "session", rows: []row{{kind: "dir", path: "/tmp/romhandbook", label: "romhandbook"}}, view: []int{0}}
+		m := &dirModel{width: size[0], height: size[1], cfg: config.Default(), target: "session", rows: []row{{kind: "dir", path: "/tmp/romhandbook", label: "romhandbook"}}, view: []int{0}}
 		output := m.View()
 		lines := strings.Split(output, "\n")
 		if len(lines) != m.height {

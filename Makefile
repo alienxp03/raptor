@@ -4,7 +4,7 @@ PREFIX := $(HOME)/.local
 .PHONY: build install clean
 
 build:
-	go build -o $(BIN) .
+	go build -o $(BIN) ./cmd/raptor
 
 install: build
 	install -d $(PREFIX)/bin

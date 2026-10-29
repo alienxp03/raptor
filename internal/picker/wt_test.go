@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"os"
@@ -9,6 +9,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/rex"
+	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
 
 func fixtureRepo(t *testing.T) string {
@@ -18,77 +22,18 @@ func fixtureRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "-b", "main"}, {"config", "user.name", "Test"}, {"config", "user.email", "test@example.com"}, {"-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial"}} {
-		if _, err := gitOut(dir, args...); err != nil {
+		if _, err := worktreepkg.GitOut(dir, args...); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return dir
 }
-func TestWorktreeRepoFolder(t *testing.T) {
-	for input, want := range map[string]string{
-		".dotfiles": "dotfiles",
-		"raptor":    "raptor",
-		"...":       "repository",
-	} {
-		if got := worktreeRepoFolder(input); got != want {
-			t.Errorf("worktreeRepoFolder(%q) = %q, want %q", input, got, want)
-		}
-	}
-}
 
-func TestLocalWorktreeLifecycle(t *testing.T) {
-	repo := fixtureRepo(t)
-	cfg := defaultConfig()
-	cfg.WorktreeRoot = t.TempDir()
-	for _, pair := range [][2]string{{"feat/login", "feature-login"}, {"fix/crash", "fix-crash"}, {"chore/deps", "chore-deps"}, {"refactor/auth/session", "refactor-auth-session"}} {
-		if got := worktreeFolder(pair[0]); got != pair[1] {
-			t.Fatalf("%s -> %s", pair[0], got)
-		}
-	}
-	path := worktreePath(repo, "feat/login", cfg)
-	if !strings.HasSuffix(path, "repo/feature-login") {
-		t.Fatal(path)
-	}
-	if err := createLocalWorktree(repo, "feat/login", "main", path); err != nil {
-		t.Fatal(err)
-	}
-	trees := listWorktrees(repo)
-	if len(trees) != 2 || !trees[0].IsMain || trees[1].Branch != "feat/login" {
-		t.Fatalf("%+v", trees)
-	}
-	if err := createLocalWorktree(repo, "feat/login", "main", path); err == nil {
-		t.Fatal("duplicate accepted")
-	}
-	if err := validateWorktree(repo, "../escape", "main", path); err == nil {
-		t.Fatal("invalid name accepted")
-	}
-	if err := validateWorktree(repo, "feat/new", "missing", path+"new"); err == nil {
-		t.Fatal("invalid base accepted")
-	}
-	if err := os.WriteFile(filepath.Join(path, "unsaved"), []byte("keep me"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := removeWorktree(repo, trees[1]); err == nil {
-		t.Fatal("dirty worktree removed")
-	}
-	if err := os.Remove(filepath.Join(path, "unsaved")); err != nil {
-		t.Fatal(err)
-	}
-	if err := removeWorktree(repo, trees[1]); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := gitOut(repo, "show-ref", "--verify", "refs/heads/feat/login"); err != nil {
-		t.Fatal("branch should be kept")
-	}
-	if err := removeWorktree(repo, trees[0]); err == nil {
-		t.Fatal("primary removable")
-	}
-}
 func TestWorktreeForm(t *testing.T) {
 	repo := fixtureRepo(t)
-	cfg := defaultConfig()
+	cfg := config.Default()
 	cfg.WorktreeRoot = t.TempDir()
-	m := newWtModel(Ctx{}, cfg, repo)
+	m := newWtModel(rex.Ctx{}, cfg, repo)
 	m.width, m.height = 80, 22
 	if cmd := m.Init(); cmd != nil {
 		t.Fatal("local picker must not fetch GitHub")

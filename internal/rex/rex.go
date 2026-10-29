@@ -1,66 +1,36 @@
-package main
+package rex
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alienxp03/raptor/internal/execx"
 )
 
-// ---------- exec helpers ----------
+type cmdResult = execx.Result
 
-type cmdResult struct {
-	Stdout string
-	Stderr string
-	Code   int
+type Ctx struct {
+	Session string
+	Block   string
+	Client  string
+	Title   string
+}
+
+func NewContext(session, block, client, title string) Ctx {
+	return Ctx{Session: session, Block: block, Client: client, Title: title}
 }
 
 func runCmd(dir string, timeout time.Duration, name string, args ...string) (cmdResult, error) {
-	cmd := exec.Command(name, args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	var out, errb bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errb
-	done := make(chan error, 1)
-	if err := cmd.Start(); err != nil {
-		return cmdResult{}, err
-	}
-	go func() { done <- cmd.Wait() }()
-	if timeout > 0 {
-		select {
-		case err := <-done:
-			return finish(err, out.String(), errb.String())
-		case <-time.After(timeout):
-			_ = cmd.Process.Kill()
-			<-done
-			return cmdResult{Stdout: out.String(), Stderr: "timed out"}, fmt.Errorf("%s timed out", name)
-		}
-	}
-	err := <-done
-	return finish(err, out.String(), errb.String())
-}
-
-func finish(err error, out, errOut string) (cmdResult, error) {
-	code := 0
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			code = ee.ExitCode()
-		} else {
-			return cmdResult{Stdout: out, Stderr: errOut}, err
-		}
-	}
-	return cmdResult{Stdout: out, Stderr: errOut, Code: code}, nil
+	return execx.Run(dir, timeout, name, args...)
 }
 
 // ---------- rex CLI wrappers ----------
 
-func rexRun(args ...string) (string, error) {
+func Run(args ...string) (string, error) {
 	r, err := runCmd("", 15*time.Second, "rex", args...)
 	if err != nil {
 		return r.Stdout, err
@@ -71,17 +41,17 @@ func rexRun(args ...string) (string, error) {
 	return r.Stdout, nil
 }
 
-func rexRunQuiet(args ...string) {
-	_, _ = rexRun(args...)
+func RunQuiet(args ...string) {
+	_, _ = Run(args...)
 }
 
-// rexDo targets a client (e.g. session.select). Remote Control required.
-func rexDo(client, action string, kv ...string) error {
+// Do targets a client (e.g. session.select). Remote Control required.
+func Do(client, action string, kv ...string) error {
 	args := []string{"-C", client, "do", action}
 	for _, s := range kv {
 		args = append(args, s)
 	}
-	_, err := rexRun(args...)
+	_, err := Run(args...)
 	return err
 }
 
@@ -90,8 +60,8 @@ type rexSession struct {
 	Label     string `json:"label"`
 }
 
-func rexSessions() []rexSession {
-	out, err := rexRun("ls", "--json")
+func Sessions() []rexSession {
+	out, err := Run("ls", "--json")
 	if err != nil {
 		return nil
 	}
@@ -104,8 +74,8 @@ func rexSessions() []rexSession {
 	return data.Sessions
 }
 
-func sessionByLabel(label string) (string, bool) {
-	for _, s := range rexSessions() {
+func SessionByLabel(label string) (string, bool) {
+	for _, s := range Sessions() {
 		if s.Label == label {
 			return s.SessionID, true
 		}
@@ -113,15 +83,15 @@ func sessionByLabel(label string) (string, bool) {
 	return "", false
 }
 
-// blockPwd returns the cwd a block last reported, via rex do.
-func blockPwd(blockID string) string {
+// BlockPwd returns the cwd a block last reported, via rex do.
+func BlockPwd(blockID string) string {
 	if blockID == "" {
 		return ""
 	}
 	script := fmt.Sprintf(
 		"local r = rex.block.call('com.superlogical.terminal', 'pwd', { block_id = '%s' }) print(r and r.pwd or '')",
 		blockID)
-	out, err := rexRun("do", "-e", script)
+	out, err := Run("do", "-e", script)
 	if err != nil {
 		return ""
 	}
@@ -132,17 +102,17 @@ func blockPwd(blockID string) string {
 
 // blockCwd returns the cwd of a block's foreground process (works even when
 // the terminal never reported OSC 7, e.g. while a TUI app owns the pane).
-func blockCwd(blockID string) string {
+func BlockCwd(blockID string) string {
 	if blockID == "" {
 		return ""
 	}
-	if p := blockPwd(blockID); p != "" {
+	if p := BlockPwd(blockID); p != "" {
 		return p
 	}
 	script := fmt.Sprintf(
 		"local r = rex.block.call('com.superlogical.terminal', 'process', { block_id = '%s' }) print(r and r.foreground and r.foreground.cwd or '')",
 		blockID)
-	out, err := rexRun("do", "-e", script)
+	out, err := Run("do", "-e", script)
 	if err != nil {
 		return ""
 	}
@@ -150,14 +120,14 @@ func blockCwd(blockID string) string {
 }
 
 // blockForeground returns the foreground process name of a block.
-func blockForeground(blockID string) string {
+func BlockForeground(blockID string) string {
 	if blockID == "" {
 		return ""
 	}
 	script := fmt.Sprintf(
 		"local r = rex.block.call('com.superlogical.terminal', 'process', { block_id = '%s' }) print(r and r.foreground and r.foreground.name or '')",
 		blockID)
-	out, err := rexRun("do", "-e", script)
+	out, err := Run("do", "-e", script)
 	if err != nil {
 		return ""
 	}
@@ -166,7 +136,7 @@ func blockForeground(blockID string) string {
 
 // ---------- zoxide ----------
 
-func zoxideList() []string {
+func ZoxideList() []string {
 	r, err := runCmd("", 5*time.Second, "zoxide", "query", "-l")
 	if err != nil {
 		return nil
@@ -191,7 +161,7 @@ func statePath() string {
 	return filepath.Join(cache, "rex", "raptor-last")
 }
 
-func lastSession() (string, error) {
+func LastSession() (string, error) {
 	data, err := os.ReadFile(statePath())
 	if err != nil {
 		return "", fmt.Errorf("no previous session recorded yet")
@@ -200,7 +170,7 @@ func lastSession() (string, error) {
 	if s == "" {
 		return "", fmt.Errorf("no previous session recorded yet")
 	}
-	for _, sess := range rexSessions() {
+	for _, sess := range Sessions() {
 		if sess.SessionID == s {
 			return s, nil
 		}
@@ -208,7 +178,7 @@ func lastSession() (string, error) {
 	return "", fmt.Errorf("the last session is gone")
 }
 
-func writeLast(sid string) {
+func WriteLast(sid string) {
 	if sid == "" {
 		return
 	}
@@ -216,4 +186,4 @@ func writeLast(sid string) {
 	_ = os.WriteFile(statePath(), []byte(sid+"\n"), 0o644)
 }
 
-func swapLast(current string) { writeLast(current) }
+func SwapLast(current string) { WriteLast(current) }

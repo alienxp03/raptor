@@ -1,13 +1,16 @@
-package main
+package picker
 
 import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/rex"
 )
 
 func TestWorktreeTargetCycle(t *testing.T) {
-	cfg := defaultConfig()
+	cfg := config.Default()
 	m := &wtModel{cfg: cfg, target: cfg.Enter}
 
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -22,7 +25,7 @@ func TestWorktreeTargetCycle(t *testing.T) {
 
 func TestWorktreeSplitTargetOpensSelection(t *testing.T) {
 	m := &wtModel{
-		ctx:    Ctx{Block: "origin-pane"},
+		ctx:    rex.Ctx{Block: "origin-pane"},
 		rows:   []worktree{{Branch: "feat/login", Path: "/tmp/login"}},
 		view:   []int{0},
 		target: "tab",

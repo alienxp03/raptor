@@ -1,8 +1,11 @@
-package main
+package config
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/alienxp03/raptor/internal/paths"
 )
 
 // Config is read from ~/.config/raptor/config.toml (all optional).
@@ -13,7 +16,7 @@ type Config struct {
 	Targets      []string
 }
 
-func defaultConfig() Config {
+func Default() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
 		WorktreeRoot: filepath.Join(home, "Workspace", "worktrees"),
@@ -23,9 +26,9 @@ func defaultConfig() Config {
 	}
 }
 
-// loadConfig parses a flat TOML subset: key = "value" / key = 12.
-func loadConfig() Config {
-	cfg := defaultConfig()
+// Load parses a flat TOML subset: key = "value" / key = 12.
+func Load() Config {
+	cfg := Default()
 	home, _ := os.UserHomeDir()
 	data, err := os.ReadFile(filepath.Join(home, ".config", "raptor", "config.toml"))
 	if err != nil {
@@ -33,13 +36,13 @@ func loadConfig() Config {
 	}
 	s := string(data)
 	get := func(key string) (string, bool) {
-		for _, line := range splitLines(s) {
-			line = trimSpace(line)
+		for _, line := range strings.Split(s, "\n") {
+			line = strings.TrimSpace(line)
 			if len(line) >= len(key)+1 && line[:len(key)] == key {
-				rest := trimSpace(line[len(key):])
+				rest := strings.TrimSpace(line[len(key):])
 				if len(rest) > 0 && rest[0] == '=' {
-					v := trimSpace(rest[1:])
-					v = trimQuotes(v)
+					v := strings.TrimSpace(rest[1:])
+					v = strings.Trim(v, "\"'")
 					return v, true
 				}
 			}
@@ -47,7 +50,7 @@ func loadConfig() Config {
 		return "", false
 	}
 	if v, ok := get("worktree_root"); ok && v != "" {
-		cfg.WorktreeRoot = expandHome(v)
+		cfg.WorktreeRoot = paths.ExpandHome(v)
 	}
 	if v, ok := get("slug_len"); ok && v != "" {
 		n := 0
@@ -66,14 +69,15 @@ func loadConfig() Config {
 		cfg.Enter = v
 	}
 	if v, ok := get("targets"); ok && v != "" {
-		var ts []string
-		for _, part := range splitComma(v) {
-			if part != "" {
-				ts = append(ts, part)
+		parts := strings.Split(strings.Trim(v, "[]\"'"), ",")
+		var targets []string
+		for _, part := range parts {
+			if part = strings.TrimSpace(strings.Trim(part, "\"'")); part != "" {
+				targets = append(targets, part)
 			}
 		}
-		if len(ts) > 0 {
-			cfg.Targets = ts
+		if len(targets) > 0 {
+			cfg.Targets = targets
 		}
 	}
 	return cfg

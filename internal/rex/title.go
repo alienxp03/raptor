@@ -1,4 +1,4 @@
-package main
+package rex
 
 import (
 	"strings"
@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (ctx Ctx) titleCommand() tea.Cmd {
+func (ctx Ctx) TitleCommand() tea.Cmd {
 	// Titles come from another terminal. Do not pass control characters into OSC.
 	title := strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

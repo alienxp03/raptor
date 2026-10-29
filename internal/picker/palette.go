@@ -1,10 +1,12 @@
-package main
+package picker
 
 import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/alienxp03/raptor/internal/paths"
 )
 
 // A quiet terminal palette. Use the same surface in every picker and form.
@@ -68,7 +70,7 @@ func pickerDirectory(path string, width int, selected bool) string {
 	if selected {
 		style = pickerSelected.Bold(true)
 	}
-	return pickerRow(style.Render(pickerTail(homeRelative(path), maxInt(width-3, 0))), width, selected)
+	return pickerRow(style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3, 0))), width, selected)
 }
 
 func pickerEntry(label, detail string, width int, selected bool) string {

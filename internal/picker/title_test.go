@@ -1,14 +1,16 @@
-package main
+package picker
 
 import (
 	"reflect"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/alienxp03/raptor/internal/rex"
 )
 
 func TestPickersInheritOriginTitle(t *testing.T) {
-	ctx := Ctx{Title: ".dotfiles"}
+	ctx := rex.Ctx{Title: ".dotfiles"}
 	models := []tea.Model{&dirModel{ctx: ctx}, &wtModel{ctx: ctx}, &repoPickModel{ctx: ctx}}
 	for _, model := range models {
 		cmd := model.Init()
@@ -25,7 +27,7 @@ func TestTitleCommand(t *testing.T) {
 		{".dotfiles\x07\n", ".dotfiles"},
 		{"旅行 project", "旅行 project"},
 	} {
-		cmd := (Ctx{Title: tt.input}).titleCommand()
+		cmd := (rex.Ctx{Title: tt.input}).TitleCommand()
 		if tt.want == "" {
 			if cmd != nil {
 				t.Fatalf("unexpected title command for %q", tt.input)

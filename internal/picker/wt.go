@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"fmt"
@@ -10,11 +10,19 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
+
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/dispatch"
+	"github.com/alienxp03/raptor/internal/paths"
+	"github.com/alienxp03/raptor/internal/rex"
+	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
 
+type worktree = worktreepkg.Worktree
+
 type wtModel struct {
-	cfg           Config
-	ctx           Ctx
+	cfg           config.Config
+	ctx           rex.Ctx
 	repo          string
 	root          string
 	rows          []worktree
@@ -47,15 +55,15 @@ type wtRemovedMsg struct{ err error }
 
 const returnToDirectories = -1
 
-func runWorktrees(ctx Ctx, cfg Config, repo string) int {
+func RunWorktrees(ctx rex.Ctx, cfg config.Config, repo string) int {
 	return runWorktreeFlow(ctx, cfg, repo, false)
 }
 
-func runWorktreeFlow(ctx Ctx, cfg Config, repo string, fromDirectories bool) int {
+func runWorktreeFlow(ctx rex.Ctx, cfg config.Config, repo string, fromDirectories bool) int {
 	if repo == "" {
-		repo = repoRoot(blockCwd(ctx.Block))
+		repo = worktreepkg.RepoRoot(rex.BlockCwd(ctx.Block))
 	}
-	if repo == "" || !isGitRepo(repo) {
+	if repo == "" || !worktreepkg.IsGitRepo(repo) {
 		repo = pickRepo(ctx, cfg)
 		if repo == "" {
 			return 0
@@ -72,33 +80,33 @@ func runWorktreeFlow(ctx Ctx, cfg Config, repo string, fromDirectories bool) int
 		if fromDirectories {
 			return returnToDirectories
 		}
-		return runDirs(ctx, cfg)
+		return RunDirs(ctx, cfg)
 	}
 	if model.chosen != nil {
-		if err := dispatch(model.target, model.chosen.Path, ctx, cfg); err != nil {
+		if err := dispatch.Dispatch(model.target, model.chosen.Path, ctx, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
 	}
 	return 0
 }
-func newWtModel(ctx Ctx, cfg Config, repo string) *wtModel {
-	m := &wtModel{ctx: ctx, cfg: cfg, repo: repo, branches: localBranches(repo), errField: -1, target: cfg.Enter}
-	m.rows = listWorktrees(repo)
+func newWtModel(ctx rex.Ctx, cfg config.Config, repo string) *wtModel {
+	m := &wtModel{ctx: ctx, cfg: cfg, repo: repo, branches: worktreepkg.LocalBranches(repo), errField: -1, target: cfg.Enter}
+	m.rows = worktreepkg.List(repo)
 	primary := repo
 	if len(m.rows) > 0 {
 		primary = m.rows[0].Path
 	}
-	m.root = filepath.Join(cfg.WorktreeRoot, worktreeRepoFolder(basename(primary)))
-	m.base, _ = gitOut(repo, "branch", "--show-current")
+	m.root = filepath.Join(cfg.WorktreeRoot, worktreepkg.RepoFolder(paths.Basename(primary)))
+	m.base, _ = worktreepkg.GitOut(repo, "branch", "--show-current")
 	if m.base == "" && len(m.branches) > 0 {
 		m.base = m.branches[0]
 	}
 	m.applyFilter()
 	return m
 }
-func (m *wtModel) Init() tea.Cmd       { return m.ctx.titleCommand() }
-func (m *wtModel) destination() string { return filepath.Join(m.root, worktreeFolder(m.branch)) }
+func (m *wtModel) Init() tea.Cmd       { return m.ctx.TitleCommand() }
+func (m *wtModel) destination() string { return filepath.Join(m.root, worktreepkg.Folder(m.branch)) }
 func (m *wtModel) applyFilter() {
 	m.view = nil
 	if m.filter == "" {
@@ -108,7 +116,7 @@ func (m *wtModel) applyFilter() {
 	} else {
 		entries := make([]string, len(m.rows))
 		for i, r := range m.rows {
-			entries[i] = r.Branch + " " + homeRelative(r.Path)
+			entries[i] = r.Branch + " " + paths.HomeRelative(r.Path)
 		}
 		for _, match := range fuzzy.Find(m.filter, entries) {
 			m.view = append(m.view, match.Index)
@@ -157,7 +165,7 @@ func (m *wtModel) baseChoices() []string {
 }
 
 func (m *wtModel) openBaseChooser() {
-	m.branches = localBranches(m.repo)
+	m.branches = worktreepkg.LocalBranches(m.repo)
 	m.baseSelecting, m.baseQuery, m.baseSel = true, "", 0
 	for i, branch := range m.branches {
 		if branch == m.base {
@@ -185,7 +193,7 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err.Error()
 		} else {
-			m.rows = listWorktrees(m.repo)
+			m.rows = worktreepkg.List(m.repo)
 			m.applyFilter()
 		}
 	case tea.KeyMsg:
@@ -233,7 +241,7 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				w := *r
 				repo := m.repo
 				m.busy = true
-				return m, func() tea.Msg { return wtRemovedMsg{removeWorktree(repo, w)} }
+				return m, func() tea.Msg { return wtRemovedMsg{worktreepkg.Remove(repo, w)} }
 			}
 			return m, nil
 		}
@@ -279,7 +287,7 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.field = (m.field + 2) % 3
 			case "enter":
 				if m.field == 0 {
-					if err := validateNewBranch(m.repo, m.branch); err != nil {
+					if err := worktreepkg.ValidateNewBranch(m.repo, m.branch); err != nil {
 						m.err, m.errField = err.Error(), 0
 						return m, nil
 					}
@@ -291,16 +299,16 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				repo, branch, base, path := m.repo, m.branch, m.base, m.destination()
-				if err := validateWorktree(repo, branch, base, path); err != nil {
+				if err := worktreepkg.Validate(repo, branch, base, path); err != nil {
 					m.err, m.errField = err.Error(), -1
-					if validateNewBranch(repo, branch) != nil {
+					if worktreepkg.ValidateNewBranch(repo, branch) != nil {
 						m.errField, m.field = 0, 0
 					}
 					return m, nil
 				}
 				m.busy = true
 				m.err, m.errField = "", -1
-				return m, func() tea.Msg { return wtCreatedMsg{path, createLocalWorktree(repo, branch, base, path)} }
+				return m, func() tea.Msg { return wtCreatedMsg{path, worktreepkg.CreateLocal(repo, branch, base, path)} }
 			default:
 				if m.field == 0 {
 					if editQuery(&m.branch, msg) {
@@ -315,7 +323,7 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch key {
 		case "tab", "shift+tab":
-			m.target = nextTarget(m.cfg, m.target, key == "tab")
+			m.target = dispatch.NextTarget(m.cfg, m.target, key == "tab")
 		case "ctrl+p":
 			if m.selected() == nil {
 				return m, nil
@@ -392,7 +400,7 @@ func (m *wtModel) View() string {
 		if r := m.selected(); r != nil {
 			// Use the full width below the list for the selected path. Very long
 			// paths keep their ending and use at most three rows.
-			path := pickerTail(homeRelative(r.Path), width*3)
+			path := pickerTail(paths.HomeRelative(r.Path), width*3)
 			pathLines = strings.Split(ansi.Hardwrap(path, width, true), "\n")
 			if len(pathLines) > 3 {
 				pathLines = pathLines[len(pathLines)-3:]
@@ -443,7 +451,7 @@ func (m *wtModel) View() string {
 			lines = append(lines, line(styErr.Render(m.err)))
 		}
 		lines = append(lines, line(""), line(dim.Render("Base branch")), line(fieldStyle(1).Render(padRight(m.base+"  ›", width))), line(""), line(dim.Render("Destination")))
-		for _, wrapped := range strings.Split(lipgloss.NewStyle().Width(width).Render(homeRelative(m.destination())), "\n") {
+		for _, wrapped := range strings.Split(lipgloss.NewStyle().Width(width).Render(paths.HomeRelative(m.destination())), "\n") {
 			lines = append(lines, line(text.Render(wrapped)))
 		}
 		if m.err != "" && m.errField != 0 {
@@ -453,7 +461,7 @@ func (m *wtModel) View() string {
 		if len(lines) > m.height-4 {
 			lines = lines[:maxInt(m.height-4, 0)]
 		}
-		button := " Create & open as " + targetLabel(m.target) + " "
+		button := " Create & open as " + dispatch.TargetLabel(m.target) + " "
 		if m.field == 2 {
 			button = pickerSelected.Bold(true).Render(button)
 		} else {
@@ -468,13 +476,13 @@ func (m *wtModel) View() string {
 			footer = "↵ Choose base   tab Next field   esc Cancel"
 		}
 		if m.field == 2 {
-			footer = "↵ Create & open as " + targetLabel(m.target) + "   ⇧tab Back   esc Cancel"
+			footer = "↵ Create & open as " + dispatch.TargetLabel(m.target) + "   ⇧tab Back   esc Cancel"
 		}
 	} else if m.confirm {
 		r := m.selected()
 		lines = append(lines, line(styErr.Bold(true).Render("Remove worktree?")), line(""))
 		if r != nil {
-			lines = append(lines, line(text.Render(r.Branch)), line(dim.Render(homeRelative(r.Path))))
+			lines = append(lines, line(text.Render(r.Branch)), line(dim.Render(paths.HomeRelative(r.Path))))
 		}
 		lines = append(lines, line(""), line(dim.Render("Branch is kept. Git refuses uncommitted changes.")))
 		footer = "↵ Remove   esc Cancel"
@@ -493,9 +501,9 @@ func (m *wtModel) View() string {
 				continue
 			}
 			r := m.rows[m.view[vi]]
-			lines = append(lines, pickerEntry(r.Branch, homeRelative(r.Path), width, vi == m.sel))
+			lines = append(lines, pickerEntry(r.Branch, paths.HomeRelative(r.Path), width, vi == m.sel))
 		}
-		left := pickerMuted.Render("Open: ") + pickerAccent.Bold(true).Render(targetLabel(m.target))
+		left := pickerMuted.Render("Open: ") + pickerAccent.Bold(true).Render(dispatch.TargetLabel(m.target))
 		footer = pickerLine(left+pickerMuted.Render(" · ^p split · ^n new · ^x remove · ↵"), width)
 		if width < 50 {
 			footer = pickerLine(left+pickerMuted.Render(" · ↵"), width)
