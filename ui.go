@@ -67,17 +67,24 @@ func loadDirRows(ctx Ctx) []row {
 func runDirs(ctx Ctx, cfg Config) int {
 	m := &dirModel{cfg: cfg, ctx: ctx, rows: loadDirRows(ctx), target: cfg.Enter}
 	m.applyFilter()
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	final, err := p.Run()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	dm := final.(*dirModel)
-
-	// bridge into the worktree flow
-	if dm.next == "wt" {
-		return runWorktrees(ctx, cfg, dm.nextRepo)
+	var dm *dirModel
+	for {
+		final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		dm = final.(*dirModel)
+		if dm.next != "wt" {
+			break
+		}
+		code := runWorktreeFlow(ctx, cfg, dm.nextRepo, true)
+		if code != returnToDirectories {
+			return code
+		}
+		// Resume the same picker rather than constructing a fresh one.
+		dm.next, dm.nextRepo = "", ""
+		m = dm
 	}
 	if dm.picked == nil {
 		return 0
@@ -211,18 +218,9 @@ func (m *dirModel) View() string {
 	if m.width < 1 || m.height < 1 {
 		return ""
 	}
-	width := maxInt(m.width-4, 1)
-	var surface lipgloss.TerminalColor = lipgloss.NoColor{}
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#88888F")).Background(surface)
-	paint := func(content string, bg lipgloss.TerminalColor) string {
-		content = padRight(ansi.Truncate(content, width, "…"), width)
-		return lipgloss.NewStyle().Background(surface).Render("  ") +
-			lipgloss.NewStyle().Background(bg).Render(content) +
-			lipgloss.NewStyle().Background(surface).Render("  ")
-	}
-	blank := paint("", surface)
-	search := lipgloss.NewStyle().Foreground(lipgloss.Color("#F2F2F4")).Background(surface)
-	lines := []string{paint(search.Render("⌕  "+m.filter+"│"), surface), blank}
+	width := maxInt(m.width-2, 1)
+	blank := pickerLine("", width)
+	lines := []string{pickerSearch(m.filter, width), blank}
 
 	maxRows := maxInt(m.height-4, 0)
 	start := maxInt(m.sel-maxRows+1, 0)
@@ -230,7 +228,7 @@ func (m *dirModel) View() string {
 		vi := start + n
 		if vi >= len(m.view) {
 			if n == 0 {
-				lines = append(lines, paint(muted.Render("  No matching directories"), surface))
+				lines = append(lines, pickerLine(pickerMuted.Render(" No matching directories"), width))
 			} else {
 				lines = append(lines, blank)
 			}
@@ -238,18 +236,15 @@ func (m *dirModel) View() string {
 		}
 		r := m.rows[m.view[vi]]
 		path := homeRelative(r.path)
-		bg := surface
-		textColor := lipgloss.Color("#DADADD")
-		if vi == m.sel {
-			bg = lipgloss.Color("#343438")
-			textColor = lipgloss.Color("#FFFFFF")
+		content := " " + path
+		if vi != m.sel {
+			content = pickerText.Render(content)
 		}
-		content := lipgloss.NewStyle().Foreground(textColor).Background(bg).Render("  " + path)
-		lines = append(lines, paint(content, bg))
+		lines = append(lines, pickerRow(content, width, vi == m.sel))
 	}
-	lines = append(lines, blank)
-	left := muted.Render("tab ") + search.Render(targetLabel(m.target))
-	right := muted.Render("^W worktrees   ↵ open")
+	lines = append(lines, pickerRule(width))
+	left := pickerText.Render(" Open as "+targetLabel(m.target)) + pickerMuted.Render("  ⇥")
+	right := pickerMuted.Render("^W Worktrees   ↵ Open ")
 	if m.err != "" {
 		right = styErr.Render(m.err)
 	}
@@ -258,7 +253,7 @@ func (m *dirModel) View() string {
 	if gap >= 2 {
 		footer += strings.Repeat(" ", gap) + right
 	}
-	lines = append(lines, paint(footer, surface))
+	lines = append(lines, pickerLine(footer, width))
 	if len(lines) > m.height {
 		lines = lines[:m.height]
 	}

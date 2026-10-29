@@ -9,7 +9,7 @@ A compact directory and worktree picker for [Rex](https://www.superlogical.com/r
 - Type to fuzzy-filter; arrows or Ctrl+J/K navigate.
 - Tab / Shift+Tab cycle the target: session, tab, pane right, pane below, or cd here.
 - Enter opens the selection. Session mode reuses a matching session label or creates one.
-- Ctrl+W on a git repository opens its worktrees.
+- Ctrl+W on a git repository opens its worktrees; returning resumes your directory query, selection, and opening target.
 - Esc clears the query, then closes the picker.
 
 `here` only sends a cd command when the origin pane's foreground process is a shell.
@@ -21,7 +21,9 @@ A compact directory and worktree picker for [Rex](https://www.superlogical.com/r
 - Type to search branches and paths; arrows or Ctrl+J/K navigate.
 - Enter opens an existing worktree as a session.
 - Ctrl+N (or F2) opens the creation form: branch name, local base branch, and a live full destination path preview.
-- Tab switches fields; arrows choose a base branch. Enter creates and opens; Esc cancels.
+- Tab / Shift+Tab move between Branch name, Base branch, and the explicit Create & open button.
+- Enter advances from the branch name, opens the searchable local-base chooser from Base branch, and only submits when Create & open is focused.
+- Esc backs out of the base chooser to the form, or cancels the form without changing the worktree list query/selection.
 - Ctrl+D (or Delete) offers worktree removal with confirmation. The branch is kept; Git refuses uncommitted changes and locked worktrees. The primary worktree cannot be removed.
 - Esc clears the query, then returns to directories.
 

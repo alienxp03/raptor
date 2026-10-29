@@ -92,7 +92,26 @@ func TestWorktreeForm(t *testing.T) {
 			t.Fatal("missing " + s)
 		}
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // command returned, not executed
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || m.busy || m.field != 1 {
+		t.Fatal("Enter on branch must advance, not create")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.baseSelecting {
+		t.Fatal("base chooser did not open")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("mai")})
+	if len(m.baseChoices()) != 1 || m.baseChoices()[0] != "main" {
+		t.Fatal("base chooser filtering failed")
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || m.baseSelecting || m.field != 2 {
+		t.Fatal("selecting a base must focus Create, not submit")
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || !m.busy {
+		t.Fatal("explicit Create action did not submit")
+	}
 	m.busy = false
 	m.Update(wtCreatedMsg{err: os.ErrPermission})
 	if !m.form || m.err == "" {
@@ -111,9 +130,10 @@ func TestWorktreeForm(t *testing.T) {
 		}
 	}
 	m.form = false
+	rowCount := len(m.rows)
 	m.filter = "123"
 	m.applyFilter()
-	if len(m.view) != 0 {
+	if len(m.rows) != rowCount {
 		t.Fatal("numeric filter created ghost")
 	}
 }

@@ -72,7 +72,7 @@ func worktreePath(repo, branch string, cfg Config) string {
 	}
 	return filepath.Join(cfg.WorktreeRoot, name, worktreeFolder(branch))
 }
-func validateWorktree(repo, branch, base, path string) error {
+func validateNewBranch(repo, branch string) error {
 	if branch == "" {
 		return fmt.Errorf("enter a branch name")
 	}
@@ -81,6 +81,13 @@ func validateWorktree(repo, branch, base, path string) error {
 	}
 	if _, err := gitOut(repo, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
 		return fmt.Errorf("branch already exists: %s", branch)
+	}
+	return nil
+}
+
+func validateWorktree(repo, branch, base, path string) error {
+	if err := validateNewBranch(repo, branch); err != nil {
+		return err
 	}
 	if base == "" {
 		return fmt.Errorf("choose a local base branch")

@@ -120,19 +120,30 @@ func (m *repoPickModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *repoPickModel) View() string {
-	var b strings.Builder
-	b.WriteString(styTitle.Render("  pick a repo") + "\n")
-	maxRows := m.height - 4
-	shown := 0
-	for vi := 0; vi < len(m.view) && shown < maxRows; vi, shown = vi+1, shown+1 {
-		r := m.rows[m.view[vi]]
-		prefix, label := "  ", r.label
-		if vi == *m.sel {
-			prefix, label = stySel.Render("> "), stySel.Render(r.label)
-		}
-		b.WriteString(prefix + label + "   " + styDim.Render(homeRelative(r.path)) + "\n")
+	if m.width < 1 || m.height < 1 {
+		return ""
 	}
-	b.WriteString("\n" + styTarget.Render("  /"+*m.filter) + "\n")
-	b.WriteString(styDim.Render("  enter select · esc cancel"))
-	return b.String()
+	width := maxInt(m.width-2, 1)
+	lines := []string{pickerSearch(*m.filter, width), pickerLine(pickerMuted.Render("Choose repository"), width)}
+	count := maxInt(m.height-4, 0)
+	start := maxInt(*m.sel-count+1, 0)
+	for n := 0; n < count; n++ {
+		i := start + n
+		if i >= len(m.view) {
+			content := ""
+			if n == 0 {
+				content = pickerMuted.Render("No matching repositories")
+			}
+			lines = append(lines, pickerLine(content, width))
+			continue
+		}
+		r := m.rows[m.view[i]]
+		content := " " + homeRelative(r.path)
+		if i != *m.sel {
+			content = pickerText.Render(content)
+		}
+		lines = append(lines, pickerRow(content, width, i == *m.sel))
+	}
+	lines = append(lines, pickerRule(width), pickerLine(pickerMuted.Render("↵ Choose repository   esc Back"), width))
+	return strings.Join(lines, "\n")
 }

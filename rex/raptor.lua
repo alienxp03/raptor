@@ -12,7 +12,8 @@ local cfg = {
   wt_key   = "shift+ctrl+w",
 
   -- popup rectangle, as fractions of the current window (x, y, w, h)
-  bounds = { x = 0.25, y = 0.20, w = 0.50, h = 0.60 },
+  bounds = { x = 0.25, y = 0.10, w = 0.50, h = 0.28 },
+  mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },
 
   -- the Go binary (github.com/alienxp03/raptor)
   bin = os.getenv("HOME") .. "/.local/bin/raptor",
@@ -46,9 +47,21 @@ local function open_layer(ctx, args)
     if d ~= nil and d.block ~= nil then win_id = d.block.window_id end
   end
 
+  local bounds = cfg.bounds
+  if ctx.client_id ~= nil then
+    local clients = rex.call("client.list")
+    for _, client in ipairs(clients and clients.clients or {}) do
+      if client.client_id == ctx.client_id and client.info ~= nil then
+        local platform = client.info.platform
+        if platform == "ios" or platform == "ipados" then bounds = cfg.mobile_bounds end
+        break
+      end
+    end
+  end
+
   local layer, err = rex.session.new_layer{
     window_id = win_id,
-    bounds = { cfg.bounds.x, cfg.bounds.y, cfg.bounds.w, cfg.bounds.h },
+    bounds = { bounds.x, bounds.y, bounds.w, bounds.h },
     focus  = true,
     layout = rex.layout.block{
       flavor   = "com.superlogical.terminal.shell",
