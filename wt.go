@@ -251,8 +251,10 @@ func (m *repoPickModel) View() string {
 }
 
 func (m *wtModel) Init() tea.Cmd {
-	repo := m.repo
-	return func() tea.Msg { return ghLoadedMsg{items: ghIssues(repo)} }
+	return tea.Batch(tea.SetWindowTitle("zpick · worktrees"), func() tea.Msg {
+		repo := m.repo
+		return ghLoadedMsg{items: ghIssues(repo)}
+	})
 }
 
 func (m *wtModel) applyFilter() {

@@ -1,6 +1,6 @@
 -- zpick — sesh-style zoxide + worktree picker for Rex (Go + Bubble Tea).
 --
---   shift+ctrl+n     dir picker (zoxide + sessions; tab cycles target,
+--   shift+cmd+p     dir picker (zoxide + sessions; tab cycles target,
 --                    w on a git repo opens the worktree flow)
 --   shift+ctrl+w     worktree picker for the current repo
 --   palette          "Zoxide Picker", "Zoxide Worktrees", "Zoxide: Last Session"
@@ -8,11 +8,11 @@
 -- Head-less: rex do zpick target=tab dir=~/some/project
 
 local cfg = {
-  open_key = "shift+ctrl+n",
+  open_key = "shift+cmd+p",
   wt_key   = "shift+ctrl+w",
 
   -- popup rectangle, as fractions of the current window (x, y, w, h)
-  bounds = { x = 0.10, y = 0.10, w = 0.80, h = 0.80 },
+  bounds = { x = 0.25, y = 0.20, w = 0.50, h = 0.60 },
 
   -- the Go binary (github.com/alienxp03/zpick)
   bin = os.getenv("HOME") .. "/.local/bin/zpick",
@@ -61,6 +61,7 @@ local function open_layer(ctx, args)
   if layer == nil then error(err, 0) end
 
   if layer.block_ids ~= nil and layer.block_ids[1] ~= nil then
+    rex.session.set_block_label{ block_id = layer.block_ids[1], label = "zpick" }
     rex.session.focus_block{ block_id = layer.block_ids[1] }
   end
   if ctx.client_id ~= nil and win_id ~= nil then

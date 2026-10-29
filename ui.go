@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -34,18 +33,16 @@ type row struct {
 }
 
 type dirModel struct {
-	cfg     Config
-	ctx     Ctx
-	rows    []row // full set
-	view    []int // indices into rows after filtering
-	filter  string
-	sel     int
-	target  string
-	err     string
-	preview string // preview text for current selection
-	prevFor string // path the preview belongs to
-	width   int
-	height  int
+	cfg    Config
+	ctx    Ctx
+	rows   []row // full set
+	view   []int // indices into rows after filtering
+	filter string
+	sel    int
+	target string
+	err    string
+	width  int
+	height int
 	// result of the interaction, read after the program exits
 	picked   *row   // non-nil when a dir/session was chosen
 	next     string // "wt" when bridging with a repo path in nextRepo
@@ -108,7 +105,7 @@ func runDirs(ctx Ctx, cfg Config) int {
 	return 0
 }
 
-func (m *dirModel) Init() tea.Cmd { return nil }
+func (m *dirModel) Init() tea.Cmd { return tea.SetWindowTitle("zpick") }
 func (m *dirModel) applyFilter() {
 	m.view = m.view[:0]
 	if m.filter == "" {
@@ -151,11 +148,6 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		return m, m.fetchPreview()
-	case previewMsg:
-		if msg.For == m.prevFor {
-			m.preview = msg.text
-		}
 		return m, nil
 	case tea.KeyMsg:
 		m.err = ""
@@ -166,7 +158,7 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.filter != "" {
 				m.filter = ""
 				m.applyFilter()
-				return m, m.fetchPreview()
+				return m, nil
 			}
 			return m, tea.Quit
 		case "backspace":
@@ -174,22 +166,22 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				r := []rune(m.filter)
 				m.filter = string(r[:len(r)-1])
 				m.applyFilter()
-				return m, m.fetchPreview()
+				return m, nil
 			}
 		case "ctrl+u":
 			m.filter = ""
 			m.applyFilter()
-			return m, m.fetchPreview()
+			return m, nil
 		case "up", "ctrl+k":
 			if m.sel > 0 {
 				m.sel--
 			}
-			return m, m.fetchPreview()
+			return m, nil
 		case "down", "ctrl+j":
 			if m.sel < len(m.view)-1 {
 				m.sel++
 			}
-			return m, m.fetchPreview()
+			return m, nil
 		case "tab", "shift+tab":
 			m.target = nextTarget(m.cfg, m.target, msg.String() == "tab")
 			return m, nil
@@ -214,66 +206,22 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 				m.filter += string(msg.Runes)
 				m.applyFilter()
-				return m, m.fetchPreview()
+				return m, nil
 			}
 		}
 	}
 	return m, nil
 }
 
-// fetchPreview loads the right pane for the selection (eza tree, branch).
-func (m *dirModel) fetchPreview() tea.Cmd {
-	r := m.selected()
-	if r == nil {
-		m.preview, m.prevFor = "", ""
-		return nil
-	}
-	path := r.path
-	if path == "" {
-		path = "~"
-	}
-	if path == m.prevFor {
-		return nil
-	}
-	m.prevFor = path
-	return func() tea.Msg {
-		text := ""
-		if out, err := runCmd("", 3*time.Second, "eza", "--tree", "--level=2",
-			"--icons=auto", "--color=always", "--git", path); err == nil && out.Stdout != "" {
-			text = out.Stdout
-		} else if out, err := runCmd("", 3*time.Second, "ls", "-la", path); err == nil {
-			text = out.Stdout
-		}
-		if branch, err := gitOut(path, "branch", "--show-current"); err == nil && branch != "" {
-			st, _ := gitOut(path, "status", "--porcelain")
-			dirty := ""
-			if strings.TrimSpace(st) != "" {
-				dirty = styDirty.Render(" ●")
-			}
-			text = styBranch.Render(branch) + dirty + "\n" + text
-		}
-		lines := strings.Split(text, "\n")
-		if len(lines) > 30 {
-			lines = lines[:30]
-		}
-		return previewMsg{For: path, text: strings.Join(lines, "\n")}
-	}
-}
-
 func (m *dirModel) View() string {
 	var b strings.Builder
-	b.WriteString(styTitle.Render("  zpick") + styDim.Render("   dirs & sessions") + "\n")
+	b.WriteString(styTitle.Render("  /") + m.filter + "\n")
 
-	listW := m.width
-	previewW := 0
-	if m.width > 100 {
-		previewW = m.width * 2 / 5
-		listW = m.width - previewW - 3
+	maxRows := m.height - 3
+	if maxRows < 1 {
+		maxRows = 1
 	}
-
-	// rows
 	var lines []string
-	maxRows := m.height - 4
 	start := 0
 	if m.sel >= maxRows {
 		start = m.sel - maxRows + 1
@@ -287,52 +235,25 @@ func (m *dirModel) View() string {
 			prefix = stySel.Render("> ")
 			label = stySel.Render(label)
 		}
-		switch r.kind {
-		case "session":
+		if r.kind == "session" {
 			label = stySession.Render("● ") + label
 		}
 		right := ""
-		if r.kind == "dir" && len(label)+len(homeRelative(r.path)) < listW {
-			pad := listW - lipgloss.Width(label) - lipgloss.Width(homeRelative(r.path)) - 4
-			if pad < 1 {
-				pad = 1
-			}
-			right = strings.Repeat(" ", pad) + styDim.Render(homeRelative(r.path))
+		if r.kind == "dir" {
+			right = "   " + styDim.Render(homeRelative(r.path))
 		}
 		line := prefix + label + right
-		if w := lipgloss.Width(line); w > listW {
-			line = truncateW(line, listW)
+		if w := lipgloss.Width(line); w > m.width {
+			line = truncateW(line, m.width)
 		}
 		lines = append(lines, line)
 	}
 	for len(lines) < maxRows {
 		lines = append(lines, "")
 	}
+	b.WriteString(strings.Join(lines, "\n"))
 
-	body := strings.Join(lines, "\n")
-	if previewW > 0 {
-		pv := m.preview
-		if pv == "" {
-			pv = styDim.Render("(no preview)")
-		}
-		pvLines := strings.Split(pv, "\n")
-		listLines := strings.Split(body, "\n")
-		for i := range listLines {
-			pl := ""
-			if i < len(pvLines) {
-				pl = truncateW(pvLines[i], previewW)
-			}
-			sep := styPreviewB.Render(" │ ")
-			listLines[i] = padRight(listLines[i], listW) + sep + pl
-		}
-		body = strings.Join(listLines, "\n")
-	}
-	b.WriteString(body)
-
-	// footer: filter + target bar + hints
-	filterLine := "  /" + m.filter
-	b.WriteString("\n" + styTarget.Render(filterLine) + "\n")
-	hints := "  " + headerTargets(m.cfg, m.target)
+	hints := "\n  " + headerTargets(m.cfg, m.target)
 	hints += styDim.Render("   tab⇄ target · w worktrees · enter open · esc quit")
 	if m.err != "" {
 		hints += "   " + styErr.Render(m.err)
