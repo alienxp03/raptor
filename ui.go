@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sahilm/fuzzy"
@@ -206,53 +208,81 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *dirModel) View() string {
-	var b strings.Builder
-	b.WriteString(m.searchBox() + "\n")
+	if m.width < 1 || m.height < 1 {
+		return ""
+	}
+	width := maxInt(m.width-4, 1)
+	surface := lipgloss.Color("#1C1C1E")
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#88888F")).Background(surface)
+	paint := func(content string, bg lipgloss.Color) string {
+		content = padRight(ansi.Truncate(content, width, "…"), width)
+		return lipgloss.NewStyle().Background(surface).Render("  ") +
+			lipgloss.NewStyle().Background(bg).Render(content) +
+			lipgloss.NewStyle().Background(surface).Render("  ")
+	}
+	blank := paint("", surface)
+	search := lipgloss.NewStyle().Foreground(lipgloss.Color("#F2F2F4")).Background(surface)
+	lines := []string{paint(search.Render("⌕  "+m.filter+"│"), surface), blank}
 
-	maxRows := m.height - 6
-	if maxRows < 1 {
-		maxRows = 1
-	}
-	var lines []string
-	start := 0
-	if m.sel >= maxRows {
-		start = m.sel - maxRows + 1
-	}
-	shown := 0
-	for vi := start; vi < len(m.view) && shown < maxRows; vi, shown = vi+1, shown+1 {
+	maxRows := maxInt(m.height-4, 0)
+	start := maxInt(m.sel-maxRows+1, 0)
+	for n := 0; n < maxRows; n++ {
+		vi := start + n
+		if vi >= len(m.view) {
+			if n == 0 {
+				lines = append(lines, paint(muted.Render("  No matching directories"), surface))
+			} else {
+				lines = append(lines, blank)
+			}
+			continue
+		}
 		r := m.rows[m.view[vi]]
-		prefix := "  "
-		var text string
-		if r.kind == "session" {
-			text = stySession.Render("● ") + r.label
-		} else {
-			text = homeRelative(r.path)
-		}
+		path := homeRelative(r.path)
+		bg := surface
+		textColor := lipgloss.Color("#DADADD")
 		if vi == m.sel {
-			prefix = stySel.Render("> ")
-			text = stySel.Render(text)
+			bg = lipgloss.Color("#343438")
+			textColor = lipgloss.Color("#FFFFFF")
 		}
-		line := prefix + text
-		if w := lipgloss.Width(line); w > m.width {
-			line = truncateW(line, m.width)
-		}
-		lines = append(lines, line)
+		content := lipgloss.NewStyle().Foreground(textColor).Background(bg).Render("  " + path)
+		lines = append(lines, paint(content, bg))
 	}
-	for len(lines) < maxRows {
-		lines = append(lines, "")
-	}
-	b.WriteString(strings.Join(lines, "\n"))
-
-	// footer pinned at the bottom, set off by a rule
-	rule := styDim.Render(strings.Repeat("─", maxInt(m.width-2, 3)))
-	b.WriteString("\n" + rule + "\n")
-	hints := "  " + headerTargets(m.cfg, m.target)
-	hints += styDim.Render("   tab⇄ · w worktrees · ⏎ open · esc")
+	lines = append(lines, blank)
+	left := muted.Render("tab ") + search.Render(targetLabel(m.target))
+	right := muted.Render("w worktrees   ↵ open")
 	if m.err != "" {
-		hints += "   " + styErr.Render(m.err)
+		right = styErr.Render(m.err)
 	}
-	b.WriteString(hints)
-	return b.String()
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	footer := left
+	if gap >= 2 {
+		footer += strings.Repeat(" ", gap) + right
+	}
+	lines = append(lines, paint(footer, surface))
+	if len(lines) > m.height {
+		lines = lines[:m.height]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderTargets(cfg Config, active string) string {
+	parts := []string{"  " + styDim.Render("OPEN AS")}
+	for _, target := range cfg.Targets {
+		label := strings.ToUpper(targetLabel(target))
+		if target == "pane" {
+			label = "PANE →"
+		} else if target == "pane_below" {
+			label = "PANE ↓"
+		} else if target == "here" {
+			label = "HERE"
+		}
+		if target == active {
+			parts = append(parts, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")).Render("["+label+"]"))
+		} else {
+			parts = append(parts, styDim.Render(" "+label+" "))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func maxInt(a, b int) int {
@@ -262,30 +292,13 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// searchBox renders the rounded input box with a block cursor.
-func (m *dirModel) searchBox() string {
-	inner := 20
-	if w := m.width - 6; w > inner {
-		inner = w
+// searchBox renders the palette's search row, inside the outer frame.
+func (m *dirModel) searchBox(width int) string {
+	content := "⌕  " + m.filter + styTarget.Render("│")
+	if lipgloss.Width(content) > width {
+		content = truncateW(content, width)
 	}
-	text := m.filter
-	placeholder := "type to search…"
-	var content string
-	if text == "" {
-		content = styDim.Render(placeholder)
-	} else {
-		content = text + stySel.Render("│")
-	}
-	if len([]rune(text)) > inner-2 {
-		r := []rune(text)
-		content = string(r[len(r)-inner+3:]) + stySel.Render("│")
-	}
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("8")).
-		Padding(0, 1).
-		Width(inner)
-	return box.Render("❯ " + content)
+	return padRight(content, width)
 }
 
 func padRight(s string, w int) string {
@@ -299,14 +312,5 @@ func truncateW(s string, w int) string {
 	if lipgloss.Width(s) <= w {
 		return s
 	}
-	// naive visible-char truncate preserving ansi-ish by runes
-	r := []rune(s)
-	out := ""
-	for _, c := range r {
-		if lipgloss.Width(out)+1 > w-1 {
-			break
-		}
-		out += string(c)
-	}
-	return out + "…"
+	return ansi.Truncate(s, maxInt(w, 0), "…")
 }
