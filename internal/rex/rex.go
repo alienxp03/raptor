@@ -187,3 +187,22 @@ func WriteLast(sid string) {
 }
 
 func SwapLast(current string) { WriteLast(current) }
+
+// SelectLast switches the Rex client to the saved session, then remembers the
+// current session so the action toggles on its next use.
+func SelectLast(ctx Ctx) (string, error) {
+	if ctx.Client == "" {
+		return "", fmt.Errorf("no client context")
+	}
+	sid, err := LastSession()
+	if err != nil {
+		return "", err
+	}
+	if sid == ctx.Session {
+		return "", fmt.Errorf("the previous session is already selected; switch sessions with Raptor first")
+	}
+	if err := SelectSession(ctx, sid); err != nil {
+		return "", err
+	}
+	return sid, nil
+}

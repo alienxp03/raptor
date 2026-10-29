@@ -9,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/paths"
@@ -61,7 +61,7 @@ func RunWorktrees(ctx rex.Ctx, cfg config.Config, repo string) int {
 
 func runWorktreeFlow(ctx rex.Ctx, cfg config.Config, repo string, fromDirectories bool) int {
 	if repo == "" {
-		repo = worktreepkg.RepoRoot(rex.BlockCwd(ctx.Block))
+		repo, _ = catalog.ResolveRepo(ctx, repo)
 	}
 	if repo == "" || !worktreepkg.IsGitRepo(repo) {
 		repo = pickRepo(ctx, cfg)
@@ -91,37 +91,16 @@ func runWorktreeFlow(ctx rex.Ctx, cfg config.Config, repo string, fromDirectorie
 	return 0
 }
 func newWtModel(ctx rex.Ctx, cfg config.Config, repo string) *wtModel {
-	m := &wtModel{ctx: ctx, cfg: cfg, repo: repo, branches: worktreepkg.LocalBranches(repo), errField: -1, target: cfg.Enter}
-	m.rows = worktreepkg.List(repo)
-	primary := repo
-	if len(m.rows) > 0 {
-		primary = m.rows[0].Path
-	}
-	m.root = filepath.Join(cfg.WorktreeRoot, worktreepkg.RepoFolder(paths.Basename(primary)))
-	m.base, _ = worktreepkg.GitOut(repo, "branch", "--show-current")
-	if m.base == "" && len(m.branches) > 0 {
-		m.base = m.branches[0]
-	}
+	info := catalog.ListWorktrees(repo, cfg)
+	m := &wtModel{ctx: ctx, cfg: cfg, repo: repo, branches: info.Branches, rows: info.Items,
+		root: info.Root, base: info.BaseBranch, errField: -1, target: cfg.Enter}
 	m.applyFilter()
 	return m
 }
 func (m *wtModel) Init() tea.Cmd       { return m.ctx.TitleCommand() }
 func (m *wtModel) destination() string { return filepath.Join(m.root, worktreepkg.Folder(m.branch)) }
 func (m *wtModel) applyFilter() {
-	m.view = nil
-	if m.filter == "" {
-		for i := range m.rows {
-			m.view = append(m.view, i)
-		}
-	} else {
-		entries := make([]string, len(m.rows))
-		for i, r := range m.rows {
-			entries[i] = r.Branch + " " + paths.HomeRelative(r.Path)
-		}
-		for _, match := range fuzzy.Find(m.filter, entries) {
-			m.view = append(m.view, match.Index)
-		}
-	}
+	m.view = catalog.FilterWorktrees(m.rows, m.filter)
 	if m.sel >= len(m.view) {
 		m.sel = len(m.view) - 1
 	}
@@ -154,14 +133,7 @@ func editQuery(value *string, msg tea.KeyMsg) bool {
 }
 
 func (m *wtModel) baseChoices() []string {
-	if m.baseQuery == "" {
-		return m.branches
-	}
-	var result []string
-	for _, match := range fuzzy.Find(m.baseQuery, m.branches) {
-		result = append(result, m.branches[match.Index])
-	}
-	return result
+	return catalog.FilterBranches(m.branches, m.baseQuery)
 }
 
 func (m *wtModel) openBaseChooser() {

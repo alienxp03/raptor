@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/paths"
@@ -14,6 +15,9 @@ import (
 func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 	switch target {
 	case "session":
+		if ctx.Client == "" {
+			return fmt.Errorf("no client context")
+		}
 		name := paths.Basename(dir)
 		sid, ok := rex.SessionByLabel(name)
 		if !ok {
@@ -29,13 +33,7 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 			}
 			sid = res.SessionID
 		}
-		if ctx.Session != "" && ctx.Session != sid {
-			rex.WriteLast(ctx.Session)
-		}
-		if ctx.Client != "" {
-			_ = rex.Do(ctx.Client, "session.select", "session_id="+sid)
-		}
-		return nil
+		return rex.SelectSession(ctx, sid)
 
 	case "tab":
 		if ctx.Session == "" {
@@ -48,14 +46,17 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 		var res struct {
 			WindowID string `json:"window_id"`
 		}
-		_ = json.Unmarshal([]byte(out), &res)
-		if res.WindowID != "" {
-			if ctx.Client != "" {
-				_ = rex.Do(ctx.Client, "session.select", "session_id="+ctx.Session, "window_id="+res.WindowID)
-			} else {
-				rex.RunQuiet("focus", "-s", ctx.Session, res.WindowID)
-			}
+		if json.Unmarshal([]byte(out), &res) != nil || res.WindowID == "" {
+			return fmt.Errorf("could not identify the new tab")
 		}
+		if ctx.Client != "" {
+			if err := rex.Do(ctx.Client, "session.select", "session_id="+ctx.Session, "window_id="+res.WindowID); err != nil {
+				return err
+			}
+		} else if _, err := rex.Run("focus", "-s", ctx.Session, res.WindowID); err != nil {
+			return err
+		}
+		rex.WriteLastPane(ctx)
 		return nil
 
 	case "pane", "pane_left", "pane_above", "pane_below":
@@ -70,20 +71,48 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 		var res struct {
 			BlockIDs []string `json:"block_ids"`
 		}
-		_ = json.Unmarshal([]byte(out), &res)
-		if len(res.BlockIDs) > 0 {
-			rex.RunQuiet("focus", "-s", ctx.Session, "-b", res.BlockIDs[0])
+		if json.Unmarshal([]byte(out), &res) != nil || len(res.BlockIDs) == 0 {
+			return fmt.Errorf("could not identify the new pane")
 		}
+		if _, err := rex.Run("focus", "-s", ctx.Session, res.BlockIDs[0]); err != nil {
+			return err
+		}
+		if ctx.Client != "" {
+			// Server focus alone does not select the pane's window on the
+			// requesting app, particularly while the native picker has focus.
+			args, _ := json.Marshal(map[string]string{"block_id": res.BlockIDs[0]})
+			out, err := rex.Run("api", "call", "-s", ctx.Session, "session.describe_block", string(args))
+			if err != nil {
+				return err
+			}
+			var placement struct {
+				Block struct {
+					WindowID string `json:"window_id"`
+				} `json:"block"`
+			}
+			if json.Unmarshal([]byte(out), &placement) != nil || placement.Block.WindowID == "" {
+				return fmt.Errorf("could not identify the new pane's window")
+			}
+			if err := rex.Do(ctx.Client, "session.select", "session_id="+ctx.Session, "window_id="+placement.Block.WindowID); err != nil {
+				return err
+			}
+		}
+		rex.WriteLastPane(ctx)
 		return nil
 
 	case "here":
 		if ctx.Block == "" {
 			return fmt.Errorf("no block context")
 		}
-		switch rex.BlockForeground(ctx.Block) {
+		shell := rex.BlockForeground(ctx.Block)
+		switch shell {
 		case "zsh", "bash", "sh", "dash", "ksh", "fish", "nu", "elvish":
-			_, _ = rex.Run("send", "-b", ctx.Block, "cd '"+dir+"'\n")
-			return nil
+			command, err := shellCD(shell, dir)
+			if err != nil {
+				return err
+			}
+			_, err = rex.Run("send", "-b", ctx.Block, command)
+			return err
 		default:
 			return fmt.Errorf("pane is not at a shell prompt")
 		}
@@ -91,6 +120,25 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 	default:
 		return fmt.Errorf("unknown target %q", target)
 	}
+}
+
+// shellCD quotes paths as data, never as executable shell input.
+func shellCD(shell, dir string) (string, error) {
+	if strings.IndexFunc(dir, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("directory contains terminal control characters")
+	}
+	if shell == "nu" || shell == "elvish" {
+		// These shells do not use POSIX quote concatenation. Keep their existing
+		// simple-path support, but do not guess an escaping syntax.
+		if strings.Contains(dir, "'") {
+			return "", fmt.Errorf("directory contains quotes unsupported by cd here in %s; use a new tab", shell)
+		}
+		if strings.HasPrefix(dir, "-") {
+			dir = "./" + dir
+		}
+		return "cd '" + dir + "'\n", nil
+	}
+	return "cd -- '" + strings.ReplaceAll(dir, "'", "'\\''") + "'\n", nil
 }
 
 func TargetLabel(t string) string {

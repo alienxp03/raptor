@@ -1,32 +1,21 @@
 package picker
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbletea"
-	"github.com/sahilm/fuzzy"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
-	"github.com/alienxp03/raptor/internal/paths"
 	"github.com/alienxp03/raptor/internal/rex"
-	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
 
 // pickRepo asks for a repo when none is in context: git dirs from zoxide.
 func pickRepo(ctx rex.Ctx, cfg config.Config) string {
 	var rows []rrow
-	seen := map[string]bool{}
-	for _, d := range rex.ZoxideList() {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err != nil {
-			continue
-		}
-		r := worktreepkg.RepoRoot(d)
-		if r != "" && !seen[r] {
-			seen[r] = true
-			rows = append(rows, rrow{label: paths.Basename(r), path: r})
-		}
+	items := catalog.Directories(true)
+	for _, item := range items {
+		rows = append(rows, rrow{label: item.Label, path: item.Path})
 	}
 	if len(rows) == 0 {
 		return ""
@@ -38,20 +27,7 @@ func pickRepo(ctx rex.Ctx, cfg config.Config) string {
 		view[i] = i
 	}
 	apply := func() []int {
-		view = view[:0]
-		if filter == "" {
-			for i := range rows {
-				view = append(view, i)
-			}
-		} else {
-			hs := make([]string, len(rows))
-			for i, r := range rows {
-				hs[i] = r.label + " " + paths.HomeRelative(r.path)
-			}
-			for _, mt := range fuzzy.Find(filter, hs) {
-				view = append(view, mt.Index)
-			}
-		}
+		view = catalog.FilterDirectories(items, filter)
 		if sel >= len(view) {
 			sel = len(view) - 1
 		}

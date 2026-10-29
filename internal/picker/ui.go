@@ -9,11 +9,10 @@ import (
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sahilm/fuzzy"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
-	"github.com/alienxp03/raptor/internal/paths"
 	"github.com/alienxp03/raptor/internal/rex"
 	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
@@ -34,10 +33,9 @@ var (
 
 // row is one list entry in the dir picker.
 type row struct {
-	kind      string // "session" | "dir"
-	label     string // paths.Basename
-	path      string // full path (for sessions: best-effort cwd)
-	sessionID string // set for sessions
+	kind  string // "dir"
+	label string // paths.Basename
+	path  string // full directory path
 }
 
 type dirModel struct {
@@ -53,7 +51,7 @@ type dirModel struct {
 	width     int
 	height    int
 	// result of the interaction, read after the program exits
-	picked   *row   // non-nil when a dir/session was chosen
+	picked   *row   // non-nil when a directory was chosen
 	next     string // "wt" when bridging with a repo path in nextRepo
 	nextRepo string
 }
@@ -65,8 +63,8 @@ type previewMsg struct {
 
 func loadDirRows(ctx rex.Ctx) []row {
 	var rows []row
-	for _, d := range rex.ZoxideList() {
-		rows = append(rows, row{kind: "dir", label: paths.Basename(d), path: d})
+	for _, d := range catalog.Directories(false) {
+		rows = append(rows, row{kind: "dir", label: d.Label, path: d.Path})
 	}
 	return rows
 }
@@ -97,15 +95,6 @@ func RunDirs(ctx rex.Ctx, cfg config.Config) int {
 		return 0
 	}
 	r := dm.picked
-	if r.kind == "session" {
-		if ctx.Session != "" && ctx.Session != r.sessionID {
-			rex.WriteLast(ctx.Session)
-		}
-		if ctx.Client != "" {
-			_ = rex.Do(ctx.Client, "session.select", "session_id="+r.sessionID)
-		}
-		return 0
-	}
 	if err := dispatch.Dispatch(dm.target, r.path, ctx, cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -115,22 +104,11 @@ func RunDirs(ctx rex.Ctx, cfg config.Config) int {
 
 func (m *dirModel) Init() tea.Cmd { return m.ctx.TitleCommand() }
 func (m *dirModel) applyFilter() {
-	m.view = m.view[:0]
-	if m.filter == "" {
-		for i := range m.rows {
-			m.view = append(m.view, i)
-		}
-		return
-	}
-	type cand struct{ idx, score int }
-	haystack := make([]string, len(m.rows))
+	items := make([]catalog.Directory, len(m.rows))
 	for i, r := range m.rows {
-		haystack[i] = r.label + " " + paths.HomeRelative(r.path)
+		items[i] = catalog.Directory{Label: r.label, Path: r.path}
 	}
-	matches := fuzzy.Find(m.filter, haystack)
-	for _, mt := range matches {
-		m.view = append(m.view, mt.Index)
-	}
+	m.view = catalog.FilterDirectories(items, m.filter)
 	if m.sel >= len(m.view) {
 		m.sel = len(m.view) - 1
 	}

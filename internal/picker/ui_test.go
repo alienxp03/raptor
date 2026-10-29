@@ -1,8 +1,12 @@
 package picker
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alienxp03/raptor/internal/rex"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -10,6 +14,37 @@ import (
 
 	"github.com/alienxp03/raptor/internal/config"
 )
+
+func TestDirectoryPickerLoadsPathsOnly(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	if err := os.WriteFile(filepath.Join(dir, "zoxide"), []byte("#!/bin/sh\nprintf '%s\\n' /demo/example /demo/tools\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rows := loadDirRows(rex.Ctx{})
+	if len(rows) != 2 {
+		t.Fatalf("got %d directories, want 2", len(rows))
+	}
+	m := &dirModel{rows: rows, cfg: config.Default(), target: "tab", width: 60, height: 10}
+	m.applyFilter()
+	for _, r := range rows {
+		if r.kind != "dir" {
+			t.Fatalf("unexpected row: %+v", r)
+		}
+	}
+	if m.Init() != nil {
+		t.Fatal("directory picker must not start session retrieval")
+	}
+	plain := ansi.Strip(m.View())
+	for _, icon := range []string{"📁", "◉", "▣", "├─", "└─"} {
+		if strings.Contains(plain, icon) {
+			t.Fatalf("unexpected launcher icon %q", icon)
+		}
+	}
+	if !strings.Contains(plain, "dir ❯") || !strings.Contains(plain, "/demo/example") || !strings.Contains(plain, "/demo/tools") {
+		t.Fatal("original directory layout not restored")
+	}
+}
 
 func TestSearchDoesNotConsumeLetters(t *testing.T) {
 	m := &dirModel{cfg: config.Default()}
@@ -51,7 +86,7 @@ func TestDirectoryRowLayout(t *testing.T) {
 
 func TestCompactPalette(t *testing.T) {
 	for _, size := range [][2]int{{80, 20}, {52, 16}, {40, 12}, {24, 8}, {18, 5}} {
-		m := &dirModel{width: size[0], height: size[1], cfg: config.Default(), target: "session", rows: []row{{kind: "dir", path: "/tmp/romhandbook", label: "romhandbook"}}, view: []int{0}}
+		m := &dirModel{width: size[0], height: size[1], cfg: config.Default(), target: "session", rows: []row{{kind: "dir", path: "/tmp/demo", label: "demo"}}, view: []int{0}}
 		output := m.View()
 		lines := strings.Split(output, "\n")
 		if len(lines) != m.height {
@@ -66,10 +101,10 @@ func TestCompactPalette(t *testing.T) {
 		if !strings.Contains(plain, "│") {
 			t.Fatal("missing empty cursor")
 		}
-		if !strings.Contains(ansi.Strip(lines[2]), "romhandbook") {
+		if !strings.Contains(ansi.Strip(lines[2]), "demo") {
 			t.Fatal("missing directory name in result row")
 		}
-		if strings.Count(plain, "romhandbook") != 1 || strings.Contains(plain, "1/1") {
+		if strings.Count(plain, "demo") != 1 || strings.Contains(plain, "1/1") {
 			t.Fatal("unexpected selected-path or result-count footer")
 		}
 		if !strings.Contains(plain, "Open as: session") {

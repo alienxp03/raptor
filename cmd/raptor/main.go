@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alienxp03/raptor/internal/api"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/picker"
@@ -25,7 +26,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [dirs|wt|direct|last] [flags] [-- extra flags per command]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|wt|api|direct|last-session|last-pane> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -40,6 +41,11 @@ func main() {
 	ctx := rex.NewContext(session, block, client, title)
 
 	switch fs.Args()[0] {
+	case "api":
+		if err := api.New(ctx, cfg).Serve(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "dirs":
 		os.Exit(picker.RunDirs(ctx, cfg))
 	case "wt":
@@ -58,17 +64,20 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-	case "last":
-		sid, err := rex.LastSession()
+	case "last", "last-session":
+		sid, err := rex.SelectLast(ctx)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		rex.SwapLast(ctx.Session)
-		if ctx.Client != "" {
-			_ = rex.Do(ctx.Client, "session.select", "session_id="+sid)
-		}
 		fmt.Println(sid)
+	case "last-pane":
+		pane, err := rex.SelectLastPane(ctx)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(pane.Block)
 	case "version":
 		fmt.Println(version)
 	default:
