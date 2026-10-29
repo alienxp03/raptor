@@ -1,0 +1,29 @@
+# Template only. No release is published by these scripts.
+# Replace all @...@ fields after uploading the exact ZIP yourself.
+# ARCH: arm64, x86_64, or universal. SHA256: checksum of that exact ZIP.
+# RELEASE_BASE_URL example shape: https://HOST/OWNER/REPO/releases/download
+cask "raptor" do
+  version "@VERSION@"
+  sha256 "@SHA256@"
+
+  url "@RELEASE_BASE_URL@/v#{version}/Raptor-#{version}-@ARCH@.zip"
+  name "Raptor"
+  desc "Local Rex command palette"
+  homepage "https://github.com/alienxp03/raptor"
+
+  depends_on macos: ">= :sonoma"
+  # For a single-architecture ZIP, uncomment the matching constraint:
+  # depends_on arch: :arm64
+  # depends_on arch: :x86_64
+
+  app "Raptor.app"
+  binary "#{appdir}/Raptor.app/Contents/MacOS/raptor-cli", target: "raptor"
+
+  caveats <<~EOS
+    Rex plugin source: #{appdir}/Raptor.app/Contents/Resources/rex/init.lua
+    Copy it manually only if no checkout symlink or custom plugin exists.
+    Rex init.lua and key bindings are not changed by this cask.
+    Set require("raptor").setup{bin = "/absolute/path/to/raptor"}
+    if the CLI is not in ~/.local/bin.
+  EOS
+end
