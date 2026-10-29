@@ -124,7 +124,7 @@ func (m *repoPickModel) View() string {
 		return ""
 	}
 	width := maxInt(m.width-2, 1)
-	lines := []string{pickerSearch(*m.filter, width), pickerLine(pickerMuted.Render("Choose repository"), width)}
+	lines := []string{pickerSearch(*m.filter, width, "repository"), pickerLine(pickerMuted.Render("Choose repository"), width)}
 	count := maxInt(m.height-4, 0)
 	start := maxInt(*m.sel-count+1, 0)
 	for n := 0; n < count; n++ {
@@ -138,11 +138,7 @@ func (m *repoPickModel) View() string {
 			continue
 		}
 		r := m.rows[m.view[i]]
-		content := " " + homeRelative(r.path)
-		if i != *m.sel {
-			content = pickerText.Render(content)
-		}
-		lines = append(lines, pickerRow(content, width, i == *m.sel))
+		lines = append(lines, pickerDirectory(r.path, width, i == *m.sel))
 	}
 	lines = append(lines, pickerRule(width), pickerLine(pickerMuted.Render("↵ Choose repository   esc Back"), width))
 	return strings.Join(lines, "\n")

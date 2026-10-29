@@ -29,8 +29,26 @@ func TestSearchDoesNotConsumeLetters(t *testing.T) {
 	}
 }
 
+func TestDirectoryRowLayout(t *testing.T) {
+	for _, width := range []int{22, 38, 78} {
+		for _, selected := range []bool{false, true} {
+			line := pickerDirectory("/workspace/demo", width, selected)
+			plain := ansi.Strip(line)
+			if lipgloss.Width(line) != width+2 {
+				t.Fatalf("row width = %d, want %d", lipgloss.Width(line), width+2)
+			}
+			if strings.Count(plain, "demo") != 1 {
+				t.Fatalf("project label missing or repeated: %q", plain)
+			}
+			if !strings.Contains(plain, "/workspace/demo") {
+				t.Fatalf("path split into columns: %q", plain)
+			}
+		}
+	}
+}
+
 func TestCompactPalette(t *testing.T) {
-	for _, size := range [][2]int{{80, 20}, {40, 12}, {24, 8}} {
+	for _, size := range [][2]int{{80, 20}, {52, 16}, {40, 12}, {24, 8}, {18, 5}} {
 		m := &dirModel{width: size[0], height: size[1], cfg: defaultConfig(), target: "session", rows: []row{{kind: "dir", path: "/tmp/romhandbook", label: "romhandbook"}}, view: []int{0}}
 		output := m.View()
 		lines := strings.Split(output, "\n")
@@ -43,14 +61,26 @@ func TestCompactPalette(t *testing.T) {
 			}
 		}
 		plain := ansi.Strip(output)
-		if !strings.Contains(lines[0], "│") {
+		if !strings.Contains(plain, "│") {
 			t.Fatal("missing empty cursor")
 		}
-		if strings.Count(plain, "romhandbook") != 1 {
-			t.Fatal("duplicate directory label")
+		if !strings.Contains(ansi.Strip(lines[2]), "romhandbook") {
+			t.Fatal("missing directory name in result row")
+		}
+		if !strings.Contains(plain, "Open as: session") {
+			t.Fatal("target missing from footer")
+		}
+		if strings.Contains(plain, "[tab]") {
+			t.Fatal("unexpected Tab hint")
+		}
+		if strings.Contains(plain, "enter open") {
+			t.Fatal("unexpected Enter hint")
+		}
+		if !strings.Contains(plain, "directory ❯ ") {
+			t.Fatal("missing search prompt")
 		}
 		if strings.Contains(plain, "╭") {
-			t.Fatal("unexpected box border")
+			t.Fatal("unexpected decorative frame")
 		}
 		m.filter = "rom"
 		if !strings.Contains(ansi.Strip(m.View()), "rom│") {

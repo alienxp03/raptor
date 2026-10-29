@@ -301,7 +301,7 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.field = 0
 			m.branch = ""
 			m.err, m.errField = "", -1
-		case "ctrl+d", "delete":
+		case "ctrl+x", "delete":
 			if r := m.selected(); r != nil {
 				if r.IsMain {
 					m.err = "Cannot remove the primary worktree"
@@ -346,13 +346,30 @@ func (m *wtModel) View() string {
 	if m.width < 1 || m.height < 1 {
 		return ""
 	}
-	width := maxInt(m.width-2, 1)
+	if m.width < 4 || m.height < 5 {
+		return pickerTiny(m.width, m.height)
+	}
+	width := m.width - 2
+	var pathLines []string
+	if !m.baseSelecting && !m.form && !m.confirm && m.height >= 10 {
+		if r := m.selected(); r != nil {
+			// Use the full width below the list for the selected path. Very long
+			// paths keep their ending and use at most three rows.
+			path := pickerTail(homeRelative(r.Path), width*3)
+			pathLines = strings.Split(ansi.Hardwrap(path, width, true), "\n")
+			if len(pathLines) > 3 {
+				pathLines = pathLines[len(pathLines)-3:]
+				pathLines[0] = pickerTail("…"+pathLines[0], width)
+			}
+		}
+	}
+	footerRows := 2 + len(pathLines)
 	text, dim := pickerText, pickerMuted
 	line := func(s string) string { return pickerLine(s, width) }
 	lines := []string{}
-	footer := "^N New   ^D Remove   ↵ Open session"
+	footer := "^n New   ^x Remove   ↵ Open session"
 	if m.baseSelecting {
-		lines = append(lines, pickerSearch(m.baseQuery, width), line(dim.Render("Local base branch")))
+		lines = append(lines, pickerSearch(m.baseQuery, width, "base"), line(dim.Render("Local base branch")))
 		choices := m.baseChoices()
 		count := maxInt(m.height-4, 0)
 		start := maxInt(m.baseSel-count+1, 0)
@@ -366,11 +383,11 @@ func (m *wtModel) View() string {
 				}
 				continue
 			}
-			content := " " + choices[i]
-			if i != m.baseSel {
-				content = text.Render(content)
+			style := text
+			if i == m.baseSel {
+				style = pickerSelected.Bold(true)
 			}
-			lines = append(lines, pickerRow(content, width, i == m.baseSel))
+			lines = append(lines, pickerRow(style.Render(choices[i]), width, i == m.baseSel))
 		}
 		footer = "↑↓ Choose   ↵ Select base   esc Back"
 	} else if m.form {
@@ -425,18 +442,9 @@ func (m *wtModel) View() string {
 		lines = append(lines, line(""), line(dim.Render("Branch is kept. Git refuses uncommitted changes.")))
 		footer = "↵ Remove   esc Cancel"
 	} else {
-		lines = append(lines, pickerSearch(m.filter, width), line(""))
-		count := maxInt(m.height-4, 0)
+		lines = append(lines, pickerSearch(m.filter, width, "worktree"), line(""))
+		count := maxInt(m.height-2-footerRows, 0)
 		start := maxInt(m.sel-count+1, 0)
-		branchWidth := 14
-		for _, r := range m.rows {
-			if w := lipgloss.Width(r.Branch); w > branchWidth {
-				branchWidth = w
-			}
-		}
-		if branchWidth > width/2 {
-			branchWidth = width / 2
-		}
 		for n := 0; n < count; n++ {
 			vi := start + n
 			if vi >= len(m.view) {
@@ -448,15 +456,7 @@ func (m *wtModel) View() string {
 				continue
 			}
 			r := m.rows[m.view[vi]]
-			branch := " " + ansi.Truncate(r.Branch, branchWidth, "…")
-			pathWidth := maxInt(width-lipgloss.Width(branch)-3, 0)
-			path := ansi.Truncate(homeRelative(r.Path), pathWidth, "…") + " "
-			gap := maxInt(width-lipgloss.Width(branch)-lipgloss.Width(path), 2)
-			content := branch + strings.Repeat(" ", gap) + path
-			if vi != m.sel {
-				content = text.Render(branch) + dim.Render(strings.Repeat(" ", gap)+path)
-			}
-			lines = append(lines, pickerRow(content, width, vi == m.sel))
+			lines = append(lines, pickerEntry(r.Branch, homeRelative(r.Path), width, vi == m.sel))
 		}
 	}
 	if m.err != "" && !m.form {
@@ -465,13 +465,17 @@ func (m *wtModel) View() string {
 	if m.busy {
 		footer = "Working…"
 	}
-	// Native-style action row, separated from results and form content.
-	if len(lines) > m.height-2 {
-		lines = lines[:maxInt(m.height-2, 0)]
+	// Keep the action row separate from results and form content.
+	if len(lines) > m.height-footerRows {
+		lines = lines[:maxInt(m.height-footerRows, 0)]
 	}
-	for len(lines) < m.height-2 {
+	for len(lines) < m.height-footerRows {
 		lines = append(lines, line(""))
 	}
-	lines = append(lines, pickerRule(width), line(dim.Render(footer)))
+	lines = append(lines, pickerRule(width))
+	for _, path := range pathLines {
+		lines = append(lines, line(dim.Render(path)))
+	}
+	lines = append(lines, line(dim.Render(footer)))
 	return strings.Join(lines, "\n")
 }

@@ -218,11 +218,17 @@ func (m *dirModel) View() string {
 	if m.width < 1 || m.height < 1 {
 		return ""
 	}
-	width := maxInt(m.width-2, 1)
+	if m.width < 4 || m.height < 5 {
+		return pickerTiny(m.width, m.height)
+	}
+	width := m.width - 2
 	blank := pickerLine("", width)
-	lines := []string{pickerSearch(m.filter, width), blank}
-
-	maxRows := maxInt(m.height-4, 0)
+	lines := []string{pickerSearch(m.filter, width, "directory"), blank}
+	footerRows := 2
+	if m.height >= 10 {
+		footerRows = 3
+	}
+	maxRows := maxInt(m.height-len(lines)-footerRows, 0)
 	start := maxInt(m.sel-maxRows+1, 0)
 	for n := 0; n < maxRows; n++ {
 		vi := start + n
@@ -235,28 +241,27 @@ func (m *dirModel) View() string {
 			continue
 		}
 		r := m.rows[m.view[vi]]
-		path := homeRelative(r.path)
-		content := " " + path
-		if vi != m.sel {
-			content = pickerText.Render(content)
-		}
-		lines = append(lines, pickerRow(content, width, vi == m.sel))
+		lines = append(lines, pickerDirectory(r.path, width, vi == m.sel))
 	}
 	lines = append(lines, pickerRule(width))
-	left := pickerText.Render(" Open as "+targetLabel(m.target)) + pickerMuted.Render("  ⇥")
-	right := pickerMuted.Render("^W Worktrees   ↵ Open ")
+	if footerRows == 3 {
+		detail := "No directory selected"
+		if r := m.selected(); r != nil {
+			detail = homeRelative(r.path)
+		}
+		lines = append(lines, pickerFooter(pickerMuted.Render(" "+detail), pickerMuted.Render(fmt.Sprintf("%d/%d ", len(m.view), len(m.rows))), detail, width))
+	}
+	target := pickerAccent.Bold(true).Render(targetLabel(m.target))
+	left := pickerMuted.Render("Open as: ") + target
+	if lipgloss.Width(left) > width {
+		left = target
+	}
+	right := pickerText.Render("ctrl+w") + pickerMuted.Render(" worktrees")
+	footer := pickerFooter(left, right, left, width)
 	if m.err != "" {
-		right = styErr.Render(m.err)
+		footer = pickerLine(styErr.Render(m.err), width)
 	}
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
-	footer := left
-	if gap >= 2 {
-		footer += strings.Repeat(" ", gap) + right
-	}
-	lines = append(lines, pickerLine(footer, width))
-	if len(lines) > m.height {
-		lines = lines[:m.height]
-	}
+	lines = append(lines, footer)
 	return strings.Join(lines, "\n")
 }
 

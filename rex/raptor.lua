@@ -1,6 +1,6 @@
 -- raptor — sesh-style zoxide + worktree picker for Rex (Go + Bubble Tea).
 --
---   shift+cmd+p     dir picker (zoxide + sessions; tab cycles target,
+--   shift+cmd+o     dir picker (zoxide + sessions; tab cycles target,
 --                    Ctrl+W on a git repo opens the worktree flow)
 --   shift+ctrl+w     worktree picker for the current repo
 --   palette          "Raptor", "Raptor Worktrees", "Raptor: Last Session"
@@ -8,11 +8,11 @@
 -- Head-less: rex do raptor target=tab dir=~/some/project
 
 local cfg = {
-  open_key = "shift+cmd+p",
+  open_key = "shift+cmd+o",
   wt_key   = "shift+ctrl+w",
 
   -- popup rectangle, as fractions of the current window (x, y, w, h)
-  bounds = { x = 0.25, y = 0.10, w = 0.50, h = 0.28 },
+  bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
   mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },
 
   -- the Go binary (github.com/alienxp03/raptor)
