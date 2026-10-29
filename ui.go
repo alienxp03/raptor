@@ -209,7 +209,7 @@ func (m *dirModel) View() string {
 	var b strings.Builder
 	b.WriteString(m.searchBox() + "\n")
 
-	maxRows := m.height - 5
+	maxRows := m.height - 6
 	if maxRows < 1 {
 		maxRows = 1
 	}
@@ -243,13 +243,23 @@ func (m *dirModel) View() string {
 	}
 	b.WriteString(strings.Join(lines, "\n"))
 
-	hints := "\n  " + headerTargets(m.cfg, m.target)
-	hints += styDim.Render("   tab⇄ target · w worktrees · enter open · esc quit")
+	// footer pinned at the bottom, set off by a rule
+	rule := styDim.Render(strings.Repeat("─", maxInt(m.width-2, 3)))
+	b.WriteString("\n" + rule + "\n")
+	hints := "  " + headerTargets(m.cfg, m.target)
+	hints += styDim.Render("   tab⇄ · w worktrees · ⏎ open · esc")
 	if m.err != "" {
 		hints += "   " + styErr.Render(m.err)
 	}
 	b.WriteString(hints)
 	return b.String()
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // searchBox renders the rounded input box with a block cursor.
@@ -264,11 +274,11 @@ func (m *dirModel) searchBox() string {
 	if text == "" {
 		content = styDim.Render(placeholder)
 	} else {
-		content = text + stySel.Render("▊")
+		content = text + stySel.Render("│")
 	}
 	if len([]rune(text)) > inner-2 {
 		r := []rune(text)
-		content = string(r[len(r)-inner+3:]) + stySel.Render("▊")
+		content = string(r[len(r)-inner+3:]) + stySel.Render("│")
 	}
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
