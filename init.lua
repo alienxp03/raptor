@@ -199,6 +199,31 @@ function M.setup(options)
 		end,
 	})
 
+	rex.action({
+		name = "raptor_create",
+		title = "Raptor: Create Worktree",
+		description = "Open the terminal create-worktree form for the origin pane's repository.",
+		category = "Navigate",
+		run = function(ctx)
+			if ctx.session_id == nil then
+				error("raptor: no session context", 0)
+			end
+			if ctx.block_id then
+				local origin = rex.session.describe_block({ block_id = ctx.block_id })
+				if origin and origin.block and origin.block.label == "raptor" then
+					-- Let an existing picker handle Ctrl+N instead of nesting layers.
+					rex.client.queue("pane.send_key", { key = "ctrl+n" })
+					return { ui = "terminal" }
+				end
+			end
+			local args = base_cmd(ctx)
+			table.insert(args, "wt")
+			table.insert(args, "--create")
+			open_layer(ctx, args)
+			return { ui = "terminal" }
+		end,
+	})
+
 	-- History shortcuts stay in Lua: no binary startup or nested Rex CLI calls.
 	local cache = os.getenv("XDG_CACHE_HOME")
 	if cache == nil or cache == "" then

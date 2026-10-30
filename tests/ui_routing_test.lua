@@ -3,6 +3,8 @@ local real_open = io.open
 local function check(case)
 	local actions, executions, layers = {}, {}, {}
 	local title_calls = 0
+	local picker_open = false
+	local queued = {}
 	local app = "/demo/Application Support/Raptor.app"
 	io.open = function(path)
 		if case.installed and path == app .. "/Contents/Info.plist" then
@@ -37,10 +39,14 @@ local function check(case)
 				return options
 			end,
 		},
-		client = { queue = function() end },
+		client = {
+			queue = function(action, args)
+				queued[#queued + 1] = { action = action, args = args }
+			end,
+		},
 		session = {
 			describe_block = function()
-				return { block = { window_id = "demo-window" } }
+				return { block = { window_id = "demo-window", label = picker_open and "raptor" or "shell" } }
 			end,
 			new_layer = function(options)
 				layers[#layers + 1] = options
@@ -82,6 +88,17 @@ local function check(case)
 			assert(layer.bounds[1] == (mobile and 0.04 or 0.28))
 		end
 	end
+	local before = #executions
+	assert(actions.raptor_create(ctx).ui == "terminal")
+	local command = layers[#layers].layout.options.command
+	assert(command[#command - 1] == "wt" and command[#command] == "--create")
+	assert(command[3] == ctx.session_id and command[5] == ctx.block_id)
+	assert(#executions == before, "create shortcut must not launch native app")
+	local layer_count = #layers
+	picker_open = true
+	actions.raptor_create(ctx)
+	assert(#layers == layer_count, "Ctrl+N inside a picker must not nest layers")
+	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+n")
 	if case.platform ~= "macos" or case.ui == "terminal" or not case.installed or case.transport == "tls" then
 		assert(#executions == 0, case.name .. ": native process unexpectedly started")
 	end

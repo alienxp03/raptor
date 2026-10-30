@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/alienxp03/raptor/internal/catalog"
@@ -32,8 +31,10 @@ type wtModel struct {
 	width, height int
 	err           string
 	form          bool
-	field         int // branch, base chooser, create button
-	errField      int // -1 for a general error
+	closeOnCancel bool // Direct form launch has no parent list.
+	loading       bool // Repository metadata loads after the first form render.
+	field         int  // branch, base chooser, open target, create button
+	errField      int  // -1 for a general error
 	baseSelecting bool
 	baseQuery     string
 	baseSel       int
@@ -52,30 +53,53 @@ type wtCreatedMsg struct {
 	err  error
 }
 type wtRemovedMsg struct{ err error }
+type wtLoadedMsg struct {
+	repo string
+	info catalog.Worktrees
+	err  error
+}
 
 const returnToDirectories = -1
+
+func RunCreateWorktree(ctx rex.Ctx, cfg config.Config, repo string) int {
+	return runWorktreePicker(ctx, cfg, repo, false, true)
+}
 
 func RunWorktrees(ctx rex.Ctx, cfg config.Config, repo string) int {
 	return runWorktreeFlow(ctx, cfg, repo, false)
 }
 
 func runWorktreeFlow(ctx rex.Ctx, cfg config.Config, repo string, fromDirectories bool) int {
-	if repo == "" {
+	return runWorktreePicker(ctx, cfg, repo, fromDirectories, false)
+}
+
+func runWorktreePicker(ctx rex.Ctx, cfg config.Config, repo string, fromDirectories, create bool) int {
+	var m *wtModel
+	if create {
+		m = newCreateModel(ctx, cfg, repo, !fromDirectories)
+	} else {
 		repo, _ = catalog.ResolveRepo(ctx, repo)
-	}
-	if repo == "" || !worktreepkg.IsGitRepo(repo) {
-		repo = pickRepo(ctx, cfg)
 		if repo == "" {
-			return 0
+			repo = pickRepo(ctx, cfg)
+			if repo == "" {
+				return 0
+			}
 		}
+		m = newWtModel(ctx, cfg, repo)
 	}
-	m := newWtModel(ctx, cfg, repo)
 	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	model := final.(*wtModel)
+	if model.action == "choose-repo" {
+		repo = pickRepo(ctx, cfg)
+		if repo == "" {
+			return 0
+		}
+		return runWorktreePicker(ctx, cfg, repo, fromDirectories, create)
+	}
 	if model.action == "back" {
 		if fromDirectories {
 			return returnToDirectories
@@ -97,8 +121,54 @@ func newWtModel(ctx rex.Ctx, cfg config.Config, repo string) *wtModel {
 	m.applyFilter()
 	return m
 }
-func (m *wtModel) Init() tea.Cmd       { return m.ctx.TitleCommand() }
+
+// Form targets include explicit pane directions when an origin pane exists.
+func (m *wtModel) formTargets() config.Config {
+	cfg := m.cfg
+	cfg.Targets = nil
+	seen := map[string]bool{}
+	for _, target := range append(append([]string{}, m.cfg.Targets...), "tab", "here", "session", "pane", "pane_left", "pane_above", "pane_below") {
+		if seen[target] || (m.ctx.Block == "" && (target == "here" || strings.HasPrefix(target, "pane"))) {
+			continue
+		}
+		seen[target] = true
+		cfg.Targets = append(cfg.Targets, target)
+	}
+	return cfg
+}
+
+func newCreateModel(ctx rex.Ctx, cfg config.Config, repo string, closeOnCancel bool) *wtModel {
+	return &wtModel{ctx: ctx, cfg: cfg, repo: repo, form: true, loading: true,
+		closeOnCancel: closeOnCancel, errField: -1, target: cfg.Enter}
+}
+
+func (m *wtModel) Init() tea.Cmd {
+	if !m.loading {
+		return m.ctx.TitleCommand()
+	}
+	ctx, cfg, repo := m.ctx, m.cfg, m.repo
+	load := func() tea.Msg {
+		root, err := catalog.ResolveRepo(ctx, repo)
+		if err != nil || root == "" {
+			return wtLoadedMsg{err: err}
+		}
+		return wtLoadedMsg{repo: root, info: catalog.ListWorktrees(root, cfg)}
+	}
+	return tea.Batch(m.ctx.TitleCommand(), load)
+}
 func (m *wtModel) destination() string { return filepath.Join(m.root, worktreepkg.Folder(m.branch)) }
+func (m *wtModel) baseLabel() string {
+	if m.loading {
+		return "Loading…"
+	}
+	return m.base + " ›"
+}
+func (m *wtModel) destinationLabel() string {
+	if m.loading {
+		return "Loading repository…"
+	}
+	return paths.HomeRelative(m.destination())
+}
 func (m *wtModel) applyFilter() {
 	m.view = catalog.FilterWorktrees(m.rows, m.filter)
 	if m.sel >= len(m.view) {
@@ -151,6 +221,19 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+	case wtLoadedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err.Error()
+			return m, nil
+		}
+		if msg.repo == "" {
+			m.action = "choose-repo"
+			return m, tea.Quit
+		}
+		m.repo, m.root = msg.repo, msg.info.Root
+		m.rows, m.branches, m.base = msg.info.Items, msg.info.Branches, msg.info.BaseBranch
+		m.applyFilter()
 	case wtCreatedMsg:
 		m.busy = false
 		if msg.err != nil {
@@ -175,6 +258,19 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		key := msg.String()
 		if key == "ctrl+c" {
 			return m, tea.Quit
+		}
+		if m.loading {
+			if key == "esc" {
+				if !m.closeOnCancel {
+					m.action = "back"
+				}
+				return m, tea.Quit
+			}
+			// Branch input is safe before metadata arrives; Git actions are not.
+			if m.field == 0 {
+				editQuery(&m.branch, msg)
+			}
+			return m, nil
 		}
 		if m.splitMode {
 			switch key {
@@ -246,18 +342,27 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.form {
 			switch key {
+			case "ctrl+o":
+				m.target = dispatch.NextTarget(m.formTargets(), m.target, true)
 			case "esc":
+				if m.closeOnCancel {
+					return m, tea.Quit
+				}
 				m.form = false
 				m.err, m.errField = "", -1
-			case "tab":
-				m.field = (m.field + 1) % 3
-			case "shift+tab":
-				m.field = (m.field + 2) % 3
-			case "down", "ctrl+j":
-				m.field = (m.field + 1) % 3
-			case "up", "ctrl+k":
-				m.field = (m.field + 2) % 3
+			case "tab", "down", "ctrl+j":
+				m.field = (m.field + 1) % 4
+			case "shift+tab", "up", "ctrl+k":
+				m.field = (m.field + 3) % 4
+			case "left", "right":
+				if m.field == 2 {
+					m.target = dispatch.NextTarget(m.formTargets(), m.target, key == "right")
+				}
 			case "enter":
+				if m.field == 2 {
+					m.field = 3
+					return m, nil
+				}
 				if m.field == 0 {
 					if err := worktreepkg.ValidateNewBranch(m.repo, m.branch); err != nil {
 						m.err, m.errField = err.Error(), 0
@@ -294,8 +399,8 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
-		case "tab", "shift+tab":
-			m.target = dispatch.NextTarget(m.cfg, m.target, key == "tab")
+		case "tab", "shift+tab", "ctrl+o":
+			m.target = dispatch.NextTarget(m.cfg, m.target, key != "shift+tab")
 		case "ctrl+p":
 			if m.selected() == nil {
 				return m, nil
@@ -412,43 +517,44 @@ func (m *wtModel) View() string {
 		if m.field == 0 {
 			name += "│"
 		}
-		fieldStyle := func(index int) lipgloss.Style {
+		fieldLine := func(index int, label, value string) string {
+			style := text
 			if m.field == index {
-				return pickerInput
+				style = pickerAccent.Bold(true)
 			}
-			return text
+			return line(dim.Render(padRight(label, 12)) + style.Render(value))
 		}
-		lines = append(lines, line(text.Bold(true).Render("New worktree")), line(""), line(dim.Render("Branch name")), line(fieldStyle(0).Render(padRight(name, width))))
-		if m.err != "" && m.errField == 0 {
+		repoLabel := paths.HomeRelative(m.repo)
+		if m.loading && m.repo == "" {
+			repoLabel = "Loading…"
+		}
+		pathLine := func(label, value string) string {
+			return line(dim.Render(padRight(label, 12) + pickerTail(value, maxInt(width-12, 0))))
+		}
+		lines = append(lines, line(text.Bold(true).Render("New worktree")), pathLine("Repo", repoLabel), line(""),
+			fieldLine(0, "Branch", name),
+			fieldLine(1, "Base", m.baseLabel()),
+			fieldLine(2, "Open in", dispatch.TargetLabel(m.target)))
+		if m.err != "" {
 			lines = append(lines, line(styErr.Render(m.err)))
 		}
-		lines = append(lines, line(""), line(dim.Render("Base branch")), line(fieldStyle(1).Render(padRight(m.base+"  ›", width))), line(""), line(dim.Render("Destination")))
-		for _, wrapped := range strings.Split(lipgloss.NewStyle().Width(width).Render(paths.HomeRelative(m.destination())), "\n") {
-			lines = append(lines, line(text.Render(wrapped)))
+		// Keep the fields and submit action visible; shorten only the preview.
+		if len(lines)+1 <= m.height-4 {
+			if len(lines)+2 <= m.height-4 {
+				lines = append(lines, line(""))
+			}
+			lines = append(lines, pathLine("Destination", m.destinationLabel()))
 		}
-		if m.err != "" && m.errField != 0 {
-			lines = append(lines, line(styErr.Render(m.err)))
-		}
-		// Reserve space for the explicit submit action on short mobile panes.
-		if len(lines) > m.height-4 {
-			lines = lines[:maxInt(m.height-4, 0)]
-		}
-		button := " Create & open as " + dispatch.TargetLabel(m.target) + " "
-		if m.field == 2 {
-			button = pickerSelected.Bold(true).Render(button)
-		} else {
-			button = text.Render(button)
+		button := pickerAccent.Render("Create & open")
+		if m.loading {
+			button = dim.Render("Create & open")
+		} else if m.field == 3 {
+			button = pickerAccent.Bold(true).Render("▸ Create & open")
 		}
 		lines = append(lines, line(""), line(button))
-		footer = "tab Next field   esc Cancel"
-		if m.field == 0 {
-			footer = "↵ Next   tab Next field   esc Cancel"
-		}
-		if m.field == 1 {
-			footer = "↵ Choose base   tab Next field   esc Cancel"
-		}
-		if m.field == 2 {
-			footer = "↵ Create & open as " + dispatch.TargetLabel(m.target) + "   ⇧tab Back   esc Cancel"
+		footer = "Tab next · ^o target · ↵ select · esc back"
+		if width < 40 {
+			footer = "tab · ^o · ↵ · esc"
 		}
 	} else if m.confirm {
 		r := m.selected()
@@ -475,7 +581,7 @@ func (m *wtModel) View() string {
 			r := m.rows[m.view[vi]]
 			lines = append(lines, pickerEntry(r.Branch, paths.HomeRelative(r.Path), width, vi == m.sel))
 		}
-		left := pickerMuted.Render("Open: ") + pickerAccent.Bold(true).Render(dispatch.TargetLabel(m.target))
+		left := pickerMuted.Render("Open: ") + pickerAccent.Bold(true).Render(dispatch.TargetLabel(m.target)) + pickerMuted.Render(" ^o")
 		footer = pickerLine(left+pickerMuted.Render(" · ^p split · ^n new · ^x remove · ↵"), width)
 		if width < 50 {
 			footer = pickerLine(left+pickerMuted.Render(" · ↵"), width)

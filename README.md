@@ -81,30 +81,31 @@ Use the `raptor` Rex action for the platform-appropriate UI. `raptor dirs` alway
 | --- | --- |
 | Type | Filter saved directory paths |
 | ↑ / ↓, Ctrl+J / Ctrl+K | Move through results |
-| Ctrl+O on Mac; Tab / Shift+Tab in terminal | Change the open target |
+| Ctrl+O; Tab / Shift+Tab also work in terminal lists | Change the open target |
 | Enter | Open the selected directory |
 | Ctrl+P, then H/J/K/L or arrow | Open in a pane split |
 | Ctrl+T | Open worktrees for the selected Git repository |
+| Ctrl+N / F2 | Open Create worktree directly for the selected Git repository |
 | Esc | Clear the filter, then close the picker |
 
 `here` changes directory only when the current pane is at a shell prompt. Session mode reuses a matching session or creates one.
 
 ## Worktree picker
 
-Use the `raptor_wt` Rex action for native Mac worktrees or the mobile terminal picker. Run `raptor wt` to use the terminal UI with the current Git repository. Use `raptor wt --repo /path/to/repo` to choose a repository directly. Without a repository in the current pane, Raptor shows a repository picker.
+Use the `raptor_wt` Rex action for native Mac worktrees or the mobile terminal picker. Run `raptor wt` to use the terminal UI with the current Git repository. Use `raptor wt --repo /path/to/repo` to choose a repository directly. Use `raptor wt --create` or the `raptor_create` Rex action to open the terminal create form directly for the origin pane's repository. Bind it with `rex.bind("ctrl+n", "raptor_create")` to use it from Pi or a shell. Without a repository in the current pane, Raptor shows a repository picker.
 
 | Key | Action |
 | --- | --- |
 | Type | Filter worktree branches and paths |
 | ↑ / ↓, Ctrl+J / Ctrl+K | Move through worktrees |
-| Ctrl+O on Mac; Tab / Shift+Tab in terminal | Change the open target |
+| Ctrl+O; Tab / Shift+Tab also work in terminal lists | Change the open target |
 | Enter | Open the selected worktree with that target |
 | Ctrl+P, then H/J/K/L or arrow | Open in a pane split |
 | Cmd+N / Ctrl+N on Mac; Ctrl+N / F2 in terminal | Create a worktree |
 | Cmd+Backspace / Ctrl+X on Mac; Ctrl+X / Delete in terminal | Remove a worktree after confirmation |
 | Esc | Clear the filter, then return to directories |
 
-The create form asks for a branch and local base branch. Go supplies the destination preview and validation in both interfaces. In the terminal UI, Tab moves between fields and Enter selects the base or submits the focused create button. The new worktree opens with the selected target.
+The create form asks for a branch and local base branch. Go supplies the destination preview and validation in both interfaces. In the terminal UI, Tab moves through Branch name → Base branch → Open in → Create. Ctrl+O cycles the target from any form field. The visible **Open in** field also uses Left/Right to choose a tab, session, current shell, or pane direction (when a source pane is available). Enter on Open in moves to Create without submitting. Enter on Create creates the worktree and opens it with that target.
 
 On Mac, Cmd+N or Ctrl+N opens the native form. Tab / Shift+Tab moves between enabled controls. Search local base branches in **From branch**; Enter selects and Escape returns to the form. Ctrl+O changes the **Open in** target. Click **Create** or press Cmd+Enter. If opening fails after creation, **Retry opening** reuses the created worktree, never creates it again. Use Cmd+Backspace or Ctrl+X to request removal; confirmation defaults to Cancel.
 
@@ -120,16 +121,16 @@ Worktrees use this layout:
 
 ## Open targets
 
-On Mac, use Ctrl+O / Ctrl+Shift+O or the **Open in** dropdown. In the terminal picker, use Tab / Shift+Tab. Tab on Mac keeps normal focus navigation. The default target list is:
+On Mac, use Ctrl+O / Ctrl+Shift+O or the **Open in** dropdown. In the terminal picker, use Ctrl+O. Tab / Shift+Tab also cycle targets in lists; in the create form they move between fields. Tab on Mac keeps normal focus navigation. The default target list is:
 
 | Target | Opens the worktree or directory… |
 | --- | --- |
 | `tab` | In a new tab |
-| `here` | In the current shell |
 | `session` | In a matching or new session |
+| `here` | In the current shell |
 | `pane`, `pane_left`, `pane_above`, `pane_below` | In a pane split |
 
-Pane targets can be added to the target list. Ctrl+P also opens the selected item in a pane split; choose the direction with H/J/K/L or arrow keys.
+The default order is tab → session → cd here → pane right → left → above → below. Ctrl+P also opens the selected item in a pane split; choose the direction with H/J/K/L or arrow keys.
 
 ## Configuration
 
@@ -138,14 +139,14 @@ All settings are optional. Save them in `~/.config/raptor/config.toml`:
 ```toml
 worktree_root = "~/Workspace/worktrees"
 enter = "tab"
-targets = ["tab", "here", "session"]
+targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]
 ```
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `worktree_root` | `~/Workspace/worktrees` | Parent folder for new worktrees |
 | `enter` | `tab` | Target selected when a picker opens |
-| `targets` | `tab`, `here`, `session` | Available open targets |
+| `targets` | `tab`, `session`, `here`, `pane`, `pane_left`, `pane_above`, `pane_below` | Available open targets |
 
 The Rex plugin also accepts UI selection and terminal popup settings:
 

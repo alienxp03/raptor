@@ -14,8 +14,8 @@ func TestWorktreeTargetCycle(t *testing.T) {
 	m := &wtModel{cfg: cfg, target: cfg.Enter}
 
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if m.target != "here" {
-		t.Fatalf("Tab target = %q, want here", m.target)
+	if m.target != "session" {
+		t.Fatalf("Tab target = %q, want session", m.target)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	if m.target != "tab" {

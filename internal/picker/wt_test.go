@@ -63,7 +63,11 @@ func TestWorktreeForm(t *testing.T) {
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil || m.baseSelecting || m.field != 2 {
-		t.Fatal("selecting a base must focus Create, not submit")
+		t.Fatal("selecting a base must focus Open in, not submit")
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || m.busy || m.field != 3 {
+		t.Fatal("Enter on Open in must focus Create, not submit")
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil || !m.busy {

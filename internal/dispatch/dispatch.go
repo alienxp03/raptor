@@ -177,12 +177,10 @@ func SplitDirection(target string) string {
 	}
 }
 
-var targetOrderHint = []string{"tab", "here", "session"}
-
 func NextTarget(cfg config.Config, cur string, forward bool) string {
 	list := cfg.Targets
 	if len(list) == 0 {
-		list = targetOrderHint
+		list = config.Default().Targets
 	}
 	idx := 0
 	for i, t := range list {

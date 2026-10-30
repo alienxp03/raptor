@@ -340,6 +340,23 @@ func TestDirectoryQueries(t *testing.T) {
 	}
 }
 
+func TestDirectoryOriginPinned(t *testing.T) {
+	repo := fixtureRepo(t)
+	t.Setenv("RAPTOR_TEST_CWD", repo)
+	fakeTool(t, "rex", "printf '%s\\n' \"$RAPTOR_TEST_CWD\"\n")
+	fakeTool(t, "zoxide", "printf '%s\\n' /other \"$RAPTOR_TEST_CWD\"\n")
+	call := client(t, New(rex.Ctx{Block: "origin"}, config.Default()))
+	for _, query := range []string{"", "no-such-match"} {
+		var result directoryResult
+		if err := call("directories", map[string]any{"query": query}, &result); err != "" {
+			t.Fatal(err)
+		}
+		if len(result.Items) == 0 || result.Items[0].Path != repo || !result.Items[0].Current {
+			t.Fatalf("missing origin repository: %+v", result)
+		}
+	}
+}
+
 func TestRepoResolutionAndErrors(t *testing.T) {
 	repo := fixtureRepo(t)
 	t.Setenv("RAPTOR_TEST_CWD", repo)

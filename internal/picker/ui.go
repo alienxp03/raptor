@@ -33,9 +33,10 @@ var (
 
 // row is one list entry in the dir picker.
 type row struct {
-	kind  string // "dir"
-	label string // paths.Basename
-	path  string // full directory path
+	kind    string // "dir"
+	label   string // paths.Basename
+	path    string // full directory path
+	current bool   // origin pane repository or directory
 }
 
 type dirModel struct {
@@ -52,7 +53,7 @@ type dirModel struct {
 	height    int
 	// result of the interaction, read after the program exits
 	picked   *row   // non-nil when a directory was chosen
-	next     string // "wt" when bridging with a repo path in nextRepo
+	next     string // "wt" or "wt-create" with a repo path in nextRepo
 	nextRepo string
 }
 
@@ -63,8 +64,8 @@ type previewMsg struct {
 
 func loadDirRows(ctx rex.Ctx) []row {
 	var rows []row
-	for _, d := range catalog.Directories(false) {
-		rows = append(rows, row{kind: "dir", label: d.Label, path: d.Path})
+	for _, d := range catalog.ContextDirectories(ctx, false) {
+		rows = append(rows, row{kind: "dir", label: d.Label, path: d.Path, current: d.Current})
 	}
 	return rows
 }
@@ -80,10 +81,12 @@ func RunDirs(ctx rex.Ctx, cfg config.Config) int {
 			return 1
 		}
 		dm = final.(*dirModel)
-		if dm.next != "wt" {
+		if dm.next != "wt" && dm.next != "wt-create" {
 			break
 		}
-		code := runWorktreeFlow(ctx, cfg, dm.nextRepo, true)
+		flowCfg := cfg
+		flowCfg.Enter = dm.target
+		code := runWorktreePicker(ctx, flowCfg, dm.nextRepo, true, dm.next == "wt-create")
 		if code != returnToDirectories {
 			return code
 		}
@@ -106,7 +109,7 @@ func (m *dirModel) Init() tea.Cmd { return m.ctx.TitleCommand() }
 func (m *dirModel) applyFilter() {
 	items := make([]catalog.Directory, len(m.rows))
 	for i, r := range m.rows {
-		items[i] = catalog.Directory{Label: r.label, Path: r.path}
+		items[i] = catalog.Directory{Label: r.label, Path: r.path, Current: r.current}
 	}
 	m.view = catalog.FilterDirectories(items, m.filter)
 	if m.sel >= len(m.view) {
@@ -201,8 +204,8 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.splitMode = true
 			return m, nil
-		case "tab", "shift+tab":
-			m.target = dispatch.NextTarget(m.cfg, m.target, msg.String() == "tab")
+		case "tab", "shift+tab", "ctrl+o":
+			m.target = dispatch.NextTarget(m.cfg, m.target, msg.String() != "shift+tab")
 			return m, nil
 		case "enter":
 			r := m.selected()
@@ -210,10 +213,13 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.picked = r
 			}
 			return m, tea.Quit
-		case "ctrl+t":
+		case "ctrl+t", "ctrl+n", "f2":
 			r := m.selected()
 			if r != nil && r.kind == "dir" && worktreepkg.IsGitRepo(r.path) {
 				m.next = "wt"
+				if msg.String() != "ctrl+t" {
+					m.next = "wt-create"
+				}
 				m.nextRepo = worktreepkg.RepoRoot(r.path)
 				return m, tea.Quit
 			}
@@ -256,16 +262,23 @@ func (m *dirModel) View() string {
 			continue
 		}
 		r := m.rows[m.view[vi]]
-		lines = append(lines, pickerDirectory(r.path, width, vi == m.sel))
+		if r.current {
+			lines = append(lines, pickerEntry(r.label, r.path, width, vi == m.sel))
+		} else {
+			lines = append(lines, pickerDirectory(r.path, width, vi == m.sel))
+		}
 	}
 	lines = append(lines, pickerRule(width))
 	target := pickerAccent.Bold(true).Render(dispatch.TargetLabel(m.target))
 	left := pickerMuted.Render("Open as: ") + target
+	if lipgloss.Width(left)+3 <= width {
+		left += pickerMuted.Render(" ^o")
+	}
 	if lipgloss.Width(left) > width {
 		left = target
 	}
 	splitHint := pickerText.Render("^p") + pickerMuted.Render(" split")
-	right := splitHint + "  " + pickerText.Render("ctrl+t") + pickerMuted.Render(" worktrees")
+	right := splitHint + "  " + pickerText.Render("^n") + pickerMuted.Render(" new worktree") + "  " + pickerText.Render("^t") + pickerMuted.Render(" worktrees")
 	if width-lipgloss.Width(left)-lipgloss.Width(right) < 2 {
 		right = splitHint
 	}

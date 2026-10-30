@@ -51,7 +51,11 @@ func main() {
 	case "wt":
 		rest := flag.NewFlagSet("wt", flag.ExitOnError)
 		repo := rest.String("repo", "", "repo path (default: origin block's cwd, else picker)")
+		create := rest.Bool("create", false, "open the create-worktree form directly")
 		_ = rest.Parse(fs.Args()[1:])
+		if *create {
+			os.Exit(picker.RunCreateWorktree(ctx, cfg, *repo))
+		}
 		os.Exit(picker.RunWorktrees(ctx, cfg, *repo))
 	case "direct":
 		// raptor -session X -block Y -client Z direct <target> <dir>
