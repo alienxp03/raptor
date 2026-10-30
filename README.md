@@ -62,8 +62,8 @@ For a fresh Rex setup, append the packaged module to the Lua search path:
 package.path = package.path .. ";/opt/homebrew/opt/raptor/share/?/init.lua"
 require("raptor").setup{}
 rex.bind("shift+cmd+o", "raptor")
-rex.bind("shift+cmd+t", "raptor_wt")
-rex.bind("ctrl+n", "raptor_create")
+rex.bind("shift+cmd+t", "raptor_worktree_list")
+rex.bind("ctrl+n", "raptor_worktree_new")
 ```
 
 Then run `rex config reload`. Existing plugin checkouts and Rex settings are
@@ -90,11 +90,11 @@ Add setup and your own key bindings to `~/.config/rex/init.lua`:
 ```lua
 require("raptor").setup{}
 rex.bind("shift+cmd+o", "raptor")
-rex.bind("shift+cmd+t", "raptor_wt")
-rex.bind("ctrl+n", "raptor_create")
+rex.bind("shift+cmd+t", "raptor_worktree_list")
+rex.bind("ctrl+n", "raptor_worktree_new")
 ```
 
-These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_wt`, `raptor_create`, `raptor_last_session`, and `raptor_last_pane` to the Rex command palette. Reload the Rex config after you change it.
+These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_worktree_list`, `raptor_worktree_new`, `raptor_session_last`, and `raptor_pane_last` to the Rex command palette. Reload the Rex config after you change it.
 
 The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it; Cmd+Q quits completely. Each reopening gets fresh Rex context and a new Go backend. No focus watcher or login item is added. If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`.
 
@@ -106,16 +106,21 @@ make package                # App ZIP and SHA-256 checksum in dist/
 ./scripts/package-macos.sh --universal  # Intel + Apple Silicon
 ```
 
-Local builds are ad-hoc signed, **not notarized**. Signing/notarization hooks and a Homebrew cask template are included, but no public release or tap is published. See [Mac architecture and protocol](docs/native-app.md) and [packaging instructions](packaging/macos.md).
+Local builds are ad-hoc signed, **not notarized**. The HEAD formula is published in `alienxp03/tap`; signing/notarization hooks and a cask template remain available for a future tagged binary release. See [Mac architecture and protocol](docs/native-app.md) and [packaging instructions](packaging/macos.md).
 
 ## Return to a previous location
 
 ```lua
-rex.bind("cmd+p", "raptor_last_pane")
+rex.bind("cmd+p", "raptor_pane_last")
 ```
 
-- `raptor_last_pane`: toggle the pane Raptor left, including across sessions and tabs.
-- `raptor_last_session`: toggle the session Raptor left. `raptor_last` remains an alias.
+- `raptor_pane_last`: toggle the pane Raptor left, including across sessions and tabs.
+- `raptor_session_last`: toggle the session Raptor left.
+
+Canonical names use resource + action, except `raptor`, which remains the default
+launcher. Old names (`raptor_wt`, `raptor_create`, `raptor_last_pane`,
+`raptor_last_session`, and `raptor_last`) remain compatibility aliases marked
+**legacy** in the command palette.
 
 Raptor records the origin when it opens a pane, tab, or different session. Changing directory with `here` does not update pane history. Clicking panes, normal Rex pane shortcuts, and manual tab or session changes do not update either history. No background watcher runs.
 
@@ -140,7 +145,7 @@ Use the `raptor` Rex action for the platform-appropriate UI. `raptor dirs` alway
 
 ## Worktree picker
 
-Use the `raptor_wt` Rex action for native Mac worktrees or the mobile terminal picker. Run `raptor wt` to use the terminal UI with the current Git repository. Use `raptor wt --repo /path/to/repo` to choose a repository directly. Use `raptor wt --create` for the terminal form, or the `raptor_create` Rex action to open Create directly using the configured `ui` (`auto` prefers the local Mac app; `terminal` always uses the terminal). Both use the origin pane's repository. Bind it with `rex.bind("ctrl+n", "raptor_create")` to use it from Pi or a shell. Without a repository in the current pane, Raptor shows a repository picker.
+Use the `raptor_worktree_list` Rex action for native Mac worktrees or the mobile terminal picker. Run `raptor wt` to use the terminal UI with the current Git repository. Use `raptor wt --repo /path/to/repo` to choose a repository directly. Use `raptor wt --create` for the terminal form, or the `raptor_worktree_new` Rex action to open Create directly using the configured `ui` (`auto` prefers the local Mac app; `terminal` always uses the terminal). Both use the origin pane's repository. Bind it with `rex.bind("ctrl+n", "raptor_worktree_new")` to use it from Pi or a shell. Without a repository in the current pane, Raptor shows a repository picker.
 
 | Key | Action |
 | --- | --- |

@@ -24,7 +24,7 @@ require("raptor").setup{
 }
 ```
 
-All picker actions (`raptor`, `raptor_wt`, and `raptor_create`) use this setting. `raptor_create` sends `mode=wt-create` to the native app or runs `raptor wt --create` in the terminal. It only opens a form; it never creates a worktree without confirmation.
+All picker actions (`raptor`, `raptor_worktree_list`, and `raptor_worktree_new`) use this setting. `raptor_worktree_new` sends `mode=wt-create` to the native app or runs `raptor wt --create` in the terminal. It only opens a form; it never creates a worktree without confirmation.
 
 Without an explicit app path, the plugin checks `~/Applications/Raptor.app` and `/Applications/Raptor.app`. Your bindings remain in your Rex `init.lua`. The installer does not change those bindings.
 

@@ -62,9 +62,11 @@ local function check(case)
 		end,
 	}
 	dofile("init.lua").setup({ app = app, ui = case.ui or "auto" })
+	assert(actions.raptor_wt == actions.raptor_worktree_list, "Legacy worktree list alias changed")
+	assert(actions.raptor_create == actions.raptor_worktree_new, "Legacy create alias changed")
 	local ctx = { session_id = "session:demo&safe", block_id = "block:demo space", client_id = "demo-client" }
 	for _, mode in ipairs({ "dirs", "wt", "wt-create" }) do
-		local action = ({ dirs = "raptor", wt = "raptor_wt", ["wt-create"] = "raptor_create" })[mode]
+		local action = ({ dirs = "raptor", wt = "raptor_worktree_list", ["wt-create"] = "raptor_worktree_new" })[mode]
 		local result = actions[action](ctx, {})
 		assert(result.ui == case.expected, case.name .. ": incorrect UI")
 		if result.ui == "native" then
@@ -95,7 +97,7 @@ local function check(case)
 	end
 	local layer_count = #layers
 	picker_open = true
-	actions.raptor_create(ctx)
+	actions.raptor_worktree_new(ctx)
 	assert(#layers == layer_count, "Ctrl+N inside a picker must not nest layers")
 	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+n")
 	if case.platform ~= "macos" or case.ui == "terminal" or not case.installed or case.transport == "tls" then

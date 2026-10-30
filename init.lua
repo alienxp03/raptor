@@ -2,7 +2,7 @@
 --
 --   require("raptor").setup{}
 --   rex.bind("shift+cmd+o", "raptor")
---   rex.bind("shift+cmd+t", "raptor_wt")
+--   rex.bind("shift+cmd+t", "raptor_worktree_list")
 
 local M = {}
 
@@ -38,6 +38,20 @@ function M.setup(options)
 
 	if cfg.ui ~= "auto" and cfg.ui ~= "terminal" then
 		error("raptor: ui must be auto or terminal", 0)
+	end
+
+	local function register_action(definition, aliases)
+		rex.action(definition)
+		for _, name in ipairs(aliases or {}) do
+			local alias = {}
+			for key, value in pairs(definition) do
+				alias[key] = value
+			end
+			alias.name = name
+			alias.title = definition.title .. " (legacy)"
+			alias.description = "Legacy alias for " .. definition.name
+			rex.action(alias)
+		end
 	end
 
 	local function client_platform(ctx)
@@ -205,8 +219,8 @@ function M.setup(options)
 		end,
 	})
 
-	rex.action({
-		name = "raptor_wt",
+	register_action({
+		name = "raptor_worktree_list",
 		title = "Raptor Worktrees",
 		description = "Browse local worktrees or create one with a branch name and full path preview.",
 		category = "Navigate",
@@ -217,10 +231,10 @@ function M.setup(options)
 			end
 			return show_picker(ctx, "wt")
 		end,
-	})
+	}, { "raptor_wt" })
 
-	rex.action({
-		name = "raptor_create",
+	register_action({
+		name = "raptor_worktree_new",
 		title = "Raptor: Create Worktree",
 		description = "Open the create-worktree form for the origin pane's repository using the configured UI.",
 		category = "Navigate",
@@ -238,7 +252,7 @@ function M.setup(options)
 			end
 			return show_picker(ctx, "wt-create")
 		end,
-	})
+	}, { "raptor_create" })
 
 	-- History shortcuts stay in Lua: no binary startup or nested Rex CLI calls.
 	local cache = os.getenv("XDG_CACHE_HOME")
@@ -341,24 +355,22 @@ function M.setup(options)
 		return { selected = pane.block_id }
 	end
 
-	for _, name in ipairs({ "raptor_last_session", "raptor_last" }) do
-		rex.action({
-			name = name,
-			title = "Raptor: Last Session",
-			description = "Toggle the session Raptor left. Manual Rex navigation does not update history.",
-			category = "Navigate",
-			keywords = "last session back toggle",
-			run = last_session,
-		})
-	end
-	rex.action({
-		name = "raptor_last_pane",
+	register_action({
+		name = "raptor_session_last",
+		title = "Raptor: Last Session",
+		description = "Toggle the session Raptor left. Manual Rex navigation does not update history.",
+		category = "Navigate",
+		keywords = "last session back toggle",
+		run = last_session,
+	}, { "raptor_last_session", "raptor_last" })
+	register_action({
+		name = "raptor_pane_last",
 		title = "Raptor: Last Pane",
 		description = "Toggle the pane Raptor left, even across sessions. No background watcher.",
 		category = "Navigate",
 		keywords = "last pane block back toggle",
 		run = last_pane,
-	})
+	}, { "raptor_last_pane" })
 end
 
 return M

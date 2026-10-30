@@ -85,7 +85,9 @@ rex = {
 }
 
 dofile("init.lua").setup({})
-assert(actions.raptor_last == actions.raptor_last_session, "legacy alias changed")
+assert(actions.raptor_last == actions.raptor_session_last, "legacy session alias changed")
+assert(actions.raptor_last_session == actions.raptor_session_last, "legacy session name changed")
+assert(actions.raptor_last_pane == actions.raptor_pane_last, "legacy pane alias changed")
 
 local function seed(session)
 	files[session_path] = "previous-session\n"
@@ -95,14 +97,14 @@ local function seed(session)
 end
 
 seed()
-local result = actions.raptor_last_session(ctx)
+local result = actions.raptor_session_last(ctx)
 assert(result.selected == "previous-session")
 assert(files[session_path] == "current-session\n")
 assert(rex.json.decode(files[pane_path]).block_id == "current-pane")
 
 for _, session in ipairs({ "current-session", "previous-session" }) do
 	seed(session)
-	result = actions.raptor_last_pane(ctx)
+	result = actions.raptor_pane_last(ctx)
 	assert(result.selected == "previous-pane")
 	assert(calls[1].action == "focus")
 	assert(calls[2].args.window_id == "moved-window")
