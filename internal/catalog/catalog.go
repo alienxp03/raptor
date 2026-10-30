@@ -41,7 +41,11 @@ func DirectoryItems(dirs []string, reposOnly bool) []Directory {
 
 // ContextDirectories pins the origin pane's repository (or current directory).
 func ContextDirectories(ctx rex.Ctx, reposOnly bool) []Directory {
-	return DirectoryItemsForCwd(rex.ZoxideList(), rex.BlockCwd(ctx.Block), reposOnly)
+	// These commands are independent; do not add their startup latency together.
+	dirs := make(chan []string, 1)
+	go func() { dirs <- rex.ZoxideList() }()
+	cwd := rex.BlockCwd(ctx.Block)
+	return DirectoryItemsForCwd(<-dirs, cwd, reposOnly)
 }
 
 func DirectoryItemsForCwd(dirs []string, cwd string, reposOnly bool) []Directory {

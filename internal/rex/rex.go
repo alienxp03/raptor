@@ -106,17 +106,19 @@ func BlockCwd(blockID string) string {
 	if blockID == "" {
 		return ""
 	}
-	if p := BlockPwd(blockID); p != "" {
-		return p
-	}
+	// Resolve reported cwd and foreground fallback in one Rex invocation.
 	script := fmt.Sprintf(
-		"local r = rex.block.call('com.superlogical.terminal', 'process', { block_id = '%s' }) print(r and r.foreground and r.foreground.cwd or '')",
-		blockID)
+		"local ok, r = pcall(rex.block.call, 'com.superlogical.terminal', 'pwd', { block_id = '%s' }) "+
+			"local pwd = ok and r and r.pwd "+
+			"if pwd and pwd ~= '' then print(pwd) else "+
+			"local p = rex.block.call('com.superlogical.terminal', 'process', { block_id = '%s' }) "+
+			"print(p and p.foreground and p.foreground.cwd or '') end",
+		blockID, blockID)
 	out, err := Run("do", "-b", blockID, "-e", script)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(out)
+	return strings.TrimPrefix(strings.TrimSpace(out), "file://")
 }
 
 // blockForeground returns the foreground process name of a block.
