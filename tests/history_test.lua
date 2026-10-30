@@ -12,6 +12,9 @@ local ctx = { client_id = "client", session_id = "current-session", block_id = "
 
 local real_open = io.open
 io.open = function(path, mode)
+	if mode == "rb" and path:match("/opt/raptor/bin/raptor$") then
+		return nil
+	end
 	assert(path == session_path or path == pane_path, "unexpected file")
 	if mode == "r" and files[path] == nil then
 		return nil

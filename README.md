@@ -28,7 +28,41 @@ The screenshots show the native macOS UI over an illustrative Rex workspace. All
 
 ## Install
 
-Clone the plugin and install Raptor. Building the Mac app requires macOS 14 or later and Xcode Command Line Tools; Go and Lua are needed for development and tests.
+### Early Homebrew builds
+
+Install the native app, terminal CLI, and Rex plugin from the current `master`:
+
+```sh
+brew install --HEAD alienxp03/tap/raptor
+# Quit Raptor before upgrading:
+brew upgrade --fetch-HEAD alienxp03/tap/raptor
+```
+
+These are development builds, not stable releases. Building requires macOS 14+,
+Xcode 26+, and Go 1.27.1+ (Homebrew installs Go and zoxide). The formula downloads
+Go modules before its offline build. Source access uses your Git credentials.
+
+For a fresh Rex setup, append the packaged module to the Lua search path:
+
+```lua
+-- Apple Silicon; use /usr/local for standard Intel Homebrew.
+package.path = package.path .. ";/opt/homebrew/opt/raptor/share/raptor/?.lua"
+require("raptor").setup{}
+rex.bind("shift+cmd+o", "raptor")
+rex.bind("shift+cmd+t", "raptor_wt")
+rex.bind("ctrl+n", "raptor_create")
+```
+
+Then run `rex config reload`. Existing plugin checkouts and Rex settings are
+not overwritten. Update an existing checkout once to get package discovery.
+The plugin prefers a detected Homebrew app/CLI pair through stable `opt` paths,
+so upgrades need no config edits. Explicit `bin` and `app` options still win.
+A previous `~/.local/bin/raptor` can shadow Homebrew's CLI on PATH; use
+`$(brew --prefix raptor)/bin/raptor` to select the packaged CLI explicitly.
+
+### Install from a checkout
+
+Clone the plugin and install Raptor. Building the Mac app requires macOS 14 or later and Xcode 26+; Go and Lua are needed for development and tests.
 
 ```sh
 git clone https://github.com/alienxp03/raptor ~/.config/rex/raptor

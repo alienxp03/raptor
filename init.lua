@@ -7,12 +7,27 @@
 local M = {}
 
 function M.setup(options)
+	-- Stable Homebrew opt paths follow upgrades without rewriting user config.
+	local brew_bin, brew_app
+	local prefixes = { os.getenv("HOMEBREW_PREFIX") or "", "/opt/homebrew", "/usr/local" }
+	for _, prefix in ipairs(prefixes) do
+		if prefix ~= "" then
+			local bin = prefix .. "/opt/raptor/bin/raptor"
+			local file = io.open(bin, "rb")
+			if file then
+				file:close()
+				brew_bin = bin
+				brew_app = prefix .. "/opt/raptor/libexec/Raptor.app"
+				break
+			end
+		end
+	end
 	local cfg = {
 		bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
 		mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },
-		bin = os.getenv("HOME") .. "/.local/bin/raptor",
+		bin = brew_bin or (os.getenv("HOME") .. "/.local/bin/raptor"),
 		ui = "auto", -- Native Mac app when installed; terminal on mobile.
-		app = "", -- Optional Raptor.app path; otherwise search standard locations.
+		app = brew_app or "", -- Explicit options override automatic package discovery.
 	}
 	for key, value in pairs(options or {}) do
 		if cfg[key] == nil then

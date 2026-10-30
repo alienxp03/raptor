@@ -52,7 +52,7 @@ for arch in "${archs[@]}"; do
     -target "$arch-apple-macosx14.0" -framework SwiftUI -framework AppKit \
     "${sources[@]}" -o "$work/RaptorUI-$arch"
   (cd "$SCRIPT_ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch \
-    "$GO" build -trimpath -ldflags "-X main.version=$VERSION" -o "$work/raptor-cli-$arch" ./cmd/raptor)
+    "$GO" build -trimpath -ldflags "-X main.version=${CLI_VERSION:-$VERSION}" -o "$work/raptor-cli-$arch" ./cmd/raptor)
 done
 if [[ $ARCH == universal ]]; then
   xcrun lipo -create "$work/RaptorUI-arm64" "$work/RaptorUI-x86_64" -output "$app/Contents/MacOS/Raptor"

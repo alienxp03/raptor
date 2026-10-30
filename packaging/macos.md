@@ -1,7 +1,7 @@
 # Local macOS packaging
 
 Run from any directory. Requires macOS, Xcode command-line tools with the macOS
-14+ SDK, and Go compatible with `go.mod`. `GO` selects a Go executable; normal
+26+ SDK (Xcode 26+), and Go compatible with `go.mod`. `GO` selects a Go executable; normal
 `GOTOOLCHAIN` behavior is kept. No sandbox: the backend needs Rex CLI access.
 No entitlements are needed. No network icon downloads.
 
@@ -19,7 +19,8 @@ Tests on both hardware architectures are still needed.
 
 Overrides:
 
-- `VERSION`: numeric major.minor.patch, default `0.0.1`.
+- `VERSION`: numeric major.minor.patch for the app bundle, default `0.0.1`.
+- `CLI_VERSION`: CLI version text; defaults to `VERSION`. Homebrew sets its HEAD revision.
 - `DIST_DIR`: output directory. Relative paths resolve from the caller's directory.
 - `ARCH` or `--arch arm64|x86_64`, or `--universal`: target architecture.
 - `GO`: executable path, including paths with spaces (not a command plus flags).
@@ -67,8 +68,36 @@ Make targets:
 - `make install-app`: build/install the Mac app plus CLI explicitly.
 - `make test-macos`: run native model/transport tests and strict Swift UI checks.
 
-`homebrew/raptor.rb.in` is an unfilled cask template, not a working release.
-Fill VERSION, ARCH, SHA256, and RELEASE_BASE_URL only after an explicit upload.
-Use the checksum for that exact ZIP and add an architecture constraint for a
-single-architecture release. Cask installation does not configure the Rex plugin.
-No publishing workflow is included.
+## Homebrew HEAD package
+
+`homebrew/raptor.rb` is the working HEAD-only formula, also published as
+`alienxp03/homebrew-tap/Formula/raptor.rb`. Keep both copies identical.
+
+```sh
+brew install --HEAD alienxp03/tap/raptor
+brew upgrade --fetch-HEAD alienxp03/tap/raptor
+brew test --HEAD alienxp03/tap/raptor
+```
+
+Homebrew 7+ runs the formula's `fetch` method with network access to download Go
+modules, then builds offline. The formula needs Xcode 26+ to compile the guarded
+macOS 26 glass API; the app still targets macOS 14+. Go 1.27.1+ is required.
+
+The package owns only Homebrew paths:
+- `opt/raptor/libexec/Raptor.app`: signed native app and bundled backend.
+- `opt/raptor/bin/raptor`: link to that same backend.
+- `opt/raptor/share/raptor/init.lua`: Rex plugin.
+
+It does not run the local installer, replace checkout symlinks, write user config,
+or overwrite `~/Applications/Raptor.app`. Rex's Lua search path must include the
+packaged plugin for a fresh install; see the README or `brew info` caveats.
+An updated plugin automatically selects the Homebrew app and CLI through stable
+`opt` paths. Explicit `bin`/`app` overrides remain supported.
+
+Quit the app before upgrading, then reopen it to start the new backend. A manual
+CLI earlier on PATH can shadow the package. The source repository currently has
+no declared SPDX license; the formula does not assume MIT. Private source clones
+require the user's Git access. No credentials are embedded.
+
+`homebrew/raptor.rb.in` remains an unfilled cask template for a future tagged
+binary release. It is not used by the HEAD formula.
