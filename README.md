@@ -48,7 +48,7 @@ rex.bind("shift+cmd+t", "raptor_wt")
 
 These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_wt`, `raptor_last_session`, and `raptor_last_pane` to the Rex command palette. Reload the Rex config after you change it.
 
-The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens near the top of the active screen and stays warm while hidden. Escape dismisses it; Cmd+Q quits completely. Each reopening gets fresh Rex context and a new Go backend. No focus watcher or login item is added. If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`.
+The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it; Cmd+Q quits completely. Each reopening gets fresh Rex context and a new Go backend. No focus watcher or login item is added. If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`.
 
 ### Local Mac package
 

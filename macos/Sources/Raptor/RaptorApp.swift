@@ -78,7 +78,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if let panel { bringForward(panel) }
             return
         }
-        let screen = invocationScreen()
+        let anchor = invocationAnchor()
         sizeSubscription?.cancel()
         model?.onClose = nil
         model?.close()
@@ -112,8 +112,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             picker.contentView = NSHostingView(rootView: PickerView(model: next))
         }
         picker.title = next.heading
-        if let area = screen?.visibleFrame {
-            picker.setFrame(PickerStyle.panelFrame(in: area, height: PickerStyle.height(for: next)), display: false)
+        if let (area, screen) = anchor {
+            picker.setFrame(PickerStyle.panelFrame(in: area, height: PickerStyle.height(for: next)).clamped(to: screen.visibleFrame), display: false)
         } else { picker.center() }
         sizeSubscription = next.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.resizePanel() }
@@ -122,23 +122,28 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         next.start()
     }
 
-    private func invocationScreen() -> NSScreen? {
+    private func invocationAnchor() -> (area: CGRect, screen: NSScreen)? {
         // For a warm accessory app, NSScreen.main may still refer to its previous
-        // invocation. Use the foreground app's window before activating Raptor.
+        // invocation. Use the foreground app's window before activating Raptor,
+        // and anchor the picker to that window rather than to the whole screen.
         if let front = NSWorkspace.shared.frontmostApplication,
            front.processIdentifier != ProcessInfo.processInfo.processIdentifier,
            let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] {
+            let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
             for window in windows {
                 guard window[kCGWindowOwnerPID as String] as? Int32 == front.processIdentifier,
                       window[kCGWindowLayer as String] as? Int == 0,
                       let bounds = window[kCGWindowBounds as String] as? [String: Any],
                       let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
-                let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
-                let center = NSPoint(x: rect.midX, y: primaryTop - rect.midY)
-                if let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) { return screen }
+                // CGWindow bounds use a top-left origin; flip to Cocoa coordinates.
+                let frame = CGRect(x: rect.minX, y: primaryTop - rect.maxY, width: rect.width, height: rect.height)
+                if let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) }) {
+                    return (frame, screen)
+                }
             }
         }
-        return NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return nil }
+        return (screen.visibleFrame, screen)
     }
 
     private func bringForward(_ picker: NSPanel) {

@@ -32,6 +32,19 @@ enum PickerStyle {
     }
 }
 
+extension CGRect {
+    /// Keep a panel frame fully inside `limit` when it overlaps it.
+    func clamped(to limit: CGRect) -> CGRect {
+        guard intersects(limit) else { return self }
+        var origin = self.origin
+        if origin.x < limit.minX { origin.x = limit.minX }
+        if origin.x + width > limit.maxX { origin.x = limit.maxX - width }
+        if origin.y < limit.minY { origin.y = limit.minY }
+        if origin.y + height > limit.maxY { origin.y = limit.maxY - height }
+        return CGRect(origin: origin, size: size)
+    }
+}
+
 private struct MenuMaterial: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
