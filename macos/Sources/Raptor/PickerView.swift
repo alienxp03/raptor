@@ -13,7 +13,7 @@ struct PickerView: View {
             status
             footer
         }
-        .font(.system(size: 14))
+        .font(.system(size: PickerStyle.bodyFontSize))
         .frame(width: PickerStyle.width, height: PickerStyle.height(for: model))
         .pickerGlass()
         .tint(PickerStyle.selection)
@@ -48,12 +48,12 @@ struct PickerView: View {
             if model.page == .create {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("New worktree").font(.system(size: 16, weight: .semibold))
+                        Text("New worktree").font(.system(size: PickerStyle.titleFontSize, weight: .semibold))
                         if model.options.demo { demoBadge }
                         Spacer()
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, PickerStyle.horizontalInset)
             } else {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -70,7 +70,7 @@ struct PickerView: View {
                     if model.options.demo { demoBadge }
                 }
                 .padding(.horizontal, 9)
-                .frame(height: 30)
+                .frame(height: PickerStyle.controlHeight)
                 .background(.primary.opacity(0.065), in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.primary.opacity(0.045)))
                 .padding(.horizontal, 5)
@@ -126,11 +126,11 @@ struct PickerView: View {
                 Text(displayPath(item.path))
             }
         }
-        .font(.system(size: 13))
+        .font(.system(size: PickerStyle.bodyFontSize))
         .foregroundStyle(.primary)
         .lineLimit(1).truncationMode(.middle)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 5)
         .frame(height: model.page == .worktrees ? PickerStyle.worktreeRowHeight : PickerStyle.rowHeight)
         .background {
             if selected { RoundedRectangle(cornerRadius: 6).fill(PickerStyle.selection.opacity(0.13)) }
@@ -161,13 +161,14 @@ struct PickerView: View {
     }
 
     private var createForm: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             pathRow("Repo", value: model.repo.map(displayPath) ?? "Loading…", path: model.repo)
             HStack(spacing: 10) {
                 formLabel("Branch")
                 TextField("feat/my-change", text: $model.branch)
                     .disableAutocorrection(true)
-                    .textFieldStyle(.plain).padding(.horizontal, 9).padding(.vertical, 7)
+                    .textFieldStyle(.plain).padding(.horizontal, 9)
+                    .frame(height: PickerStyle.controlHeight)
                     .background(field == .branch ? PickerStyle.selection.opacity(0.18) : Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .branch ? PickerStyle.selection : Color.primary.opacity(0.12)))
                     .focused($field, equals: .branch)
@@ -185,7 +186,8 @@ struct PickerView: View {
                         Spacer()
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, 9).padding(.vertical, 7)
+                    .padding(.horizontal, 9)
+                    .frame(height: PickerStyle.controlHeight)
                     .background(field == .base ? PickerStyle.selection.opacity(0.18) : Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .base ? PickerStyle.selection : Color.primary.opacity(0.12)))
                 }
@@ -212,7 +214,7 @@ struct PickerView: View {
                     .accessibilityIdentifier("create-validation")
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
+        .padding(.horizontal, PickerStyle.horizontalInset).padding(.vertical, 8)
         .disabled(model.busy).frame(maxHeight: .infinity, alignment: .top)
     }
 
@@ -251,7 +253,8 @@ struct PickerView: View {
                 Text(createActionLabel).fontWeight(.semibold)
                 Text("⌘↵").foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16).padding(.vertical, 9)
+            .padding(.horizontal, 12)
+            .frame(height: PickerStyle.controlHeight)
             .background(PickerStyle.selection.opacity(0.22), in: Capsule())
             .overlay(Capsule().strokeBorder(PickerStyle.selection.opacity(field == .submit ? 0.9 : 0.4)))
             .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
@@ -320,7 +323,8 @@ struct PickerView: View {
                             Text("New").fontWeight(.medium)
                             Text("⌃N").foregroundStyle(.secondary)
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .padding(.horizontal, 12)
+                        .frame(height: PickerStyle.controlHeight)
                         .background(PickerStyle.selection.opacity(0.13), in: Capsule())
                         .overlay(Capsule().strokeBorder(PickerStyle.selection.opacity(0.3)))
                     }
@@ -337,8 +341,8 @@ struct PickerView: View {
         .font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.65))
         .lineLimit(1)
         .buttonStyle(.plain)
-        .padding(.horizontal, 10)
-        .frame(height: model.page == .create ? 50 : PickerStyle.footerHeight)
+        .padding(.horizontal, PickerStyle.horizontalInset)
+        .frame(height: PickerStyle.footerHeight)
         .overlay(alignment: .top) {
             if model.page != .create { Divider().opacity(0.4) }
         }
@@ -380,9 +384,9 @@ struct PickerView: View {
                     Text(PickerModel.targetLabel(model.target))
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                 }
-                .font(.system(size: model.page == .create ? 13 : 12, weight: .medium)).foregroundStyle(Color.primary)
+                .font(.system(size: PickerStyle.bodyFontSize, weight: .medium)).foregroundStyle(Color.primary)
                 .padding(.horizontal, model.page == .create ? 0 : 7)
-                .padding(.vertical, 4)
+                .frame(height: PickerStyle.controlHeight)
                 .background(model.page == .create && field == .target ? PickerStyle.selection.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
                 .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(field == .target ? PickerStyle.selection.opacity(0.6) : Color.clear))
             }

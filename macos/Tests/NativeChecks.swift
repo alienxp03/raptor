@@ -118,6 +118,8 @@ struct NativeChecks {
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data("{\"needs_repo\":false,\"base_branch\":\"main\",\"items\":[{\"path\":\"/a\",\"branch\":\"main\",\"is_main\":true}]}".utf8))
         precondition(decoded.items?.first?.isMain == true && decoded.baseBranch == "main")
 
+        precondition(PickerStyle.bodyFontSize == 13 && PickerStyle.controlHeight == PickerStyle.rowHeight && PickerStyle.createHeaderHeight == PickerStyle.searchHeight,
+                     "Launcher and form must share typography and control sizing")
         precondition(PickerModel.targetLabel("tab") == "New tab")
         precondition(PickerModel.targetLabel("session") == "Session")
         precondition(PickerModel.targetLabel("here") == "Current shell")
@@ -146,7 +148,7 @@ struct NativeChecks {
         try await wait { !model.busy && !model.loading }
         precondition(model.items.count == 2)
         model.beginCreate()
-        precondition(PickerStyle.height(for: model) == 310, "Creation form grew beyond the compact layout")
+        precondition(PickerStyle.height(for: model) == 260, "Creation form grew beyond the compact layout")
         model.branch = "feat/test"
         try await wait { model.previewReady }
         precondition(model.canCreate && model.destination == "/Users/demo/Projects/example-kit-worktrees/feat-test")
@@ -290,11 +292,11 @@ struct NativeChecks {
         let origin = await backend.requestedRepo()
         precondition(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)
         precondition(direct.branch == "feat/typed-early" && direct.base == "main")
-        precondition(PickerStyle.height(for: direct) == 310)
+        precondition(PickerStyle.height(for: direct) == 260)
         direct.validationError = "Branch already exists"
-        precondition(!direct.canSubmitForm && PickerStyle.height(for: direct) == 338)
+        precondition(!direct.canSubmitForm && PickerStyle.height(for: direct) == 288)
         direct.error = "Backend error"
-        precondition(PickerStyle.height(for: direct) == 374)
+        precondition(PickerStyle.height(for: direct) == 324)
         direct.validationError = nil
         direct.error = nil
         let targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]

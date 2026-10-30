@@ -60,7 +60,7 @@ struct BranchPickerPopover: View {
                     .accessibilityIdentifier("base-error")
             }
         }
-        .font(.system(size: 13))
+        .font(.system(size: PickerStyle.bodyFontSize))
         .frame(width: 360, height: popoverHeight)
         .pickerGlass()
         .tint(PickerStyle.selection)

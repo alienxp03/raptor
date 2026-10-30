@@ -6,11 +6,16 @@ enum PickerStyle {
     static let width: CGFloat = 640
     static let topInset: CGFloat = 72
     static let radius: CGFloat = 14
+    static let bodyFontSize: CGFloat = 13
+    static let titleFontSize: CGFloat = 14
+    static let controlHeight: CGFloat = 28
+    static let horizontalInset: CGFloat = 10
+    static let createHeight: CGFloat = 260
     static let searchHeight: CGFloat = 42
-    static let createHeaderHeight: CGFloat = 40
+    static let createHeaderHeight: CGFloat = searchHeight
     static let footerHeight: CGFloat = 42
-    static let rowHeight: CGFloat = 28
-    static let worktreeRowHeight: CGFloat = 28
+    static let rowHeight: CGFloat = controlHeight
+    static let worktreeRowHeight: CGFloat = controlHeight
     static let selection = Color(red: 0.48, green: 0.61, blue: 0.49)
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {
@@ -21,7 +26,7 @@ enum PickerStyle {
     @MainActor static func height(for model: PickerModel) -> CGFloat {
         if model.page == .create {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 28 : 0
-            return 310 + validation + (model.error == nil && model.notice == nil ? 0 : 36)
+            return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 36)
         }
         let rowHeight = model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight
         let rows = CGFloat(min(max(model.items.count, 2), 8))
