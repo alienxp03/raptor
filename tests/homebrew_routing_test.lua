@@ -22,7 +22,7 @@ for _, prefix in ipairs({ "/opt/homebrew", "/usr/local", "/custom/homebrew" }) d
 		end,
 		call = function()
 			return {
-				clients = { { client_id = "C", info = { platform = "macos" }, principal = { transport = "unix" } } },
+				clients = { { client_id = "C", info = { platform = "macos", kind = "app" }, principal = { transport = "unix" } } },
 			}
 		end,
 		block = {

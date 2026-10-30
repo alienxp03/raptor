@@ -22,7 +22,7 @@ local function check(case)
 				clients = {
 					{
 						client_id = "demo-client",
-						info = { platform = case.platform },
+						info = { platform = case.platform, kind = case.kind or "app" },
 						principal = { transport = case.transport or "unix" },
 					},
 				},
@@ -100,13 +100,14 @@ local function check(case)
 	actions.raptor_worktree_new(ctx)
 	assert(#layers == layer_count, "Ctrl+N inside a picker must not nest layers")
 	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+n")
-	if case.platform ~= "macos" or case.ui == "terminal" or not case.installed or case.transport == "tls" then
+	if case.platform ~= "macos" or case.kind == "cli" or case.ui == "terminal" or not case.installed or case.transport == "tls" then
 		assert(#executions == 0, case.name .. ": native process unexpectedly started")
 	end
 end
 
 for _, case in ipairs({
 	{ name = "Mac native", platform = "macos", installed = true, expected = "native" },
+	{ name = "Mac-hosted CLI is not a viewing app", platform = "macos", kind = "cli", installed = true, expected = "terminal" },
 	{ name = "remote Mac", platform = "macos", transport = "tls", installed = true, expected = "terminal" },
 	{ name = "iPhone", platform = "ios", installed = true, expected = "terminal" },
 	{ name = "iPad", platform = "ipados", installed = true, expected = "terminal" },

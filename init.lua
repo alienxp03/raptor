@@ -61,7 +61,10 @@ function M.setup(options)
 		local clients = rex.call("client.list")
 		for _, client in ipairs(clients and clients.clients or {}) do
 			if client.client_id == ctx.client_id and client.info ~= nil then
-				return client.info.platform, client.principal ~= nil and client.principal.transport == "unix"
+				-- A CLI runs on the server even when invoked from an iPhone.
+				-- Its platform/transport do not identify the viewing app.
+				return client.info.platform,
+					client.info.kind == "app" and client.principal ~= nil and client.principal.transport == "unix"
 			end
 		end
 		return nil
