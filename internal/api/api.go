@@ -121,13 +121,14 @@ type treeItem struct {
 }
 
 type treeResult struct {
-	Repo       string     `json:"repo"`
-	NeedsRepo  bool       `json:"needs_repo"`
-	Items      []treeItem `json:"items"`
-	Branches   []string   `json:"branches"`
-	BaseBranch string     `json:"base_branch"`
-	Targets    []string   `json:"targets"`
-	Target     string     `json:"target"`
+	DestinationRoot string     `json:"destination_root"`
+	Repo            string     `json:"repo"`
+	NeedsRepo       bool       `json:"needs_repo"`
+	Items           []treeItem `json:"items"`
+	Branches        []string   `json:"branches"`
+	BaseBranch      string     `json:"base_branch"`
+	Targets         []string   `json:"targets"`
+	Target          string     `json:"target"`
 }
 
 type branchesResult struct {
@@ -176,6 +177,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		result := treeResult{Repo: repo, NeedsRepo: repo == "", Items: []treeItem{}, Branches: []string{}, Targets: h.targets(), Target: h.cfg.Enter}
 		if repo != "" {
 			info := catalog.ListWorktrees(repo, h.cfg)
+			result.DestinationRoot = info.Root
 			result.Branches = append(result.Branches, info.Branches...)
 			result.BaseBranch = info.BaseBranch
 			for _, i := range catalog.FilterWorktrees(info.Items, p.Query) {
@@ -263,7 +265,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 }
 
 func (h *Handler) targets() []string {
-	return append([]string{}, h.cfg.Targets...)
+	return h.cfg.AvailableTargets(h.ctx.Block != "")
 }
 
 func canonicalPath(path string) string {

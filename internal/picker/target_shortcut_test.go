@@ -10,13 +10,35 @@ import (
 
 func TestCtrlOCyclesListTargets(t *testing.T) {
 	cfg := config.Default()
-	dirs := &dirModel{cfg: cfg, target: "tab"}
-	trees := &wtModel{cfg: cfg, target: "tab"}
+	dirs := &dirModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, target: "tab"}
+	trees := &wtModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, target: "tab"}
 	for _, want := range []string{"session", "here", "pane", "pane_left", "pane_above", "pane_below", "tab"} {
 		_, dirCmd := dirs.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 		_, treeCmd := trees.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 		if dirs.target != want || trees.target != want || dirCmd != nil || treeCmd != nil {
 			t.Fatalf("Ctrl+O must cycle list targets without submitting; want %s", want)
+		}
+	}
+}
+
+func TestCtrlOTargetParity(t *testing.T) {
+	for _, cfg := range []config.Config{config.Default(), {Targets: []string{"tab", "pane_below", "session"}}} {
+		for _, block := range []string{"", "origin"} {
+			ctx := rex.Ctx{Block: block}
+			dirs := &dirModel{cfg: cfg, ctx: ctx, target: "tab"}
+			trees := &wtModel{cfg: cfg, ctx: ctx, target: "tab"}
+			form := &wtModel{cfg: cfg, ctx: ctx, form: true, target: "tab"}
+			// The API uses this same source for native target order.
+			targets := cfg.AvailableTargets(block != "")
+			for i := 1; i <= len(targets); i++ {
+				want := targets[i%len(targets)]
+				for _, model := range []tea.Model{dirs, trees, form} {
+					model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+				}
+				if dirs.target != want || trees.target != want || form.target != want {
+					t.Fatalf("Ctrl+O order differs across lists/form/API: want %s", want)
+				}
+			}
 		}
 	}
 }

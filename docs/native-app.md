@@ -24,6 +24,8 @@ require("raptor").setup{
 }
 ```
 
+All picker actions (`raptor`, `raptor_wt`, and `raptor_create`) use this setting. `raptor_create` sends `mode=wt-create` to the native app or runs `raptor wt --create` in the terminal. It only opens a form; it never creates a worktree without confirmation.
+
 Without an explicit app path, the plugin checks `~/Applications/Raptor.app` and `/Applications/Raptor.app`. Your bindings remain in your Rex `init.lua`. The installer does not change those bindings.
 
 ## Reopening and performance
@@ -36,7 +38,7 @@ Quit the app before replacing an installed bundle. The build/installer refuses t
 
 ## Shared logic
 
-The footer's **Open in:** dropdown names the destination explicitly: **New tab**, **Session**, or **Current shell**. Ctrl+O cycles the choices; Ctrl+Shift+O cycles backward. The dropdown also supports pointer selection. Tab / Shift+Tab moves keyboard focus, not the open target. Ctrl+P remains the pane-split shortcut.
+The **Open in** control uses the shared target order: tab → session → cd here → pane right → left → above → below. Configured target lists are respected by both interfaces; cd/pane targets require an origin pane. Ctrl+O cycles the choices; Ctrl+Shift+O cycles backward. The dropdown also supports pointer selection. Tab / Shift+Tab moves keyboard focus, not the open target. Ctrl+P remains the pane-split shortcut.
 
 Home-directory labels use `~/…`; tooltips and backend requests retain the full absolute paths. Paths outside the current home directory stay absolute.
 
@@ -55,7 +57,7 @@ The app starts the bundled `Contents/MacOS/raptor-cli` executable with the origi
 
 ```json
 {"id":1,"method":"directories","params":{"query":"demo"}}
-{"id":1,"result":{"items":[{"path":"/demo/project","label":"project"}],"targets":["tab","here","session"],"target":"tab"}}
+{"id":1,"result":{"items":[{"path":"/demo/project","label":"project"}],"targets":["tab","session","here","pane","pane_left","pane_above","pane_below"],"target":"tab"}}
 ```
 
 Errors have an `error` string instead of `result`. IDs identify requests; they do not identify directories or worktrees. Paths returned by Go identify selectable entries.
@@ -72,7 +74,7 @@ Errors have an `error` string instead of `result`. IDs identify requests; they d
 
 The native **Create** button sends creation followed by dispatch. These remain separate backend operations: the app records the created path before opening it. If opening fails, **Retry opening** dispatches that existing path without creating again. A timeout during creation can leave the outcome unknown; check the worktree list before trying creation again.
 
-The creation form has a branch field, searchable local **From branch** picker, read-only destination preview, and open target. Branch matching and validation run in Go. An untouched branch field shows guidance, not a validation error. Tab / Shift+Tab skips disabled controls; Cmd+Enter submits. The branch popover owns its keyboard events: Enter selects, Escape closes it and restores form focus; neither submits nor closes the form beneath it.
+The creation form labels the source **Repo** and new **Destination** paths, with branch, searchable local base branch, and open target fields. Direct `wt-create` launches display the form before metadata loads. Escape closes a directly opened form; it returns to the parent list for a form opened from that list. A base-branch popover is dismissed first. Branch matching and validation run in Go. An untouched branch field shows guidance, not a validation error. Tab / Shift+Tab skips disabled controls; Cmd+Enter submits. The branch popover owns its keyboard events: Enter selects, Escape closes it and restores form focus; neither submits nor closes the form beneath it.
 
 ## Releases
 

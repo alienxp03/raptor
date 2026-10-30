@@ -234,10 +234,10 @@ func TestWorktreeLifecycle(t *testing.T) {
 	if err := call("worktrees.list", map[string]any{"repo": repo}, &listed); err != "" {
 		t.Fatal(err)
 	}
-	if listed.Repo != repo || listed.NeedsRepo || len(listed.Items) != 2 || !listed.Items[0].IsMain || listed.BaseBranch != "main" {
+	if listed.DestinationRoot != filepath.Dir(want) || listed.Repo != repo || listed.NeedsRepo || len(listed.Items) != 2 || !listed.Items[0].IsMain || listed.BaseBranch != "main" {
 		t.Fatalf("list: %+v", listed)
 	}
-	if !reflect.DeepEqual(listed.Branches, []string{"feat/native", "main"}) || !reflect.DeepEqual(listed.Targets, cfg.Targets) || listed.Target != cfg.Enter {
+	if !reflect.DeepEqual(listed.Branches, []string{"feat/native", "main"}) || !reflect.DeepEqual(listed.Targets, cfg.AvailableTargets(false)) || listed.Target != cfg.Enter {
 		t.Fatalf("metadata: %+v", listed)
 	}
 	for _, query := range []string{"fnt", "sample", "does-not-match"} {
@@ -333,7 +333,7 @@ func TestDirectoryQueries(t *testing.T) {
 			for _, index := range catalog.FilterDirectories(items, query) {
 				want = append(want, items[index])
 			}
-			if !reflect.DeepEqual(result.Items, want) || result.Target != cfg.Enter || !reflect.DeepEqual(result.Targets, cfg.Targets) {
+			if !reflect.DeepEqual(result.Items, want) || result.Target != cfg.Enter || !reflect.DeepEqual(result.Targets, cfg.AvailableTargets(false)) {
 				t.Fatalf("directory query: %+v want %+v", result, want)
 			}
 		}

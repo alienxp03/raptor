@@ -4,7 +4,7 @@ struct PickerView: View {
     @ObservedObject var model: PickerModel
     @FocusState private var field: Field?
     @State private var baseReturnFocus: Field = .base
-    private enum Field { case search, branch, base, target, cancel, submit }
+    private enum Field { case search, branch, base, target, submit }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,13 +48,10 @@ struct PickerView: View {
             if model.page == .create {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Create worktree").font(.system(size: 16, weight: .semibold))
+                        Text("New worktree").font(.system(size: 16, weight: .semibold))
                         if model.options.demo { demoBadge }
                         Spacer()
                     }
-                    Text(displayPath(model.repo ?? ""))
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle).help(model.repo ?? "")
                 }
                 .padding(.horizontal, 16)
             } else {
@@ -114,30 +111,35 @@ struct PickerView: View {
 
     private func row(_ item: PickerItem) -> some View {
         let selected = model.selectedID == item.id
-        let primary = selected ? Color.black.opacity(0.9) : Color.primary
-        return VStack(alignment: .leading, spacing: 2) {
+        return HStack(spacing: 14) {
             if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
-                    .foregroundStyle(primary)
-                Text(displayPath(item.path)).font(.system(size: 12))
-                    .foregroundStyle(selected ? Color.black.opacity(0.6) : Color.secondary)
+                    .fontWeight(selected ? .medium : .regular)
+                    .frame(width: PickerStyle.width * 0.36, alignment: .leading)
+                Text(displayPath(item.path)).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             } else if item.current == true {
-                HStack(spacing: 8) {
-                    Text(item.label ?? "Current repo").fontWeight(.medium)
-                    Text(displayPath(item.path))
-                        .foregroundStyle(selected ? Color.black.opacity(0.6) : Color.secondary)
-                }
-                .foregroundStyle(primary)
+                Text(item.label ?? "Current repo").fontWeight(.medium)
+                Text(displayPath(item.path)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
-                Text(displayPath(item.path)).foregroundStyle(primary)
+                Text(displayPath(item.path))
             }
         }
+        .font(.system(size: 13))
+        .foregroundStyle(.primary)
         .lineLimit(1).truncationMode(.middle)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .frame(height: model.page == .worktrees ? PickerStyle.worktreeRowHeight : PickerStyle.rowHeight)
         .background {
-            if selected { RoundedRectangle(cornerRadius: 8).fill(PickerStyle.selection) }
+            if selected { RoundedRectangle(cornerRadius: 6).fill(PickerStyle.selection.opacity(0.13)) }
+        }
+        .overlay(alignment: .leading) {
+            if selected {
+                RoundedRectangle(cornerRadius: 1).fill(PickerStyle.selection)
+                    .frame(width: 2, height: 16).padding(.leading, 3)
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -159,13 +161,14 @@ struct PickerView: View {
     }
 
     private var createForm: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Branch name").font(.system(size: 12, weight: .medium)).foregroundStyle(.primary.opacity(0.65))
+        VStack(alignment: .leading, spacing: 10) {
+            pathRow("Repo", value: model.repo.map(displayPath) ?? "Loading…", path: model.repo)
+            HStack(spacing: 10) {
+                formLabel("Branch")
                 TextField("feat/my-change", text: $model.branch)
                     .disableAutocorrection(true)
                     .textFieldStyle(.plain).padding(.horizontal, 9).padding(.vertical, 7)
-                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                    .background(field == .branch ? PickerStyle.selection.opacity(0.18) : Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .branch ? PickerStyle.selection : Color.primary.opacity(0.12)))
                     .focused($field, equals: .branch)
                     .task { await Task.yield(); field = .branch }
@@ -173,8 +176,8 @@ struct PickerView: View {
                     .disabled(model.createdPath != nil)
                     .accessibilityLabel("New branch name").accessibilityIdentifier("create-branch")
             }
-            VStack(alignment: .leading, spacing: 5) {
-                Text("From branch").font(.system(size: 12, weight: .medium)).foregroundStyle(.primary.opacity(0.65))
+            HStack(spacing: 10) {
+                formLabel("Base")
                 Button { presentBasePicker() } label: {
                     HStack {
                         Text(model.base.isEmpty ? "Choose a local branch…" : model.base)
@@ -183,14 +186,14 @@ struct PickerView: View {
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 9).padding(.vertical, 7)
-                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+                    .background(field == .base ? PickerStyle.selection.opacity(0.18) : Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .base ? PickerStyle.selection : Color.primary.opacity(0.12)))
                 }
                 .buttonStyle(.plain).focusable().focused($field, equals: .base)
                 .onKeyPress(.return) { presentBasePicker(); return .handled }
-                .disabled(model.createdPath != nil)
+                .disabled(model.createdPath != nil || model.loading)
                 .help("Search local branches. Enter selects a branch.")
-                .accessibilityLabel("From branch: \(model.base)")
+                .accessibilityLabel("Base branch: \(model.base)")
                 .accessibilityIdentifier("create-base")
                 .popover(isPresented: $model.basePickerPresented, arrowEdge: .bottom) {
                     BranchPickerPopover(current: model.base, initialBranches: model.branches,
@@ -202,67 +205,38 @@ struct PickerView: View {
                         })
                 }
             }
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(model.createdPath == nil ? "Destination" : "Created at")
-                        .font(.system(size: 12, weight: .medium)).foregroundStyle(.primary.opacity(0.65))
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(destinationLabel)
-                            .font(.system(size: 12)).foregroundStyle(model.destination == nil && model.createdPath == nil ? Color.secondary : Color.primary)
-                            .textSelection(.enabled).lineLimit(2).truncationMode(.middle)
-                            .frame(maxWidth: .infinity, minHeight: 16, alignment: .topLeading)
-                        if !model.branch.isEmpty && !model.previewReady && model.createdPath == nil {
-                            ProgressView().controlSize(.mini).accessibilityLabel("Checking destination")
-                        }
-                    }
-                    .padding(.horizontal, 9).padding(.vertical, 6)
-                    .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityIdentifier("create-destination")
-                    .help(model.createdPath ?? model.destination ?? "")
-                    if !model.branch.isEmpty, model.previewReady, let validation = model.validationError {
-                        Text(validation).font(.system(size: 12)).foregroundStyle(.orange).lineLimit(2)
-                            .accessibilityIdentifier("create-validation")
-                    }
-                }
-                HStack {
-                    openTargetControl
-                    Spacer()
-                    Text("⌃O").font(.system(size: 11)).foregroundStyle(.secondary)
-                        .help("Ctrl+O changes the open target")
-                }
+            openTargetControl
+            pathRow("Destination", value: destinationLabel, path: model.createdPath ?? model.destination ?? model.destinationRoot)
+            if !model.branch.isEmpty, model.previewReady, let validation = model.validationError {
+                Text(validation).font(.system(size: 12)).foregroundStyle(.orange).lineLimit(2)
+                    .accessibilityIdentifier("create-validation")
             }
-            HStack {
-                Button(model.createdPath == nil ? "Cancel" : "Back") { model.escape() }
-                    .buttonStyle(.plain).focusable().focused($field, equals: .cancel)
-                    .onKeyPress(.return) { model.escape(); return .handled }
-                    .accessibilityIdentifier("create-back")
-                Spacer()
-                Button { model.create() } label: {
-                    HStack(spacing: 8) {
-                        Text(createActionLabel)
-                        Text("⌘↵").font(.system(size: 11)).opacity(0.75)
-                    }
-                }
-                .buttonStyle(.borderedProminent).controlSize(.regular)
-                .focusable().focused($field, equals: .submit)
-                .keyboardShortcut(.return, modifiers: .command)
-                .onKeyPress(.return) {
-                    if model.canSubmitForm { model.create() }
-                    return .handled
-                }
-                .disabled(!model.canSubmitForm)
-                .accessibilityLabel(createActionLabel)
-                .accessibilityIdentifier(model.createdPath == nil ? "create-submit" : "open-created")
-            }
-            .padding(.top, 2)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .disabled(model.busy).frame(maxHeight: .infinity, alignment: .top)
     }
 
+    private func formLabel(_ title: String) -> some View {
+        Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
+            .frame(width: 90, alignment: .leading)
+    }
+
+    private func pathRow(_ title: String, value: String, path: String?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            formLabel(title)
+            Text(value).font(.system(size: 12)).foregroundStyle(.secondary)
+                .textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(path ?? value)
+                .accessibilityIdentifier(title == "Repo" ? "create-repo" : "create-destination")
+        }
+    }
+
     private var destinationLabel: String {
         if let path = model.createdPath ?? model.destination { return displayPath(path) }
-        return model.branch.isEmpty ? "Enter a branch name to preview its location." : "Checking destination…"
+        if model.loading { return "Loading…" }
+        if model.branch.isEmpty, let root = model.destinationRoot { return displayPath(root) }
+        return model.branch.isEmpty ? "Loading destination…" : "Checking destination…"
     }
 
     private var createActionLabel: String {
@@ -271,7 +245,32 @@ struct PickerView: View {
         return "Create"
     }
 
+    private var createSubmitButton: some View {
+        Button { model.create() } label: {
+            HStack(spacing: 10) {
+                Text(createActionLabel).fontWeight(.semibold)
+                Text("⌘↵").foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .background(PickerStyle.selection.opacity(0.22), in: Capsule())
+            .overlay(Capsule().strokeBorder(PickerStyle.selection.opacity(field == .submit ? 0.9 : 0.4)))
+            .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+        }
+        .buttonStyle(.plain)
+        .focusable().focused($field, equals: .submit)
+        .keyboardShortcut(.return, modifiers: .command)
+        .onKeyPress(.return) {
+            if model.canSubmitForm { model.create() }
+            return .handled
+        }
+        .disabled(!model.canSubmitForm)
+        .opacity(model.canSubmitForm ? 1 : 0.45)
+        .accessibilityLabel(createActionLabel)
+        .accessibilityIdentifier(model.createdPath == nil ? "create-submit" : "open-created")
+    }
+
     private func presentBasePicker() {
+        guard !model.loading, !model.busy, model.createdPath == nil else { return }
         baseReturnFocus = .base
         field = .base
         model.basePickerPresented = true
@@ -279,9 +278,8 @@ struct PickerView: View {
 
     private func advanceFormFocus(backward: Bool) {
         guard model.page == .create, !model.busy, !model.basePickerPresented else { return }
-        var fields: [Field] = model.createdPath == nil ? [.branch, .base] : []
+        var fields: [Field] = model.createdPath == nil ? (model.loading ? [.branch] : [.branch, .base]) : []
         if !model.targets.isEmpty { fields.append(.target) }
-        fields.append(.cancel)
         if model.canSubmitForm { fields.append(.submit) }
         let current = fields.firstIndex(of: field ?? .branch) ?? (backward ? 0 : -1)
         field = fields[(current + (backward ? fields.count - 1 : 1)) % fields.count]
@@ -313,46 +311,66 @@ struct PickerView: View {
                 openTargetControl
             }
             Spacer(minLength: 0)
-            if !model.splitMode {
+            if model.page == .create { createSubmitButton }
+            if !model.splitMode && model.page != .create {
                 if model.page == .directories || model.page == .worktrees {
-                    Button("Split ⌃P") { model.toggleSplit() }
-                        .disabled(!model.canOpen)
-                        .help("Ctrl+P, then H/J/K/L or an arrow to split. Esc cancels.")
-                        .accessibilityLabel("Split pane, Control P")
-                        .accessibilityIdentifier("toggle-split")
-                }
-                if model.page == .directories {
-                    Button("Worktrees ⌃T") { model.showWorktrees() }
-                        .disabled(model.busy || model.loading).accessibilityIdentifier("show-worktrees")
-                } else if model.page == .worktrees {
-                    Button("New ⌘N") { model.beginCreate() }
-                        .disabled(model.busy || model.loading).accessibilityIdentifier("new-worktree")
-                    Button("Remove…") { model.askRemove() }
-                        .disabled(model.busy || model.loading || model.selected?.isMain != false)
-                        .accessibilityIdentifier("remove-worktree")
-                }
-                if model.page != .create {
-                    Button("↵") { model.choose() }
-                        .disabled(model.page == .repositories ? model.selected == nil || model.busy || model.loading : !model.canOpen)
-                        .help("Open selected location").accessibilityLabel("Open selected location")
+                    listActions
+                    Button { model.beginCreate() } label: {
+                        HStack(spacing: 8) {
+                            Text("New").fontWeight(.medium)
+                            Text("⌃N").foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(PickerStyle.selection.opacity(0.13), in: Capsule())
+                        .overlay(Capsule().strokeBorder(PickerStyle.selection.opacity(0.3)))
+                    }
+                    .disabled(model.busy || model.loading || model.selected == nil)
+                    .help("Create a worktree for the selected repository. Ctrl+N or Cmd+N.")
+                    .accessibilityIdentifier("new-worktree")
+                } else if model.page == .repositories {
+                    Button("Choose ↵") { model.choose() }
+                        .disabled(model.selected == nil || model.busy || model.loading)
                         .accessibilityIdentifier("open-selected")
                 }
             }
-            Button("Esc") { model.escape() }
-                .help(model.page == .directories ? "Close picker" : "Back")
-                .disabled(model.busy).accessibilityIdentifier("close-picker")
         }
         .font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.65))
         .lineLimit(1)
         .buttonStyle(.plain)
         .padding(.horizontal, 10)
-        .frame(height: PickerStyle.footerHeight)
-        .overlay(alignment: .top) { Divider().opacity(0.4) }
+        .frame(height: model.page == .create ? 50 : PickerStyle.footerHeight)
+        .overlay(alignment: .top) {
+            if model.page != .create { Divider().opacity(0.4) }
+        }
+    }
+
+    private var listActions: some View {
+        Menu {
+            Button("Open ↵") { model.choose() }.disabled(!model.canOpen)
+            Button("Split pane ⌃P") { model.toggleSplit() }.disabled(!model.canOpen)
+            if model.page == .directories {
+                Button("Worktrees ⌃T") { model.showWorktrees() }
+                    .disabled(model.busy || model.loading || model.selected == nil)
+            } else {
+                Button("Remove worktree… ⌃X") { model.askRemove() }
+                    .disabled(model.busy || model.loading || model.selected?.isMain != false)
+            }
+            Divider()
+            Button(model.page == .directories ? "Close Esc" : "Back Esc") { model.escape() }
+                .disabled(model.busy)
+        } label: {
+            Image(systemName: "ellipsis").frame(width: 24, height: 24)
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        .fixedSize().help("More actions")
+        .accessibilityLabel("More actions")
+        .accessibilityIdentifier("list-actions")
     }
 
     private var openTargetControl: some View {
-        HStack(spacing: 6) {
-            Text("Open in:").font(.system(size: 12)).foregroundStyle(Color.primary.opacity(0.65))
+        HStack(spacing: model.page == .create ? 10 : 6) {
+            if model.page == .create { formLabel("Open in") }
+            else { Text("Open in:").font(.system(size: 12)).foregroundStyle(Color.primary.opacity(0.65)) }
             Menu {
                 ForEach(model.targets, id: \.self) { value in
                     Button(PickerModel.targetLabel(value)) { model.target = value }
@@ -364,7 +382,8 @@ struct PickerView: View {
                 }
                 .font(.system(size: model.page == .create ? 13 : 12, weight: .medium)).foregroundStyle(Color.primary)
                 .padding(.horizontal, model.page == .create ? 0 : 7)
-                .padding(.vertical, model.page == .create ? 0 : 4)
+                .padding(.vertical, 4)
+                .background(model.page == .create && field == .target ? PickerStyle.selection.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
                 .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(field == .target ? PickerStyle.selection.opacity(0.6) : Color.clear))
             }
             .menuStyle(.borderlessButton)

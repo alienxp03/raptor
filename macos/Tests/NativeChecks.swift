@@ -60,6 +60,36 @@ private actor CreateThenOpenBackend: BackendClient {
     }
 }
 
+private actor DelayedMetadataBackend: BackendClient {
+    private var calls: [String] = []
+    private var origin: String?
+    nonisolated func close() {}
+    func methods() -> [String] { calls }
+    func requestedRepo() -> String? { origin }
+    func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
+        calls.append(method)
+        if method == "worktrees.list" {
+            if case let .text(value) = params["repo"] { origin = value }
+            // Simulate a pipe response that cannot be recalled on cancellation.
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { continuation.resume() }
+            }
+            return APIResult(items: [PickerItem(path: "/resolved", branch: "main")],
+                             targets: ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"],
+                             target: "tab", repo: "/resolved", branches: ["main"], baseBranch: "main")
+        }
+        if method == "worktrees.preview" {
+            guard case .text("feat/typed-early") = params["branch"],
+                  case .text("/resolved") = params["repo"],
+                  case .text("main") = params["base"] else {
+                preconditionFailure("Preview ran before metadata or lost entered branch")
+            }
+            return APIResult(path: "/resolved-worktrees/typed", validationError: "")
+        }
+        return APIResult()
+    }
+}
+
 @main
 struct NativeChecks {
     @MainActor static func main() async throws {
@@ -73,6 +103,12 @@ struct NativeChecks {
             _ = try LaunchOptions(arguments: ["--repo"])
             preconditionFailure("Missing argument accepted")
         } catch {}
+        for mode in ["WT-CREATE", "wt-create-extra", "wt-create ", ""] {
+            do {
+                _ = try LaunchOptions(arguments: ["--mode", mode])
+                preconditionFailure("Invalid create mode accepted")
+            } catch {}
+        }
         let screen = CGRect(x: -1200, y: 200, width: 1200, height: 800)
         let frame = PickerStyle.panelFrame(in: screen, height: 220)
         let taller = PickerStyle.panelFrame(in: screen, height: 400)
@@ -90,9 +126,11 @@ struct NativeChecks {
         model.start()
         try await wait { !model.loading }
         precondition(model.page == .worktrees && model.items.count == 3)
-        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 190,
+        precondition(model.destinationRoot == "/Users/demo/Projects/example-kit-worktrees",
+                     "Default destination must come from shared backend before branch input")
+        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 176,
                      "The picker must use a wider layout with compact, content-fitted height")
-        precondition(PickerStyle.rowHeight == 26 && PickerStyle.worktreeRowHeight == 36,
+        precondition(PickerStyle.rowHeight == 28 && PickerStyle.worktreeRowHeight == 28,
                      "Directory and worktree rows must keep compact spacing")
         model.askRemove()
         precondition(model.removalCandidate == nil, "Main worktree must not be removable")
@@ -108,7 +146,7 @@ struct NativeChecks {
         try await wait { !model.busy && !model.loading }
         precondition(model.items.count == 2)
         model.beginCreate()
-        precondition(PickerStyle.height(for: model) == 400, "Creation form grew beyond the compact layout")
+        precondition(PickerStyle.height(for: model) == 310, "Creation form grew beyond the compact layout")
         model.branch = "feat/test"
         try await wait { model.previewReady }
         precondition(model.canCreate && model.destination == "/Users/demo/Projects/example-kit-worktrees/feat-test")
@@ -119,7 +157,7 @@ struct NativeChecks {
                      "Create must also open without a second click")
         model.escape()
         try await wait { !model.loading }
-        precondition(model.items.count == 3, "Create submitted more than once")
+        precondition(model.page == .worktrees && model.items.count == 3, "Ordinary create must return to the list without repeated creation")
         model.toggleSplit()
         precondition(model.splitMode)
         model.escape()
@@ -129,6 +167,28 @@ struct NativeChecks {
         model.cycleTarget(backward: true)
         precondition(model.target == previousTarget)
         model.close()
+
+        let compactList = PickerModel(options: options, backend: DemoBackend())
+        compactList.items = (0..<8).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
+        let eightRowHeight = PickerStyle.height(for: compactList)
+        compactList.items = (0..<30).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
+        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 316,
+                     "Lists must stop growing after eight compact rows")
+        compactList.close()
+
+        try await directCreateChecks()
+        let directoryCreate = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
+        directoryCreate.start()
+        try await wait { !directoryCreate.loading }
+        let selectedRepo = directoryCreate.selected?.path
+        directoryCreate.beginCreate()
+        precondition(directoryCreate.page == .create && directoryCreate.loading && directoryCreate.repo == selectedRepo,
+                     "New from directories must open Create directly for the selected repository")
+        try await wait { !directoryCreate.loading }
+        directoryCreate.escape()
+        try await wait { !directoryCreate.loading }
+        precondition(directoryCreate.page == .directories, "Create opened from directories must return there")
+        directoryCreate.close()
 
         let fallback = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt"]), backend: DemoBackend())
         fallback.start()
@@ -149,7 +209,7 @@ struct NativeChecks {
         try await wait { !stale.loading }
         try await Task.sleep(for: .milliseconds(350))
         precondition(stale.items.first?.path == "/demo/new", "Stale query replaced current results")
-        precondition(PickerStyle.height(for: stale) == 134, "Filtered results must shrink the panel")
+        precondition(PickerStyle.height(for: stale) == 148, "Filtered results must shrink the panel")
         stale.choose(); stale.choose()
         try await wait { !stale.busy }
         let dispatches = await scripted.count("dispatch")
@@ -174,10 +234,10 @@ struct NativeChecks {
         preview.close()
 
         let retryBackend = CreateThenOpenBackend()
-        let retry = PickerModel(options: options, backend: retryBackend)
+        let retry = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/demo"]), backend: retryBackend)
         retry.start()
         try await wait { !retry.loading }
-        retry.beginCreate()
+        precondition(retry.page == .create && !retry.loading)
         let baseMatches = try await retry.searchBaseBranches("backend-order")
         precondition(baseMatches == ["zeta", "alpha"], "Branch search must preserve the backend's matching and order")
         retry.branch = "feat/demo"
@@ -210,6 +270,78 @@ struct NativeChecks {
             try await transportChecks()
         }
         print("PASS: launch flags, decoding, repository fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
+    }
+
+    @MainActor private static func directCreateChecks() async throws {
+        let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/origin"])
+        precondition(options.mode == "wt-create" && options.repo == "/origin")
+        let backend = DelayedMetadataBackend()
+        let direct = PickerModel(options: options, backend: backend)
+        precondition(direct.page == .create && direct.loading && !direct.canSubmitForm,
+                     "Direct launch must render a disabled form before starting backend work")
+        direct.start()
+        direct.branch = "feat/typed-early"
+        direct.create()
+        try await Task.sleep(for: .milliseconds(230))
+        let pendingMethods = await backend.methods()
+        precondition(direct.page == .create && direct.branch == "feat/typed-early" && !direct.canCreate)
+        precondition(pendingMethods == ["worktrees.list"], "Metadata must precede preview and create")
+        try await wait { direct.canCreate }
+        let origin = await backend.requestedRepo()
+        precondition(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)
+        precondition(direct.branch == "feat/typed-early" && direct.base == "main")
+        precondition(PickerStyle.height(for: direct) == 310)
+        direct.validationError = "Branch already exists"
+        precondition(!direct.canSubmitForm && PickerStyle.height(for: direct) == 338)
+        direct.error = "Backend error"
+        precondition(PickerStyle.height(for: direct) == 374)
+        direct.validationError = nil
+        direct.error = nil
+        let targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]
+        let labels = ["New tab", "Session", "Current shell", "Split right", "Split left", "Split above", "Split below"]
+        precondition(direct.targets == targets)
+        for (target, label) in zip(targets, labels) {
+            precondition(direct.target == target && PickerModel.targetLabel(target) == label)
+            direct.cycleTarget(backward: false)
+        }
+        precondition(direct.target == "tab", "Ctrl+O must wrap through all seven targets")
+        for target in targets.reversed() {
+            direct.cycleTarget(backward: true)
+            precondition(direct.target == target)
+        }
+        var closed = false
+        direct.onClose = { closed = true }
+        direct.basePickerPresented = true
+        direct.escape()
+        precondition(!direct.basePickerPresented && !closed && direct.page == .create)
+        direct.escape()
+        precondition(closed, "Direct Escape must close, not show a worktree list")
+
+        let slow = PickerModel(options: options, backend: DelayedMetadataBackend())
+        var slowClosed = false
+        slow.onClose = { slowClosed = true }
+        slow.start()
+        slow.branch = "feat/typed-early"
+        try await Task.sleep(for: .milliseconds(40))
+        slow.escape()
+        precondition(slowClosed && !slow.canCreate, "Escape must work while metadata loads")
+        try await Task.sleep(for: .milliseconds(350))
+        precondition(slow.repo == "/origin" && slow.base.isEmpty && !slow.previewReady,
+                     "Late metadata must not update a closed picker")
+
+        let fallback = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt-create"]), backend: DemoBackend())
+        fallback.start()
+        precondition(fallback.page == .create)
+        try await wait { !fallback.loading }
+        precondition(fallback.page == .repositories && !fallback.items.isEmpty)
+        fallback.choose()
+        precondition(fallback.page == .create && fallback.loading && !fallback.canCreate,
+                     "Repository selection must continue directly to the form")
+        fallback.branch = "feat/repository"
+        try await wait { fallback.canCreate }
+        precondition(fallback.page == .create && fallback.items.isEmpty && fallback.branch == "feat/repository")
+        fallback.close()
+        print("PASS: immediate direct form, origin metadata, early typing, disabled submit, close during load, stale metadata, direct repository continuation, direct Escape/popover, seven target labels and bidirectional cycling")
     }
 
     @MainActor private static func wait(_ condition: () -> Bool) async throws {

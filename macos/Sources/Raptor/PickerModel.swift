@@ -6,7 +6,7 @@ final class PickerModel: ObservableObject {
     let options: LaunchOptions
     private let backend: any BackendClient
     @Published var page: Page
-    @Published var query = "" { didSet { if query != oldValue { scheduleQuery() } } }
+    @Published var query = "" { didSet { if query != oldValue && page != .create { scheduleQuery() } } }
     @Published var items: [PickerItem] = []
     @Published var selectedID: String?
     @Published var targets: [String] = []
@@ -15,6 +15,7 @@ final class PickerModel: ObservableObject {
     @Published var branches: [String] = []
     @Published var branch = "" { didSet { if branch != oldValue { schedulePreview() } } }
     @Published var base = "" { didSet { if base != oldValue { schedulePreview() } } }
+    @Published var destinationRoot: String?
     @Published var destination: String?
     @Published var validationError: String?
     @Published var previewReady = false
@@ -35,17 +36,19 @@ final class PickerModel: ObservableObject {
     private var generation = 0
     private var previewGeneration = 0
     private var closed = false
+    private var createParent: Page = .worktrees
 
     init(options: LaunchOptions, backend: any BackendClient) {
         self.options = options
         self.backend = backend
-        self.page = options.mode == "wt" ? .worktrees : .directories
+        self.page = options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories)
         self.repo = options.repo
+        self.loading = options.mode == "wt-create"
     }
 
     var selected: PickerItem? { items.first { $0.id == selectedID } }
     var canOpen: Bool { !busy && !loading && selected != nil && !target.isEmpty }
-    var canCreate: Bool { !busy && !basePickerPresented && previewReady && validationError == nil && destination != nil && !branch.isEmpty && !base.isEmpty && !target.isEmpty && createdPath == nil }
+    var canCreate: Bool { !busy && !loading && !basePickerPresented && previewReady && validationError == nil && destination != nil && !branch.isEmpty && !base.isEmpty && !target.isEmpty && createdPath == nil }
     var canSubmitForm: Bool { !basePickerPresented && (canCreate || (!busy && createdPath != nil && !target.isEmpty)) }
     var heading: String {
         switch page {
@@ -67,7 +70,7 @@ final class PickerModel: ObservableObject {
     }
 
     private func scheduleQuery(immediate: Bool = false) {
-        guard !closed, page != .create else { return }
+        guard !closed else { return }
         generation += 1
         let token = generation
         queryTask?.cancel()
@@ -84,7 +87,7 @@ final class PickerModel: ObservableObject {
                 try Task.checkCancellation()
                 var params: [String: APIValue] = ["query": .text(currentQuery)]
                 let method: String
-                if currentPage == .worktrees {
+                if currentPage == .worktrees || currentPage == .create {
                     method = "worktrees.list"
                     if let currentRepo { params["repo"] = .text(currentRepo) }
                 } else {
@@ -93,22 +96,24 @@ final class PickerModel: ObservableObject {
                 }
                 let result = try await self.backend.request(method, params: params)
                 guard !Task.isCancelled, token == self.generation, !self.closed else { return }
-                if currentPage == .worktrees, result.needsRepo == true {
+                if (currentPage == .worktrees || currentPage == .create), result.needsRepo == true {
                     self.repo = nil
                     self.navigate(.repositories)
                     return
                 }
                 let previous = self.selectedID
-                self.items = result.items ?? []
+                self.items = currentPage == .create ? [] : (result.items ?? [])
                 self.selectedID = self.items.contains { $0.id == previous } ? previous : self.items.first?.id
                 if let targets = result.targets { self.targets = targets }
                 if !self.targets.contains(self.target) { self.target = result.target ?? self.targets.first ?? "" }
-                if currentPage == .worktrees {
+                if currentPage == .worktrees || currentPage == .create {
                     self.repo = result.repo ?? currentRepo
+                    self.destinationRoot = result.destinationRoot
                     self.branches = result.branches ?? []
                     self.base = result.baseBranch ?? self.branches.first ?? ""
                 }
                 self.loading = false
+                if currentPage == .create { self.schedulePreview() }
             } catch {
                 guard !Task.isCancelled, token == self.generation, !self.closed else { return }
                 self.loading = false
@@ -128,7 +133,7 @@ final class PickerModel: ObservableObject {
         error = nil; notice = nil
         query = ""
         scheduleQuery(immediate: true)
-        onFocusSearch?()
+        if newPage != .create { onFocusSearch?() }
     }
 
     func move(_ delta: Int) {
@@ -157,7 +162,7 @@ final class PickerModel: ObservableObject {
         guard !busy, !loading, let selected else { return }
         if page == .repositories {
             repo = selected.path
-            navigate(.worktrees)
+            navigate(options.mode == "wt-create" ? .create : .worktrees)
         } else if canOpen {
             dispatch(path: selected.path, target: target)
         }
@@ -170,7 +175,17 @@ final class PickerModel: ObservableObject {
     }
 
     func beginCreate() {
-        guard !busy, !loading, page == .worktrees, repo != nil else { return }
+        guard !busy, !loading else { return }
+        if page == .directories {
+            guard let selected else { return }
+            createParent = .directories
+            repo = selected.path
+            branch = ""
+            navigate(.create)
+            return
+        }
+        guard page == .worktrees, repo != nil else { return }
+        createParent = .worktrees
         page = .create
         splitMode = false
         error = nil; notice = nil; createdPath = nil
@@ -183,7 +198,7 @@ final class PickerModel: ObservableObject {
         if basePickerPresented { basePickerPresented = false; return }
         if splitMode { splitMode = false; return }
         if page == .create {
-            navigate(.worktrees)
+            if options.mode == "wt-create" { close() } else { navigate(createParent) }
         } else if !query.isEmpty {
             query = ""
         } else if page == .worktrees || page == .repositories {
@@ -209,7 +224,7 @@ final class PickerModel: ObservableObject {
         previewTask?.cancel()
         previewReady = false
         destination = nil; validationError = nil
-        guard let repo, !branch.isEmpty else { return }
+        guard !loading, let repo, !branch.isEmpty, !base.isEmpty else { return }
         let branch = branch, base = base
         previewTask = Task { [weak self] in
             guard let self else { return }

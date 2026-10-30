@@ -13,6 +13,10 @@ struct PickerRequestChecks {
 
         let noBlock = try parse("raptor://picker/?mode=wt&session=S&client=C")
         precondition(noBlock.mode == "wt" && noBlock.block.isEmpty && noBlock.repo == nil)
+        let direct = try parse("raptor://picker?mode=wt-create&session=S&client=C&repo=%2Fdemo")
+        precondition(direct.mode == "wt-create" && direct.repo == "/demo" && direct.block.isEmpty)
+        let directNoRepo = try parse("raptor://picker?mode=wt-create&session=S&client=C")
+        precondition(directNoRepo.mode == "wt-create" && directNoRepo.repo == nil)
         let unicode = try parse("raptor://picker?mode=wt&session=S&client=C&repo=%2FUsers%2F%E7%8C%AB%20%26%20caf%C3%A9")
         precondition(unicode.repo == "/Users/猫 & café")
         let percent = try parse("raptor://picker?mode=wt&session=S&client=C&repo=%2Ftmp%2F%2520%252F%25ZZ+plus")
@@ -48,6 +52,11 @@ struct PickerRequestChecks {
             "raptor://picker?mode=dirs&session=S",
             "raptor://picker?mode=other&session=S&client=C",
             "raptor://picker?mode=DIRS&session=S&client=C",
+            "raptor://picker?mode=WT-CREATE&session=S&client=C",
+            "raptor://picker?mode=wt-create-extra&session=S&client=C",
+            "raptor://picker?mode=wt-create%20&session=S&client=C",
+            "raptor://picker?mode=wt-create&mode=wt&session=S&client=C",
+            "raptor://picker?mode=wt-create&session=S&client=C&action=create",
             base + "&session=other", base + "&%73ession=other",
             base + "&mode=wt", base + "&repo=a&repo=b",
             base + "&block=other", base + "&client=other",

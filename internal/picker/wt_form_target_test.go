@@ -57,15 +57,28 @@ func TestWorktreeFormGreenFocus(t *testing.T) {
 	previous := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
-	for field, value := range []string{"feat/demo│", "main ›", "session", "▸ Create & open"} {
+	for field, value := range []string{"feat/demo│", "main ›", "session", "▸ Create"} {
 		m := &wtModel{form: true, field: field, branch: "feat/demo", base: "main", target: "session", width: 80, height: 18}
 		view := m.View()
 		if !strings.Contains(view, pickerAccent.Bold(true).Render(value)) {
 			t.Fatalf("field %d must use green focus", field)
 		}
-		if field != 3 && !strings.Contains(view, pickerAccent.Render("Create & open")) {
+		if field != 3 && !strings.Contains(view, pickerAccent.Render("Create")) {
 			t.Fatal("Create action must use green")
 		}
+	}
+}
+
+func TestWorktreeFormDefaultPathAndBottomAction(t *testing.T) {
+	m := &wtModel{form: true, root: "/trees/project", base: "main", target: "tab", width: 80, height: 18}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "Destination /trees/project") {
+		t.Fatal("Default destination must be visible before entering a branch")
+	}
+	lines := strings.Split(view, "\n")
+	action := lines[m.height-3]
+	if !strings.HasSuffix(strings.TrimRight(action, " "), "Create") || strings.Index(action, "Create") < m.width/2 {
+		t.Fatalf("Create action must be anchored at bottom right: %q", action)
 	}
 }
 
@@ -84,7 +97,7 @@ func TestWorktreeFormTargetVisible(t *testing.T) {
 		m := &wtModel{form: true, field: 2, target: "session", branch: "feat/demo", base: "main", width: size[0], height: size[1]}
 		view := m.View()
 		plain := ansi.Strip(view)
-		for _, label := range []string{"Repo", "Branch", "Base", "Open in", "session", "Destination", "Create & open"} {
+		for _, label := range []string{"Repo", "Branch", "Base", "Open in", "session", "Destination", "Create"} {
 			if !strings.Contains(plain, label) {
 				t.Fatalf("%v: missing %q: %s", size, label, plain)
 			}

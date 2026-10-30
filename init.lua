@@ -148,7 +148,12 @@ function M.setup(options)
 			end
 		end
 		local args = base_cmd(ctx)
-		table.insert(args, mode)
+		if mode == "wt-create" then
+			table.insert(args, "wt")
+			table.insert(args, "--create")
+		else
+			table.insert(args, mode)
+		end
 		open_layer(ctx, args)
 		return { ui = "terminal" }
 	end
@@ -202,7 +207,7 @@ function M.setup(options)
 	rex.action({
 		name = "raptor_create",
 		title = "Raptor: Create Worktree",
-		description = "Open the terminal create-worktree form for the origin pane's repository.",
+		description = "Open the create-worktree form for the origin pane's repository using the configured UI.",
 		category = "Navigate",
 		run = function(ctx)
 			if ctx.session_id == nil then
@@ -216,11 +221,7 @@ function M.setup(options)
 					return { ui = "terminal" }
 				end
 			end
-			local args = base_cmd(ctx)
-			table.insert(args, "wt")
-			table.insert(args, "--create")
-			open_layer(ctx, args)
-			return { ui = "terminal" }
+			return show_picker(ctx, "wt-create")
 		end,
 	})
 

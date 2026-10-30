@@ -20,7 +20,7 @@ func TestCreateFormRendersBeforeRepositoryLoad(t *testing.T) {
 		t.Fatal("repository metadata must load through a command after rendering")
 	}
 	view := ansi.Strip(m.View())
-	for _, label := range []string{"New worktree", "Branch", "Loading…", "Loading repository…", "Create & open"} {
+	for _, label := range []string{"New worktree", "Branch", "Loading…", "Loading repository…", "Create"} {
 		if !strings.Contains(view, label) {
 			t.Fatalf("first render missing %q", label)
 		}

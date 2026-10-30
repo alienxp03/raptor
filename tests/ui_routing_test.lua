@@ -63,8 +63,8 @@ local function check(case)
 	}
 	dofile("init.lua").setup({ app = app, ui = case.ui or "auto" })
 	local ctx = { session_id = "session:demo&safe", block_id = "block:demo space", client_id = "demo-client" }
-	for _, mode in ipairs({ "dirs", "wt" }) do
-		local action = mode == "dirs" and "raptor" or "raptor_wt"
+	for _, mode in ipairs({ "dirs", "wt", "wt-create" }) do
+		local action = ({ dirs = "raptor", wt = "raptor_wt", ["wt-create"] = "raptor_create" })[mode]
 		local result = actions[action](ctx, {})
 		assert(result.ui == case.expected, case.name .. ": incorrect UI")
 		if result.ui == "native" then
@@ -83,17 +83,16 @@ local function check(case)
 		else
 			local layer = layers[#layers]
 			local command = layer.layout.options.command
-			assert(command[#command] == mode)
+			if mode == "wt-create" then
+				assert(command[#command - 1] == "wt" and command[#command] == "--create")
+			else
+				assert(command[#command] == mode)
+			end
+			assert(command[3] == ctx.session_id and command[5] == ctx.block_id)
 			local mobile = case.platform == "ios" or case.platform == "ipados"
 			assert(layer.bounds[1] == (mobile and 0.04 or 0.28))
 		end
 	end
-	local before = #executions
-	assert(actions.raptor_create(ctx).ui == "terminal")
-	local command = layers[#layers].layout.options.command
-	assert(command[#command - 1] == "wt" and command[#command] == "--create")
-	assert(command[3] == ctx.session_id and command[5] == ctx.block_id)
-	assert(#executions == before, "create shortcut must not launch native app")
 	local layer_count = #layers
 	picker_open = true
 	actions.raptor_create(ctx)

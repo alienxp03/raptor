@@ -44,7 +44,7 @@ func TestWorktreeForm(t *testing.T) {
 		t.Fatal("form not editable")
 	}
 	out := ansi.Strip(m.View())
-	for _, s := range []string{"feat/login", "feature-login", "main", "Create & open"} {
+	for _, s := range []string{"feat/login", "feature-login", "main", "Create"} {
 		if !strings.Contains(out, s) {
 			t.Fatal("missing " + s)
 		}

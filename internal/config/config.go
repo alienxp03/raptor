@@ -26,6 +26,24 @@ func Default() Config {
 	}
 }
 
+// AvailableTargets shares target order and context requirements across both UIs.
+func (cfg Config) AvailableTargets(hasBlock bool) []string {
+	targets := cfg.Targets
+	if len(targets) == 0 {
+		targets = Default().Targets
+	}
+	result := []string{}
+	seen := map[string]bool{}
+	for _, target := range targets {
+		if seen[target] || (!hasBlock && (target == "here" || strings.HasPrefix(target, "pane"))) {
+			continue
+		}
+		seen[target] = true
+		result = append(result, target)
+	}
+	return result
+}
+
 // Load parses a flat TOML subset: key = "value" / key = 12.
 func Load() Config {
 	cfg := Default()

@@ -44,9 +44,10 @@ Add setup and your own key bindings to `~/.config/rex/init.lua`:
 require("raptor").setup{}
 rex.bind("shift+cmd+o", "raptor")
 rex.bind("shift+cmd+t", "raptor_wt")
+rex.bind("ctrl+n", "raptor_create")
 ```
 
-These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_wt`, `raptor_last_session`, and `raptor_last_pane` to the Rex command palette. Reload the Rex config after you change it.
+These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_wt`, `raptor_create`, `raptor_last_session`, and `raptor_last_pane` to the Rex command palette. Reload the Rex config after you change it.
 
 The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it; Cmd+Q quits completely. Each reopening gets fresh Rex context and a new Go backend. No focus watcher or login item is added. If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`.
 
@@ -92,7 +93,7 @@ Use the `raptor` Rex action for the platform-appropriate UI. `raptor dirs` alway
 
 ## Worktree picker
 
-Use the `raptor_wt` Rex action for native Mac worktrees or the mobile terminal picker. Run `raptor wt` to use the terminal UI with the current Git repository. Use `raptor wt --repo /path/to/repo` to choose a repository directly. Use `raptor wt --create` or the `raptor_create` Rex action to open the terminal create form directly for the origin pane's repository. Bind it with `rex.bind("ctrl+n", "raptor_create")` to use it from Pi or a shell. Without a repository in the current pane, Raptor shows a repository picker.
+Use the `raptor_wt` Rex action for native Mac worktrees or the mobile terminal picker. Run `raptor wt` to use the terminal UI with the current Git repository. Use `raptor wt --repo /path/to/repo` to choose a repository directly. Use `raptor wt --create` for the terminal form, or the `raptor_create` Rex action to open Create directly using the configured `ui` (`auto` prefers the local Mac app; `terminal` always uses the terminal). Both use the origin pane's repository. Bind it with `rex.bind("ctrl+n", "raptor_create")` to use it from Pi or a shell. Without a repository in the current pane, Raptor shows a repository picker.
 
 | Key | Action |
 | --- | --- |
@@ -105,7 +106,7 @@ Use the `raptor_wt` Rex action for native Mac worktrees or the mobile terminal p
 | Cmd+Backspace / Ctrl+X on Mac; Ctrl+X / Delete in terminal | Remove a worktree after confirmation |
 | Esc | Clear the filter, then return to directories |
 
-The create form asks for a branch and local base branch. Go supplies the destination preview and validation in both interfaces. In the terminal UI, Tab moves through Branch name → Base branch → Open in → Create. Ctrl+O cycles the target from any form field. The visible **Open in** field also uses Left/Right to choose a tab, session, current shell, or pane direction (when a source pane is available). Enter on Open in moves to Create without submitting. Enter on Create creates the worktree and opens it with that target.
+Both create forms show labeled **Repo** and **Destination** paths, the branch, base, and open target. Direct Create launches render before repository metadata loads; typing and Escape stay available. Escape closes a directly launched form (or first dismisses its base chooser); forms opened from a list return to that list. The create form asks for a branch and local base branch. Go supplies the destination preview and validation in both interfaces. In the terminal UI, Tab moves through Branch name → Base branch → Open in → Create. Ctrl+O cycles the target from any form field. The visible **Open in** field also uses Left/Right to choose a tab, session, current shell, or pane direction (when a source pane is available). Enter on Open in moves to Create without submitting. Enter on Create creates the worktree and opens it with that target.
 
 On Mac, Cmd+N or Ctrl+N opens the native form. Tab / Shift+Tab moves between enabled controls. Search local base branches in **From branch**; Enter selects and Escape returns to the form. Ctrl+O changes the **Open in** target. Click **Create** or press Cmd+Enter. If opening fails after creation, **Retry opening** reuses the created worktree, never creates it again. Use Cmd+Backspace or Ctrl+X to request removal; confirmation defaults to Cancel.
 

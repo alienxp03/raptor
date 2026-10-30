@@ -12,7 +12,7 @@ actor DemoBackend: BackendClient {
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         try await Task.sleep(for: .milliseconds(70))
         func text(_ key: String) -> String { if case let .text(value) = params[key] { return value }; return "" }
-        let targets = ["tab", "here", "session", "pane", "pane_left", "pane_above", "pane_below"]
+        let targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]
         let repo = "/Users/demo/Projects/example-kit"
         let branches = ["main", "develop", "feat/native-picker", "fix/focus"]
         switch method {
@@ -25,7 +25,7 @@ actor DemoBackend: BackendClient {
             if text("repo").isEmpty { return APIResult(needsRepo: true) }
             return APIResult(items: worktrees.filter {
                 text("query").isEmpty || $0.path.localizedCaseInsensitiveContains(text("query")) || ($0.branch ?? "").localizedCaseInsensitiveContains(text("query"))
-            }, targets: targets, target: "tab", repo: repo, needsRepo: false,
+            }, targets: targets, target: "tab", repo: repo, destinationRoot: "/Users/demo/Projects/example-kit-worktrees", needsRepo: false,
             branches: branches, baseBranch: "main")
         case "worktrees.branches":
             return APIResult(branches: branches.filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) })

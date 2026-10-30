@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/alienxp03/raptor/internal/catalog"
@@ -122,18 +123,10 @@ func newWtModel(ctx rex.Ctx, cfg config.Config, repo string) *wtModel {
 	return m
 }
 
-// Form targets include explicit pane directions when an origin pane exists.
+// Use the same target order and context requirements as the native backend.
 func (m *wtModel) formTargets() config.Config {
 	cfg := m.cfg
-	cfg.Targets = nil
-	seen := map[string]bool{}
-	for _, target := range append(append([]string{}, m.cfg.Targets...), "tab", "here", "session", "pane", "pane_left", "pane_above", "pane_below") {
-		if seen[target] || (m.ctx.Block == "" && (target == "here" || strings.HasPrefix(target, "pane"))) {
-			continue
-		}
-		seen[target] = true
-		cfg.Targets = append(cfg.Targets, target)
-	}
+	cfg.Targets = cfg.AvailableTargets(m.ctx.Block != "")
 	return cfg
 }
 
@@ -400,7 +393,7 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch key {
 		case "tab", "shift+tab", "ctrl+o":
-			m.target = dispatch.NextTarget(m.cfg, m.target, key != "shift+tab")
+			m.target = dispatch.NextTarget(m.formTargets(), m.target, key != "shift+tab")
 		case "ctrl+p":
 			if m.selected() == nil {
 				return m, nil
@@ -489,6 +482,7 @@ func (m *wtModel) View() string {
 	text, dim := pickerText, pickerMuted
 	line := func(s string) string { return pickerLine(s, width) }
 	lines := []string{}
+	formButton := ""
 	footer := "^n New   ^x Remove   ↵ Open"
 	if m.baseSelecting {
 		lines = append(lines, pickerSearch(m.baseQuery, width, "base"), line(dim.Render("Local base branch")))
@@ -545,13 +539,13 @@ func (m *wtModel) View() string {
 			}
 			lines = append(lines, pathLine("Destination", m.destinationLabel()))
 		}
-		button := pickerAccent.Render("Create & open")
+		formButton = pickerAccent.Render("Create")
 		if m.loading {
-			button = dim.Render("Create & open")
+			formButton = dim.Render("Create")
 		} else if m.field == 3 {
-			button = pickerAccent.Bold(true).Render("▸ Create & open")
+			formButton = pickerAccent.Bold(true).Render("▸ Create")
 		}
-		lines = append(lines, line(""), line(button))
+		footerRows++
 		footer = "Tab next · ^o target · ↵ select · esc back"
 		if width < 40 {
 			footer = "tab · ^o · ↵ · esc"
@@ -602,6 +596,9 @@ func (m *wtModel) View() string {
 	}
 	for len(lines) < m.height-footerRows {
 		lines = append(lines, line(""))
+	}
+	if formButton != "" {
+		lines = append(lines, line(strings.Repeat(" ", maxInt(width-lipgloss.Width(formButton), 0))+formButton))
 	}
 	lines = append(lines, pickerRule(width))
 	for _, path := range pathLines {

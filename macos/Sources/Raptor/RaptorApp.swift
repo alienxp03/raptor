@@ -261,7 +261,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if model.canSubmitForm { model.create() }
             return true
         }
-        if (command || control) && !option && key == "n" && model.page == .worktrees {
+        if (command || control) && !option && key == "n" && (model.page == .worktrees || model.page == .directories) {
             model.beginCreate(); return true
         }
         if model.page == .worktrees && ((command && event.keyCode == 51) || (control && key == "x")) {

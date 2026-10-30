@@ -25,7 +25,7 @@ struct LaunchOptions: Sendable {
             index += 2
         }
         let mode = values["--mode"] ?? "dirs"
-        guard mode == "dirs" || mode == "wt" else { throw APIError.message("Mode must be dirs or wt.") }
+        guard ["dirs", "wt", "wt-create"].contains(mode) else { throw APIError.message("Mode must be dirs, wt or wt-create.") }
         self.mode = mode
         session = values["--session"] ?? ""
         block = values["--block"] ?? ""
@@ -71,6 +71,7 @@ struct APIResult: Codable, Sendable {
     var targets: [String]? = nil
     var target: String? = nil
     var repo: String? = nil
+    var destinationRoot: String? = nil
     var needsRepo: Bool? = nil
     var branches: [String]? = nil
     var baseBranch: String? = nil
@@ -78,6 +79,7 @@ struct APIResult: Codable, Sendable {
     var validationError: String? = nil
     enum CodingKeys: String, CodingKey {
         case items, targets, target, repo, branches, path
+        case destinationRoot = "destination_root"
         case needsRepo = "needs_repo", baseBranch = "base_branch", validationError = "validation_error"
     }
 }

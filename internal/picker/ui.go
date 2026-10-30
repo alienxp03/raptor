@@ -205,7 +205,9 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.splitMode = true
 			return m, nil
 		case "tab", "shift+tab", "ctrl+o":
-			m.target = dispatch.NextTarget(m.cfg, m.target, msg.String() != "shift+tab")
+			targets := m.cfg
+			targets.Targets = targets.AvailableTargets(m.ctx.Block != "")
+			m.target = dispatch.NextTarget(targets, m.target, msg.String() != "shift+tab")
 			return m, nil
 		case "enter":
 			r := m.selected()
