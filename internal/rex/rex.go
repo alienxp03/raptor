@@ -91,7 +91,7 @@ func BlockPwd(blockID string) string {
 	script := fmt.Sprintf(
 		"local r = rex.block.call('com.superlogical.terminal', 'pwd', { block_id = '%s' }) print(r and r.pwd or '')",
 		blockID)
-	out, err := Run("do", "-e", script)
+	out, err := Run("do", "-b", blockID, "-e", script)
 	if err != nil {
 		return ""
 	}
@@ -112,7 +112,7 @@ func BlockCwd(blockID string) string {
 	script := fmt.Sprintf(
 		"local r = rex.block.call('com.superlogical.terminal', 'process', { block_id = '%s' }) print(r and r.foreground and r.foreground.cwd or '')",
 		blockID)
-	out, err := Run("do", "-e", script)
+	out, err := Run("do", "-b", blockID, "-e", script)
 	if err != nil {
 		return ""
 	}
@@ -127,7 +127,7 @@ func BlockForeground(blockID string) string {
 	script := fmt.Sprintf(
 		"local r = rex.block.call('com.superlogical.terminal', 'process', { block_id = '%s' }) print(r and r.foreground and r.foreground.name or '')",
 		blockID)
-	out, err := Run("do", "-e", script)
+	out, err := Run("do", "-b", blockID, "-e", script)
 	if err != nil {
 		return ""
 	}
