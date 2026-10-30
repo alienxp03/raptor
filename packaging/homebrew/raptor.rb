@@ -62,7 +62,7 @@ class Raptor < Formula
       Existing Rex config, plugin checkouts, and local apps are not overwritten.
 
       For a fresh Rex setup, append this to ~/.config/rex/init.lua:
-        package.path = package.path .. ";#{opt_share}/raptor/?.lua"
+        package.path = package.path .. ";#{opt_share}/?/init.lua"
         require("raptor").setup{}
         rex.bind("shift+cmd+o", "raptor")
         rex.bind("shift+cmd+t", "raptor_wt")

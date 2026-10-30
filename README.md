@@ -59,7 +59,7 @@ For a fresh Rex setup, append the packaged module to the Lua search path:
 
 ```lua
 -- Apple Silicon; use /usr/local for standard Intel Homebrew.
-package.path = package.path .. ";/opt/homebrew/opt/raptor/share/raptor/?.lua"
+package.path = package.path .. ";/opt/homebrew/opt/raptor/share/?/init.lua"
 require("raptor").setup{}
 rex.bind("shift+cmd+o", "raptor")
 rex.bind("shift+cmd+t", "raptor_wt")
