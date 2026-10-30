@@ -90,6 +90,14 @@ private actor DelayedMetadataBackend: BackendClient {
     }
 }
 
+private actor SlowDirectoryBackend: BackendClient {
+    nonisolated func close() {}
+    func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
+        try await Task.sleep(for: .milliseconds(100))
+        return APIResult(items: (0..<30).map { PickerItem(path: "/demo/\($0)") }, targets: ["tab"], target: "tab")
+    }
+}
+
 @main
 struct NativeChecks {
     @MainActor static func main() async throws {
@@ -123,6 +131,17 @@ struct NativeChecks {
         precondition(PickerModel.targetLabel("tab") == "New tab")
         precondition(PickerModel.targetLabel("session") == "Session")
         precondition(PickerModel.targetLabel("here") == "Current shell")
+        let launcher = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: SlowDirectoryBackend())
+        let initialListHeight = PickerStyle.height(for: launcher)
+        precondition(launcher.loading && initialListHeight == 316,
+                     "Launcher must reserve eight rows before its first render")
+        launcher.start()
+        precondition(PickerStyle.height(for: launcher) == initialListHeight && !launcher.canOpen)
+        try await wait { !launcher.loading }
+        precondition(launcher.items.count == 30 && PickerStyle.height(for: launcher) == initialListHeight,
+                     "Populated launcher must not jump from a search-sized window to a list")
+        launcher.close()
+
         let backend = DemoBackend()
         let model = PickerModel(options: options, backend: backend)
         model.start()
@@ -130,7 +149,7 @@ struct NativeChecks {
         precondition(model.page == .worktrees && model.items.count == 3)
         precondition(model.destinationRoot == "/Users/demo/Projects/example-kit-worktrees",
                      "Default destination must come from shared backend before branch input")
-        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 176,
+        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 220,
                      "The picker must use a wider layout with compact, content-fitted height")
         precondition(PickerStyle.rowHeight == 28 && PickerStyle.worktreeRowHeight == 28,
                      "Directory and worktree rows must keep compact spacing")
@@ -174,8 +193,15 @@ struct NativeChecks {
         compactList.items = (0..<8).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
         let eightRowHeight = PickerStyle.height(for: compactList)
         compactList.items = (0..<30).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
-        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 316,
+        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 360,
                      "Lists must stop growing after eight compact rows")
+        let longBranch = PickerItem(path: "/demo/long", branch: "feat/" + String(repeating: "long-name-", count: 15))
+        precondition(PickerStyle.branchLines(for: longBranch) == 2,
+                     "Selected long branch names must wrap instead of sharing width with paths")
+        compactList.items[0] = longBranch
+        compactList.selectedID = longBranch.id
+        precondition(PickerStyle.height(for: compactList) == eightRowHeight + PickerStyle.worktreeRowHeight,
+                     "A wrapped selected branch needs one extra row without hiding the path detail")
         compactList.close()
 
         try await directCreateChecks()

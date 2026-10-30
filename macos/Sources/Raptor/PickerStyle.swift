@@ -16,11 +16,20 @@ enum PickerStyle {
     static let footerHeight: CGFloat = 42
     static let rowHeight: CGFloat = controlHeight
     static let worktreeRowHeight: CGFloat = controlHeight
+    static let selectedPathHeight: CGFloat = 44
     static let selection = Color(red: 0.48, green: 0.61, blue: 0.49)
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {
         CGRect(x: area.midX - width / 2, y: area.maxY - topInset - height,
                width: width, height: height)
+    }
+
+    static func branchLines(for item: PickerItem) -> Int {
+        guard let branch = item.branch else { return 1 }
+        let label = branch + (item.isMain == true ? " · primary" : "")
+        let font = NSFont.systemFont(ofSize: bodyFontSize, weight: .medium)
+        let measured = (label as NSString).size(withAttributes: [.font: font]).width
+        return measured > width - 30 ? 2 : 1
     }
 
     @MainActor static func height(for model: PickerModel) -> CGFloat {
@@ -29,9 +38,13 @@ enum PickerStyle {
             return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 36)
         }
         let rowHeight = model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight
-        let rows = CGFloat(min(max(model.items.count, 2), 8))
+        // Reserve the list footprint before the first backend response arrives.
+        let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count, 2), 8)
+        let rows = CGFloat(rowCount)
         let status: CGFloat = model.error == nil && model.notice == nil ? 0 : 36
-        let content = searchHeight + rows * rowHeight + 8 + footerHeight + status
+        let detail = model.page == .worktrees ? selectedPathHeight : 0
+        let wrappedRow = model.page == .worktrees && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
+        let content = searchHeight + rows * rowHeight + wrappedRow + 8 + detail + footerHeight + status
         let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
         return min(content, max(available, 180))
     }

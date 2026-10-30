@@ -10,6 +10,7 @@ struct PickerView: View {
         VStack(spacing: 0) {
             header
             if model.page == .create { createForm } else { results }
+            if model.page == .worktrees { selectedWorktreePath }
             status
             footer
         }
@@ -115,9 +116,9 @@ struct PickerView: View {
             if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
                     .fontWeight(selected ? .medium : .regular)
-                    .frame(width: PickerStyle.width * 0.36, alignment: .leading)
-                Text(displayPath(item.path)).font(.system(size: 12)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .lineLimit(selected ? 2 : 1).truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else if item.current == true {
                 Text(item.label ?? "Current repo").fontWeight(.medium)
                 Text(displayPath(item.path)).foregroundStyle(.secondary)
@@ -131,15 +132,9 @@ struct PickerView: View {
         .lineLimit(1).truncationMode(.middle)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 5)
-        .frame(height: model.page == .worktrees ? PickerStyle.worktreeRowHeight : PickerStyle.rowHeight)
+        .frame(height: model.page == .worktrees ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight)
         .background {
             if selected { RoundedRectangle(cornerRadius: 6).fill(PickerStyle.selection.opacity(0.13)) }
-        }
-        .overlay(alignment: .leading) {
-            if selected {
-                RoundedRectangle(cornerRadius: 1).fill(PickerStyle.selection)
-                    .frame(width: 2, height: 16).padding(.leading, 3)
-            }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -158,6 +153,22 @@ struct PickerView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("path-row:\(item.path)")
         .accessibilityAction { model.selectedID = item.id; model.choose() }
+    }
+
+    private var selectedWorktreePath: some View {
+        Group {
+            if let selected = model.selected {
+                Text(displayPath(selected.path))
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(selected.path)
+            }
+        }
+        .padding(.horizontal, PickerStyle.horizontalInset)
+        .frame(height: PickerStyle.selectedPathHeight, alignment: .leading)
+        .accessibilityIdentifier("selected-worktree-path")
     }
 
     private var createForm: some View {
@@ -302,41 +313,30 @@ struct PickerView: View {
         }
     }
 
+    private var isListPage: Bool { model.page == .directories || model.page == .worktrees }
+
     private var footer: some View {
-        HStack(spacing: 9) {
-            if model.splitMode {
-                Text("Split ⌃P   h←  j↓  k↑  l→").accessibilityIdentifier("keyboard-hint")
-            } else if model.page == .repositories {
-                Text("Choose repository").foregroundStyle(.secondary)
-            } else if model.page == .create {
-                Text("Tab fields · ⌃O target").accessibilityIdentifier("keyboard-hint")
-            } else {
-                openTargetControl
-            }
-            Spacer(minLength: 0)
-            if model.page == .create { createSubmitButton }
-            if !model.splitMode && model.page != .create {
-                if model.page == .directories || model.page == .worktrees {
-                    listActions
-                    Button { model.beginCreate() } label: {
-                        HStack(spacing: 8) {
-                            Text("New").fontWeight(.medium)
-                            Text("⌃N").foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 12)
-                        .frame(height: PickerStyle.controlHeight)
-                        .background(PickerStyle.selection.opacity(0.13), in: Capsule())
-                        .overlay(Capsule().strokeBorder(PickerStyle.selection.opacity(0.3)))
-                    }
-                    .disabled(model.busy || model.loading || model.selected == nil)
-                    .help("Create a worktree for the selected repository. Ctrl+N or Cmd+N.")
-                    .accessibilityIdentifier("new-worktree")
+        VStack(spacing: 0) {
+            HStack(spacing: 9) {
+                if model.splitMode {
+                    Text("Split ⌃P   h←  j↓  k↑  l→").accessibilityIdentifier("keyboard-hint")
                 } else if model.page == .repositories {
+                    Text("Choose repository").foregroundStyle(.secondary)
+                } else if model.page == .create {
+                    Text("Tab fields · ⌃O target").accessibilityIdentifier("keyboard-hint")
+                } else {
+                    openTargetControl
+                }
+                Spacer(minLength: 0)
+                if isListPage && !model.splitMode { listActions }
+                if model.page == .create { createSubmitButton }
+                if model.page == .repositories {
                     Button("Choose ↵") { model.choose() }
                         .disabled(model.selected == nil || model.busy || model.loading)
                         .accessibilityIdentifier("open-selected")
                 }
             }
+            .frame(height: PickerStyle.footerHeight)
         }
         .font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.65))
         .lineLimit(1)
@@ -349,25 +349,23 @@ struct PickerView: View {
     }
 
     private var listActions: some View {
-        Menu {
-            Button("Open ↵") { model.choose() }.disabled(!model.canOpen)
-            Button("Split pane ⌃P") { model.toggleSplit() }.disabled(!model.canOpen)
+        HStack(spacing: 12) {
+            Button("↵ Open") { model.choose() }.disabled(!model.canOpen)
+                .accessibilityIdentifier("open-selected")
+            Button("⌃P Split") { model.toggleSplit() }.disabled(!model.canOpen)
+                .accessibilityIdentifier("toggle-split")
             if model.page == .directories {
-                Button("Worktrees ⌃T") { model.showWorktrees() }
+                Button("⌃T Worktrees") { model.showWorktrees() }
                     .disabled(model.busy || model.loading || model.selected == nil)
+                    .accessibilityIdentifier("show-worktrees")
             } else {
-                Button("Remove worktree… ⌃X") { model.askRemove() }
+                Button("⌃X Remove") { model.askRemove() }
                     .disabled(model.busy || model.loading || model.selected?.isMain != false)
+                    .accessibilityIdentifier("remove-worktree")
             }
-            Divider()
-            Button(model.page == .directories ? "Close Esc" : "Back Esc") { model.escape() }
-                .disabled(model.busy)
-        } label: {
-            Image(systemName: "ellipsis").frame(width: 24, height: 24)
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden)
-        .fixedSize().help("More actions")
-        .accessibilityLabel("More actions")
+        .font(.system(size: 10))
+        .fixedSize()
         .accessibilityIdentifier("list-actions")
     }
 

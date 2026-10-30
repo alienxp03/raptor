@@ -92,6 +92,25 @@ func pickerEntry(label, detail string, width int, selected bool) string {
 	return pickerRow(content, width, selected)
 }
 
+// Worktree rows show branch names only; the selected path has its own detail.
+func pickerWorktreeBranch(branch string, width int, selected bool) []string {
+	available := maxInt(width-3, 1)
+	parts := []string{ansi.Truncate(branch, available, "…")}
+	style := pickerText
+	if selected {
+		style = pickerSelected.Bold(true)
+		parts = strings.Split(ansi.Hardwrap(branch, available, true), "\n")
+		if len(parts) > 2 {
+			parts = []string{parts[0], ansi.Truncate(strings.Join(parts[1:], ""), available, "…")}
+		}
+	}
+	lines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		lines = append(lines, pickerRow(style.Render(part), width, selected))
+	}
+	return lines
+}
+
 func pickerTail(value string, width int) string {
 	if width <= 0 {
 		return ""

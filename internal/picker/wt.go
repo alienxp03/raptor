@@ -561,11 +561,14 @@ func (m *wtModel) View() string {
 	} else {
 		lines = append(lines, pickerSearch(m.filter, width, "worktree"), line(""))
 		count := maxInt(m.height-2-footerRows, 0)
-		start := maxInt(m.sel-count+1, 0)
-		for n := 0; n < count; n++ {
-			vi := start + n
+		selectedRows := 1
+		if selected := m.selected(); selected != nil {
+			selectedRows = len(pickerWorktreeBranch(selected.Branch, width, true))
+		}
+		start := maxInt(m.sel-count+selectedRows, 0)
+		for vi := start; len(lines) < m.height-footerRows; vi++ {
 			if vi >= len(m.view) {
-				if n == 0 {
+				if vi == start {
 					lines = append(lines, line(dim.Render("No local worktrees")))
 				} else {
 					lines = append(lines, line(""))
@@ -573,7 +576,11 @@ func (m *wtModel) View() string {
 				continue
 			}
 			r := m.rows[m.view[vi]]
-			lines = append(lines, pickerEntry(r.Branch, paths.HomeRelative(r.Path), width, vi == m.sel))
+			for _, branchLine := range pickerWorktreeBranch(r.Branch, width, vi == m.sel) {
+				if len(lines) < m.height-footerRows {
+					lines = append(lines, branchLine)
+				}
+			}
 		}
 		left := pickerMuted.Render("Open: ") + pickerAccent.Bold(true).Render(dispatch.TargetLabel(m.target)) + pickerMuted.Render(" ^o")
 		footer = pickerLine(left+pickerMuted.Render(" · ^p split · ^n new · ^x remove · ↵"), width)

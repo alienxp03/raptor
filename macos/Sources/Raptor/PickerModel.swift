@@ -43,7 +43,7 @@ final class PickerModel: ObservableObject {
         self.backend = backend
         self.page = options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories)
         self.repo = options.repo
-        self.loading = options.mode == "wt-create"
+        self.loading = true
     }
 
     var selected: PickerItem? { items.first { $0.id == selectedID } }

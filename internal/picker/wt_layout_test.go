@@ -75,6 +75,31 @@ func TestWorktreeSelectedPathDetail(t *testing.T) {
 	}
 }
 
+func TestWorktreeBranchesUseFullRows(t *testing.T) {
+	branch := "fix/mmb-551-remove-passenger-admin-fee"
+	m := &wtModel{width: 60, height: 14, rows: []worktree{
+		{Branch: branch, Path: "/selected/worktree"},
+		{Branch: "feat/other", Path: "/unselected/worktree"},
+	}, view: []int{0, 1}}
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, branch) {
+		t.Fatal("Branch must use full row width instead of being shortened beside a path")
+	}
+	if strings.Count(plain, "/selected/worktree") != 1 || strings.Contains(plain, "/unselected/worktree") {
+		t.Fatal("Only the selected path belongs below the list")
+	}
+	longBranch := strings.Repeat("long-branch-", 6)
+	lines := pickerWorktreeBranch(longBranch, 48, true)
+	if len(lines) != 2 {
+		t.Fatalf("Selected long branch must wrap to two rows: %v", lines)
+	}
+	for _, line := range lines {
+		if lipgloss.Width(line) > 50 {
+			t.Fatal("Wrapped branch exceeds terminal width")
+		}
+	}
+}
+
 func TestWorktreeListFitsViewports(t *testing.T) {
 	for _, path := range []string{"/tmp/sample-project", "/tmp/" + strings.Repeat("parent/", 60) + "feature-login", "/tmp/" + strings.Repeat("界/", 80)} {
 		for _, size := range [][2]int{{80, 20}, {40, 12}, {39, 10}, {24, 8}, {3, 3}} {
