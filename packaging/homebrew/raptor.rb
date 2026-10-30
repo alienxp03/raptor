@@ -34,6 +34,7 @@ class Raptor < Formula
     ENV["VERSION"] = "0.0.1"
     ENV["CLI_VERSION"] = version.to_s
     ENV["APP_SIGN_IDENTITY"] = "-"
+    ENV["RAPTOR_EXTERNAL_SANDBOX"] = "1"
     ENV["DIST_DIR"] = buildpath/"dist"
 
     arch = Hardware::CPU.arm? ? "arm64" : "x86_64"
@@ -46,6 +47,10 @@ class Raptor < Formula
 
   def caveats
     <<~EOS
+      Private source: set HOMEBREW_GITHUB_API_TOKEN in your shell to a token
+      with read access to alienxp03/raptor. Do not store it in the formula.
+      Use a repo-scoped gh Git credential helper; see the README setup.
+
       This is an early HEAD build. Quit Raptor before upgrading:
         brew upgrade --fetch-HEAD alienxp03/tap/raptor
 

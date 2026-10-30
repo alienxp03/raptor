@@ -45,10 +45,16 @@ archs=("$ARCH")
 # Keep caches and all intermediate build files outside the app bundle.
 export CLANG_MODULE_CACHE_PATH="$work/clang-cache"
 export SWIFT_MODULECACHE_PATH="$work/swift-cache"
+# Homebrew already isolates the build. Swift macro plugins cannot nest another
+# macOS sandbox inside it; retain the outer sandbox and skip only the inner one.
+swift_flags=()
+if [[ ${RAPTOR_EXTERNAL_SANDBOX:-0} == 1 ]]; then
+  swift_flags=(-disable-sandbox)
+fi
 for arch in "${archs[@]}"; do
   case "$arch" in arm64) goarch=arm64 ;; x86_64) goarch=amd64 ;; esac
   printf 'Building %s (Go: %s)\n' "$arch" "$("$GO" version)"
-  xcrun --sdk macosx swiftc -parse-as-library -O -sdk "$sdk" \
+  xcrun --sdk macosx swiftc ${swift_flags[@]+"${swift_flags[@]}"} -parse-as-library -O -sdk "$sdk" \
     -target "$arch-apple-macosx14.0" -framework SwiftUI -framework AppKit \
     "${sources[@]}" -o "$work/RaptorUI-$arch"
   (cd "$SCRIPT_ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch \

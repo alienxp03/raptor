@@ -21,6 +21,9 @@ Overrides:
 
 - `VERSION`: numeric major.minor.patch for the app bundle, default `0.0.1`.
 - `CLI_VERSION`: CLI version text; defaults to `VERSION`. Homebrew sets its HEAD revision.
+- `RAPTOR_EXTERNAL_SANDBOX=1`: only for an already-sandboxed caller such as Homebrew;
+  prevents Swift macro plugins from trying to nest a second sandbox. The outer
+  Homebrew sandbox stays enabled.
 - `DIST_DIR`: output directory. Relative paths resolve from the caller's directory.
 - `ARCH` or `--arch arm64|x86_64`, or `--universal`: target architecture.
 - `GO`: executable path, including paths with spaces (not a command plus flags).
@@ -97,7 +100,9 @@ An updated plugin automatically selects the Homebrew app and CLI through stable
 Quit the app before upgrading, then reopen it to start the new backend. A manual
 CLI earlier on PATH can shadow the package. The source repository currently has
 no declared SPDX license; the formula does not assume MIT. Private source clones
-require the user's Git access. No credentials are embedded.
+require a repo-scoped `gh auth git-credential` helper and
+`HOMEBREW_GITHUB_API_TOKEN` in the calling shell; see the README. No credentials
+are embedded. A read-only token for the source repository is sufficient.
 
 `homebrew/raptor.rb.in` remains an unfilled cask template for a future tagged
 binary release. It is not used by the HEAD formula.

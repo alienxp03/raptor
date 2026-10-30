@@ -38,6 +38,19 @@ brew install --HEAD alienxp03/tap/raptor
 brew upgrade --fetch-HEAD alienxp03/tap/raptor
 ```
 
+The source remains private. Before installation, install `gh` and add a credential
+helper scoped to this repository (existing helpers are retained):
+
+```sh
+git config --global --add credential.https://github.com/alienxp03/raptor.git.helper '!gh auth git-credential'
+```
+
+Set `HOMEBREW_GITHUB_API_TOKEN` in your shell using your secret manager or
+GitHub CLI account with private-repo read access. Homebrew passes it to the Git
+fetch helper; it is not written into the package. Normal Keychain-only Git login
+is not sufficient inside the fetch sandbox. With that variable set, the install
+and upgrade commands above work without extra flags. Do not commit tokens.
+
 These are development builds, not stable releases. Building requires macOS 14+,
 Xcode 26+, and Go 1.27.1+ (Homebrew installs Go and zoxide). The formula downloads
 Go modules before its offline build. Source access uses your Git credentials.
