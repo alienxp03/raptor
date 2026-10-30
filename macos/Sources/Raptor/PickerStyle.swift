@@ -1,16 +1,16 @@
 import AppKit
 import SwiftUI
 
-// Match the proportions of Rex's command menu, not a terminal-sized dashboard.
+// Keep the picker wide enough for paths, with content-fitted height.
 enum PickerStyle {
-    static let width: CGFloat = 440
+    static let width: CGFloat = 640
     static let topInset: CGFloat = 72
     static let radius: CGFloat = 14
     static let searchHeight: CGFloat = 42
     static let createHeaderHeight: CGFloat = 60
     static let footerHeight: CGFloat = 32
-    static let rowHeight: CGFloat = 32
-    static let worktreeRowHeight: CGFloat = 46
+    static let rowHeight: CGFloat = 26
+    static let worktreeRowHeight: CGFloat = 36
     static let selection = Color(red: 0.48, green: 0.61, blue: 0.49)
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {

@@ -61,8 +61,9 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     var label: String? = nil
     var branch: String? = nil
     var isMain: Bool? = nil
+    var current: Bool? = nil
     var id: String { path }
-    enum CodingKeys: String, CodingKey { case path, label, branch; case isMain = "is_main" }
+    enum CodingKeys: String, CodingKey { case path, label, branch, current; case isMain = "is_main" }
 }
 
 struct APIResult: Codable, Sendable {

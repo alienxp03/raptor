@@ -90,8 +90,10 @@ struct NativeChecks {
         model.start()
         try await wait { !model.loading }
         precondition(model.page == .worktrees && model.items.count == 3)
-        precondition(PickerStyle.width == 440 && PickerStyle.height(for: model) == 220,
-                     "The picker must keep Rex-sized, content-fitted proportions")
+        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 190,
+                     "The picker must use a wider layout with compact, content-fitted height")
+        precondition(PickerStyle.rowHeight == 26 && PickerStyle.worktreeRowHeight == 36,
+                     "Directory and worktree rows must keep compact spacing")
         model.askRemove()
         precondition(model.removalCandidate == nil, "Main worktree must not be removable")
         model.move(1)
@@ -147,7 +149,7 @@ struct NativeChecks {
         try await wait { !stale.loading }
         try await Task.sleep(for: .milliseconds(350))
         precondition(stale.items.first?.path == "/demo/new", "Stale query replaced current results")
-        precondition(PickerStyle.height(for: stale) == 146, "Filtered results must shrink the panel")
+        precondition(PickerStyle.height(for: stale) == 134, "Filtered results must shrink the panel")
         stale.choose(); stale.choose()
         try await wait { !stale.busy }
         let dispatches = await scripted.count("dispatch")

@@ -121,6 +121,13 @@ struct PickerView: View {
                     .foregroundStyle(primary)
                 Text(displayPath(item.path)).font(.system(size: 12))
                     .foregroundStyle(selected ? Color.black.opacity(0.6) : Color.secondary)
+            } else if item.current == true {
+                HStack(spacing: 8) {
+                    Text(item.label ?? "Current repo").fontWeight(.medium)
+                    Text(displayPath(item.path))
+                        .foregroundStyle(selected ? Color.black.opacity(0.6) : Color.secondary)
+                }
+                .foregroundStyle(primary)
             } else {
                 Text(displayPath(item.path)).foregroundStyle(primary)
             }
@@ -144,7 +151,7 @@ struct PickerView: View {
         }
         .help(item.path)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? ""))
+        .accessibilityLabel((item.current == true ? (item.label ?? "Current repo") + ", " : "") + displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? ""))
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("path-row:\(item.path)")
@@ -353,21 +360,24 @@ struct PickerView: View {
             } label: {
                 HStack(spacing: 5) {
                     Text(PickerModel.targetLabel(model.target))
-                    if model.page != .create { Text("⌃O").font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.55)) }
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
                 }
                 .font(.system(size: model.page == .create ? 13 : 12, weight: .medium)).foregroundStyle(Color.primary)
                 .padding(.horizontal, model.page == .create ? 0 : 7)
                 .padding(.vertical, model.page == .create ? 0 : 4)
-                .background(Color.primary.opacity(model.page == .create ? 0 : 0.08), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(model.page == .create ? 0 : 0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(field == .target ? PickerStyle.selection.opacity(0.6) : Color.clear))
             }
+            .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .focusable().focused($field, equals: .target)
+            .focusEffectDisabled()
             .fixedSize().disabled(model.busy || model.targets.isEmpty)
             .help("Choose where to open. Press Ctrl+O or Ctrl+Shift+O to change.")
             .accessibilityLabel("Open in: \(PickerModel.targetLabel(model.target))")
             .accessibilityIdentifier("open-target")
+            if model.page != .create {
+                Text("⌃O").font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.55))
+            }
         }
         .fixedSize(horizontal: true, vertical: false)
     }
