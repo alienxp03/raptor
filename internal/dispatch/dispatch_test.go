@@ -57,7 +57,7 @@ func TestMissingClientDoesNotCreateSession(t *testing.T) {
 }
 
 func TestDispatchPaneHistory(t *testing.T) {
-	for _, target := range []string{"tab", "pane", "pane_left", "pane_above", "pane_below", "session"} {
+	for _, target := range []string{"tab", "pane_right", "pane_below", "session"} {
 		for _, fail := range []bool{false, true} {
 			name := target
 			if fail {

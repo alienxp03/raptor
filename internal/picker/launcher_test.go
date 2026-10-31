@@ -15,7 +15,7 @@ import (
 func launcherFixture(t *testing.T, path string) *dirModel {
 	t.Helper()
 	cfg := config.Default()
-	cfg.Targets = []string{"tab", "session", "here", "pane", "pane_below"}
+	cfg.Targets = []string{"tab", "session", "here", "pane_right", "pane_below"}
 	m := &dirModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, launcher: true,
 		rows: []row{{kind: "dir", label: "project", path: path}}, target: "tab", width: 40, height: 12}
 	m.applyFilter()

@@ -26,12 +26,8 @@ func (m *dirModel) openLauncherActions(path string) {
 			label = "Open tab"
 		case "here":
 			label = "cd here"
-		case "pane":
+		case "pane_right":
 			label = "Split right"
-		case "pane_left":
-			label = "Split left"
-		case "pane_above":
-			label = "Split above"
 		case "pane_below":
 			label = "Split below"
 		}

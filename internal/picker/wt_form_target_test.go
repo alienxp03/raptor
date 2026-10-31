@@ -14,7 +14,7 @@ import (
 
 func TestWorktreeFormTargetChoice(t *testing.T) {
 	m := &wtModel{cfg: config.Default(), ctx: rex.Ctx{Block: "origin"}, form: true, field: 2, target: "tab"}
-	for _, want := range []string{"session", "here", "pane", "pane_left", "pane_above", "pane_below", "tab"} {
+	for _, want := range []string{"session", "here", "pane_right", "pane_below", "tab"} {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRight})
 		if cmd != nil || m.busy || m.target != want || m.field != 2 {
 			t.Fatalf("target = %q, want %q; selection must not submit", m.target, want)

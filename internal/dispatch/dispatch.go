@@ -59,7 +59,7 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 		rex.WriteLastPane(ctx)
 		return nil
 
-	case "pane", "pane_left", "pane_above", "pane_below":
+	case "pane_right", "pane_below":
 		if ctx.Block == "" {
 			return fmt.Errorf("no block context")
 		}
@@ -147,12 +147,8 @@ func TargetLabel(t string) string {
 		return "session"
 	case "tab":
 		return "tab"
-	case "pane":
+	case "pane_right":
 		return "pane →"
-	case "pane_left":
-		return "pane ←"
-	case "pane_above":
-		return "pane ↑"
 	case "pane_below":
 		return "pane ↓"
 	case "here":
@@ -164,12 +160,8 @@ func TargetLabel(t string) string {
 
 func SplitDirection(target string) string {
 	switch target {
-	case "pane":
+	case "pane_right":
 		return "right"
-	case "pane_left":
-		return "left"
-	case "pane_above":
-		return "above"
 	case "pane_below":
 		return "below"
 	default:

@@ -269,14 +269,10 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch key {
 			case "esc", "ctrl+p":
 				m.splitMode = false
-			case "h", "left":
-				m.target = "pane_left"
 			case "j", "down":
 				m.target = "pane_below"
-			case "k", "up":
-				m.target = "pane_above"
 			case "l", "right":
-				m.target = "pane"
+				m.target = "pane_right"
 			default:
 				return m, nil
 			}
@@ -588,7 +584,7 @@ func (m *wtModel) View() string {
 			footer = pickerLine(left+pickerMuted.Render(" · ↵"), width)
 		}
 		if m.splitMode {
-			footer = pickerLine(pickerMuted.Render("Split: ")+pickerAccent.Bold(true).Render("h← j↓ k↑ l→ · esc cancel"), width)
+			footer = pickerLine(pickerMuted.Render("Split: ")+pickerAccent.Bold(true).Render("j↓ l→ · esc cancel"), width)
 		}
 	}
 	if m.err != "" && !m.form {

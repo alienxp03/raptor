@@ -27,10 +27,8 @@ func TestSplitModeDirections(t *testing.T) {
 		target    string
 		direction string
 	}{
-		{"h", tea.KeyLeft, "pane_left", "left"},
 		{"j", tea.KeyDown, "pane_below", "below"},
-		{"k", tea.KeyUp, "pane_above", "above"},
-		{"l", tea.KeyRight, "pane", "right"},
+		{"l", tea.KeyRight, "pane_right", "right"},
 	} {
 		for _, key := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune(tt.letter)}, {Type: tt.arrow}} {
 			m := splitFixture()
@@ -107,7 +105,7 @@ func TestSplitModeHints(t *testing.T) {
 		}
 		m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 		output := ansi.Strip(m.View())
-		if !strings.Contains(output, "h← j↓ k↑ l→") || !strings.Contains(output, "esc") {
+		if !strings.Contains(output, "j↓ l→") || !strings.Contains(output, "esc") {
 			t.Fatal("missing direction or cancel hints")
 		}
 	}
@@ -136,7 +134,7 @@ func TestDefaultTargetCycle(t *testing.T) {
 	}
 	for _, config := range []config.Config{cfg, {}} {
 		target := "tab"
-		for _, want := range []string{"session", "here", "pane", "pane_left", "pane_above", "pane_below", "tab"} {
+		for _, want := range []string{"session", "here", "pane_right", "pane_below", "tab"} {
 			target = dispatch.NextTarget(config, target, true)
 			if target != want {
 				t.Fatalf("next target = %q, want %q", target, want)

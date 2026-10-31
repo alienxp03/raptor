@@ -11,7 +11,7 @@ import (
 )
 
 func TestPaneSelectsRequestingClientWindow(t *testing.T) {
-	for _, target := range []string{"pane", "pane_left", "pane_above", "pane_below"} {
+	for _, target := range []string{"pane_right", "pane_below"} {
 		for _, failure := range []string{"", "describe", "missing-window", "select", "no-client"} {
 			t.Run(target+"/"+failure, func(t *testing.T) {
 				dir := t.TempDir()

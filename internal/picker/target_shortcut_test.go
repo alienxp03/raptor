@@ -12,7 +12,7 @@ func TestCtrlOCyclesListTargets(t *testing.T) {
 	cfg := config.Default()
 	dirs := &dirModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, target: "tab"}
 	trees := &wtModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, target: "tab"}
-	for _, want := range []string{"session", "here", "pane", "pane_left", "pane_above", "pane_below", "tab"} {
+	for _, want := range []string{"session", "here", "pane_right", "pane_below", "tab"} {
 		_, dirCmd := dirs.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 		_, treeCmd := trees.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 		if dirs.target != want || trees.target != want || dirCmd != nil || treeCmd != nil {

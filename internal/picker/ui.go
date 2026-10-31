@@ -36,7 +36,6 @@ type row struct {
 	kind    string // "dir"
 	label   string // paths.Basename
 	path    string // full directory path
-	current bool   // origin pane repository or directory
 }
 
 type dirModel struct {
@@ -68,8 +67,8 @@ type previewMsg struct {
 
 func loadDirRows(ctx rex.Ctx) []row {
 	var rows []row
-	for _, d := range catalog.ContextDirectories(ctx, false) {
-		rows = append(rows, row{kind: "dir", label: d.Label, path: d.Path, current: d.Current})
+	for _, d := range catalog.Directories(false) {
+		rows = append(rows, row{kind: "dir", label: d.Label, path: d.Path})
 	}
 	return rows
 }
@@ -123,7 +122,7 @@ func (m *dirModel) Init() tea.Cmd { return m.ctx.TitleCommand() }
 func (m *dirModel) applyFilter() {
 	items := make([]catalog.Directory, len(m.rows))
 	for i, r := range m.rows {
-		items[i] = catalog.Directory{Label: r.label, Path: r.path, Current: r.current}
+		items[i] = catalog.Directory{Label: r.label, Path: r.path}
 	}
 	m.view = catalog.FilterDirectories(items, m.filter)
 	if m.sel >= len(m.view) {
@@ -166,10 +165,8 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			target := map[string]string{
-				"h": "pane_left", "left": "pane_left",
 				"j": "pane_below", "down": "pane_below",
-				"k": "pane_above", "up": "pane_above",
-				"l": "pane", "right": "pane",
+				"l": "pane_right", "right": "pane_right",
 			}[msg.String()]
 			if target != "" {
 				if r := m.selected(); r != nil && r.kind == "dir" {
@@ -290,11 +287,7 @@ func (m *dirModel) View() string {
 			continue
 		}
 		r := m.rows[m.view[vi]]
-		if r.current {
-			lines = append(lines, pickerEntry(r.label, r.path, width, vi == m.sel))
-		} else {
-			lines = append(lines, pickerDirectory(r.path, width, vi == m.sel))
-		}
+		lines = append(lines, pickerDirectory(r.path, width, vi == m.sel))
 	}
 	lines = append(lines, pickerRule(width))
 	target := pickerAccent.Bold(true).Render(dispatch.TargetLabel(m.target))
@@ -315,7 +308,7 @@ func (m *dirModel) View() string {
 		footer = pickerLine(pickerMuted.Render("enter Actions · esc Back/close"), width)
 	}
 	if m.splitMode {
-		directions := pickerAccent.Bold(true).Render("h← j↓ k↑ l→")
+		directions := pickerAccent.Bold(true).Render("j↓ l→")
 		footer = pickerFooter(pickerMuted.Render("Split: ")+directions, pickerMuted.Render("esc cancel"), directions+pickerMuted.Render(" · esc"), width)
 	}
 	if m.err != "" {
@@ -329,7 +322,7 @@ func renderTargets(cfg config.Config, active string) string {
 	parts := []string{"  " + styDim.Render("OPEN AS")}
 	for _, target := range cfg.Targets {
 		label := strings.ToUpper(dispatch.TargetLabel(target))
-		if target == "pane" {
+		if target == "pane_right" {
 			label = "PANE →"
 		} else if target == "pane_below" {
 			label = "PANE ↓"

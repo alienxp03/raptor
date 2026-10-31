@@ -6,7 +6,7 @@ import (
 )
 
 func TestAvailableTargets(t *testing.T) {
-	all := []string{"tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"}
+	all := []string{"tab", "session", "here", "pane_right", "pane_below"}
 	for _, cfg := range []Config{Default(), {}} {
 		if got := cfg.AvailableTargets(true); !reflect.DeepEqual(got, all) {
 			t.Fatalf("shared target order: %v", got)

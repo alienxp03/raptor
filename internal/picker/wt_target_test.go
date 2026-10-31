@@ -34,8 +34,8 @@ func TestWorktreeSplitTargetOpensSelection(t *testing.T) {
 	if !m.splitMode {
 		t.Fatal("Ctrl+P did not enter split mode")
 	}
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	if m.target != "pane_left" || m.chosen == nil || m.chosen.Path != "/tmp/login" || cmd == nil {
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if m.target != "pane_right" || m.chosen == nil || m.chosen.Path != "/tmp/login" || cmd == nil {
 		t.Fatalf("split selection = target %q, chosen %#v, cmd %v", m.target, m.chosen, cmd)
 	}
 }
