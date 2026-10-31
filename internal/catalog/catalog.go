@@ -13,9 +13,8 @@ import (
 )
 
 type Directory struct {
-	Path    string `json:"path"`
-	Label   string `json:"label"`
-	Current bool   `json:"current,omitempty"`
+	Path  string `json:"path"`
+	Label string `json:"label"`
 }
 
 func Directories(reposOnly bool) []Directory {
@@ -39,62 +38,12 @@ func DirectoryItems(dirs []string, reposOnly bool) []Directory {
 	return items
 }
 
-// ContextDirectories pins the origin pane's repository (or current directory).
-func ContextDirectories(ctx rex.Ctx, reposOnly bool) []Directory {
-	// These commands are independent; do not add their startup latency together.
-	dirs := make(chan []string, 1)
-	go func() { dirs <- rex.ZoxideList() }()
-	cwd := rex.BlockCwdInSession(ctx.Session, ctx.Block)
-	return DirectoryItemsForCwd(<-dirs, cwd, reposOnly)
-}
-
-func DirectoryItemsForCwd(dirs []string, cwd string, reposOnly bool) []Directory {
-	items := DirectoryItems(dirs, reposOnly)
-	if cwd == "" {
-		return items
-	}
-	root := worktree.RepoRoot(cwd)
-	label := "Current repo"
-	if root == "" {
-		if reposOnly {
-			return items
-		}
-		root, label = filepath.Clean(cwd), "Current directory"
-	}
-	result := []Directory{{Path: root, Label: label, Current: true}}
-	comparisonRoot := root
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		comparisonRoot = resolved
-	}
-	for _, item := range items {
-		path := filepath.Clean(item.Path)
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
-			path = resolved
-		}
-		if path != comparisonRoot {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
 func FilterDirectories(items []Directory, query string) []int {
 	entries := make([]string, len(items))
 	for i, item := range items {
 		entries[i] = item.Label + " " + paths.HomeRelative(item.Path)
 	}
-	result := []int{}
-	for i, item := range items {
-		if item.Current {
-			result = append(result, i)
-		}
-	}
-	for _, i := range match(entries, query) {
-		if !items[i].Current {
-			result = append(result, i)
-		}
-	}
-	return result
+	return match(entries, query)
 }
 
 func FilterWorktrees(items []worktree.Worktree, query string) []int {

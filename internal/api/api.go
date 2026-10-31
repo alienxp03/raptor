@@ -156,7 +156,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		items := catalog.ContextDirectories(h.ctx, p.ReposOnly)
+		items := catalog.Directories(p.ReposOnly)
 		result := directoryResult{Items: []catalog.Directory{}, Targets: h.targets(), Target: h.cfg.Enter}
 		for _, i := range catalog.FilterDirectories(items, p.Query) {
 			result.Items = append(result.Items, items[i])

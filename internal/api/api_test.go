@@ -340,19 +340,31 @@ func TestDirectoryQueries(t *testing.T) {
 	}
 }
 
-func TestDirectoryOriginPinned(t *testing.T) {
+func TestDirectoryListFollowsZoxide(t *testing.T) {
 	repo := fixtureRepo(t)
 	t.Setenv("RAPTOR_TEST_CWD", repo)
 	fakeTool(t, "rex", "printf '%s\\n' \"$RAPTOR_TEST_CWD\"\n")
 	fakeTool(t, "zoxide", "printf '%s\\n' /other \"$RAPTOR_TEST_CWD\"\n")
 	call := client(t, New(rex.Ctx{Block: "origin"}, config.Default()))
-	for _, query := range []string{"", "no-such-match"} {
+	cases := []struct {
+		query string
+		paths []string
+	}{
+		{"", []string{"/other", repo}},
+		{"no-such-match", nil},
+		{"other", []string{"/other"}},
+	}
+	for _, c := range cases {
 		var result directoryResult
-		if err := call("directories", map[string]any{"query": query}, &result); err != "" {
+		if err := call("directories", map[string]any{"query": c.query}, &result); err != "" {
 			t.Fatal(err)
 		}
-		if len(result.Items) == 0 || result.Items[0].Path != repo || !result.Items[0].Current {
-			t.Fatalf("missing origin repository: %+v", result)
+		paths := []string(nil)
+		for _, item := range result.Items {
+			paths = append(paths, item.Path)
+		}
+		if !reflect.DeepEqual(paths, c.paths) {
+			t.Fatalf("query %q: got %v want %v", c.query, paths, c.paths)
 		}
 	}
 }
@@ -377,7 +389,7 @@ func TestRepoResolutionAndErrors(t *testing.T) {
 			t.Fatalf("missing repo %s: %s", method, err)
 		}
 	}
-	for _, target := range []string{"tab", "pane", "here", "unknown"} {
+	for _, target := range []string{"tab", "pane_right", "here", "unknown"} {
 		if err := noOrigin("dispatch", map[string]any{"target": target, "path": repo}, nil); err == "" {
 			t.Fatalf("dispatch %s should fail", target)
 		}
