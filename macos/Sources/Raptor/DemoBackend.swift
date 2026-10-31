@@ -12,7 +12,7 @@ actor DemoBackend: BackendClient {
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         try await Task.sleep(for: .milliseconds(70))
         func text(_ key: String) -> String { if case let .text(value) = params[key] { return value }; return "" }
-        let targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]
+        let targets = ["tab", "session", "here", "pane_right", "pane_below"]
         let repo = "/Users/demo/Projects/example-kit"
         let branches = ["main", "develop", "feat/native-picker", "fix/focus"]
         switch method {

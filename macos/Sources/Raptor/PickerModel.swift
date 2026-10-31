@@ -27,6 +27,7 @@ final class PickerModel: ObservableObject {
     @Published var splitMode = false
     @Published var removalCandidate: PickerItem?
     @Published var basePickerPresented = false
+    @Published var targetPickerPresented = false
     var onClose: (() -> Void)?
     var onFocusSearch: (() -> Void)?
     var onAdvanceFormFocus: ((Bool) -> Void)?
@@ -48,7 +49,7 @@ final class PickerModel: ObservableObject {
 
     var selected: PickerItem? { items.first { $0.id == selectedID } }
     var canOpen: Bool { !busy && !loading && selected != nil && !target.isEmpty }
-    var canCreate: Bool { !busy && !loading && !basePickerPresented && previewReady && validationError == nil && destination != nil && !branch.isEmpty && !base.isEmpty && !target.isEmpty && createdPath == nil }
+    var canCreate: Bool { !busy && !loading && !basePickerPresented && !targetPickerPresented && previewReady && validationError == nil && destination != nil && !branch.isEmpty && !base.isEmpty && !target.isEmpty && createdPath == nil }
     var canSubmitForm: Bool { !basePickerPresented && (canCreate || (!busy && createdPath != nil && !target.isEmpty)) }
     var heading: String {
         switch page {
@@ -196,6 +197,7 @@ final class PickerModel: ObservableObject {
     func escape() {
         guard removalCandidate == nil, !busy else { return }
         if basePickerPresented { basePickerPresented = false; return }
+        if targetPickerPresented { targetPickerPresented = false; return }
         if splitMode { splitMode = false; return }
         if page == .create {
             if options.mode == "wt-create" { close() } else { navigate(createParent) }
@@ -307,9 +309,7 @@ final class PickerModel: ObservableObject {
         case "tab": return "New tab"
         case "session": return "Session"
         case "here": return "cd here"
-        case "pane": return "Split right"
-        case "pane_left": return "Split left"
-        case "pane_above": return "Split above"
+        case "pane_right": return "Split right"
         case "pane_below": return "Split below"
         default: return target
         }

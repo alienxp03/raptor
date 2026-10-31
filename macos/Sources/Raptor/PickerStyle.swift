@@ -1,23 +1,31 @@
 import AppKit
 import SwiftUI
 
-// Keep the picker wide enough for paths, with content-fitted height.
+// Rex-native metrics and palette. Sampled from the Rex Beta picker window
+// (2x capture): compact 28pt rows, warm dark surface, amber selection.
 enum PickerStyle {
     static let width: CGFloat = 640
     static let topInset: CGFloat = 72
-    static let radius: CGFloat = 14
+    static let radius: CGFloat = 12
     static let bodyFontSize: CGFloat = 13
+    static let rowFontSize: CGFloat = 13
     static let titleFontSize: CGFloat = 14
-    static let controlHeight: CGFloat = 28
+    static let controlHeight: CGFloat = 26
     static let horizontalInset: CGFloat = 10
-    static let createHeight: CGFloat = 260
-    static let searchHeight: CGFloat = 42
+    static let listInset: CGFloat = 6
+    static let rowInset: CGFloat = 12
+    static let createHeight: CGFloat = 240
+    static let searchHeight: CGFloat = 40
+    static let searchFieldHeight: CGFloat = 30
     static let createHeaderHeight: CGFloat = searchHeight
-    static let footerHeight: CGFloat = 42
-    static let rowHeight: CGFloat = controlHeight
-    static let worktreeRowHeight: CGFloat = controlHeight
-    static let selectedPathHeight: CGFloat = 44
-    static let selection = Color(red: 0.48, green: 0.61, blue: 0.49)
+    static let footerHeight: CGFloat = 34
+    static let rowHeight: CGFloat = 28
+    static let worktreeRowHeight: CGFloat = 28
+    static let selectedPathHeight: CGFloat = 32
+    static let selection = Color(red: 0.722, green: 0.510, blue: 0.259)
+    static let selectionText = Color(red: 0.153, green: 0.141, blue: 0.133)
+    static let background = Color(red: 0.153, green: 0.141, blue: 0.133)
+    static let fieldBackground = Color(red: 0.243, green: 0.227, blue: 0.224)
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {
         CGRect(x: area.midX - width / 2, y: area.maxY - topInset - height,
@@ -27,21 +35,21 @@ enum PickerStyle {
     static func branchLines(for item: PickerItem) -> Int {
         guard let branch = item.branch else { return 1 }
         let label = branch + (item.isMain == true ? " · primary" : "")
-        let font = NSFont.systemFont(ofSize: bodyFontSize, weight: .medium)
+        let font = NSFont.systemFont(ofSize: rowFontSize, weight: .medium)
         let measured = (label as NSString).size(withAttributes: [.font: font]).width
-        return measured > width - 30 ? 2 : 1
+        return measured > width - 2 * rowInset - 30 ? 2 : 1
     }
 
     @MainActor static func height(for model: PickerModel) -> CGFloat {
         if model.page == .create {
-            let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 28 : 0
-            return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 36)
+            let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
+            return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 32)
         }
         let rowHeight = model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight
         // Reserve the list footprint before the first backend response arrives.
         let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count, 2), 8)
         let rows = CGFloat(rowCount)
-        let status: CGFloat = model.error == nil && model.notice == nil ? 0 : 36
+        let status: CGFloat = model.error == nil && model.notice == nil ? 0 : 32
         let detail = model.page == .worktrees ? selectedPathHeight : 0
         let wrappedRow = model.page == .worktrees && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
         let content = searchHeight + rows * rowHeight + wrappedRow + 8 + detail + footerHeight + status
@@ -63,30 +71,15 @@ extension CGRect {
     }
 }
 
-private struct MenuMaterial: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .menu
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
-
-private struct PickerGlass: ViewModifier {
+private struct RexPanelBackground: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: PickerStyle.radius))
-        } else {
-            content
-                .background(MenuMaterial())
-                .clipShape(RoundedRectangle(cornerRadius: PickerStyle.radius))
-                .overlay(RoundedRectangle(cornerRadius: PickerStyle.radius).strokeBorder(.primary.opacity(0.12)))
-        }
+        content
+            .background(PickerStyle.background)
+            .clipShape(RoundedRectangle(cornerRadius: PickerStyle.radius))
+            .overlay(RoundedRectangle(cornerRadius: PickerStyle.radius).strokeBorder(Color.white.opacity(0.07)))
     }
 }
 
 extension View {
-    func pickerGlass() -> some View { modifier(PickerGlass()) }
+    func pickerGlass() -> some View { modifier(RexPanelBackground()) }
 }

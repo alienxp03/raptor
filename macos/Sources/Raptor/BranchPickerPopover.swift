@@ -39,14 +39,18 @@ struct BranchPickerPopover: View {
             TextField("Search local branches…", text: $query)
                 .disableAutocorrection(true)
                 .textFieldStyle(.plain)
+                .font(.system(size: PickerStyle.rowFontSize))
                 .focused($searchFocused)
                 .accessibilityLabel("Search local base branches")
                 .accessibilityIdentifier("base-search")
                 .onSubmit {} // Never submit the worktree form beneath this popover.
                 .onKeyPress(keys: [.upArrow, .downArrow, .return, .escape],
                             phases: [.down, .repeat], action: handleKey)
-                .padding(.horizontal, 10)
-                .frame(height: PickerStyle.searchHeight)
+                .padding(.horizontal, 9)
+                .frame(height: PickerStyle.searchFieldHeight)
+                .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, PickerStyle.listInset)
+                .padding(.vertical, 8)
             Divider().opacity(0.4)
             results
             if let visibleError {
@@ -77,7 +81,7 @@ struct BranchPickerPopover: View {
 
     private var popoverHeight: CGFloat {
         let rows = visibleBranches.isEmpty ? 2 : visibleBranches.count
-        return min(280, PickerStyle.searchHeight + 9 + CGFloat(rows) * PickerStyle.rowHeight + (visibleError == nil ? 0 : 44))
+        return min(280, PickerStyle.searchFieldHeight + 12 + 8 + CGFloat(rows) * PickerStyle.rowHeight + (visibleError == nil ? 0 : 36))
     }
 
     private var results: some View {
@@ -88,7 +92,7 @@ struct BranchPickerPopover: View {
                         branchRow(branch).id(branch)
                     }
                 }
-                .padding(.horizontal, 5)
+                .padding(.horizontal, PickerStyle.listInset)
                 .padding(.vertical, 4)
             }
             .overlay {
@@ -128,12 +132,13 @@ struct BranchPickerPopover: View {
             Text(branch)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .foregroundStyle(isSelected ? Color.black.opacity(0.9) : Color.primary)
+                .font(.system(size: PickerStyle.rowFontSize, weight: isSelected ? .medium : .regular))
+                .foregroundStyle(isSelected ? PickerStyle.selectionText : Color.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, PickerStyle.rowInset)
                 .frame(height: PickerStyle.rowHeight)
                 .background {
-                    if isSelected { RoundedRectangle(cornerRadius: 8).fill(PickerStyle.selection) }
+                    if isSelected { RoundedRectangle(cornerRadius: 6).fill(PickerStyle.selection) }
                 }
                 .contentShape(Rectangle())
         }

@@ -220,7 +220,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         // SwiftUI popover events can still name the parent panel. Let the
         // branch picker own Escape, Return, Tab, and all editing shortcuts.
-        if model.basePickerPresented { return false }
+        if model.basePickerPresented || model.targetPickerPresented { return false }
         guard event.window === panel, panel.isKeyWindow,
               panel.attachedSheet == nil, NSApp.modalWindow == nil else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -239,16 +239,12 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return true
             }
             switch event.keyCode {
-            case 123: model.split("pane_left")
-            case 124: model.split("pane")
+            case 124: model.split("pane_right")
             case 125: model.split("pane_below")
-            case 126: model.split("pane_above")
             default:
                 switch key {
-                case "h": model.split("pane_left")
                 case "j": model.split("pane_below")
-                case "k": model.split("pane_above")
-                case "l": model.split("pane")
+                case "l": model.split("pane_right")
                 default: break
                 }
             }

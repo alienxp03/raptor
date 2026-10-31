@@ -75,7 +75,7 @@ private actor DelayedMetadataBackend: BackendClient {
                 DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { continuation.resume() }
             }
             return APIResult(items: [PickerItem(path: "/resolved", branch: "main")],
-                             targets: ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"],
+                             targets: ["tab", "session", "here", "pane_right", "pane_below"],
                              target: "tab", repo: "/resolved", branches: ["main"], baseBranch: "main")
         }
         if method == "worktrees.preview" {
@@ -126,15 +126,15 @@ struct NativeChecks {
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data("{\"needs_repo\":false,\"base_branch\":\"main\",\"items\":[{\"path\":\"/a\",\"branch\":\"main\",\"is_main\":true}]}".utf8))
         precondition(decoded.items?.first?.isMain == true && decoded.baseBranch == "main")
 
-        precondition(PickerStyle.bodyFontSize == 13 && PickerStyle.controlHeight == PickerStyle.rowHeight && PickerStyle.createHeaderHeight == PickerStyle.searchHeight,
+        precondition(PickerStyle.rowFontSize == 13 && PickerStyle.rowHeight == 28 && PickerStyle.createHeaderHeight == PickerStyle.searchHeight,
                      "Launcher and form must share typography and control sizing")
         precondition(PickerModel.targetLabel("tab") == "New tab")
         precondition(PickerModel.targetLabel("session") == "Session")
         precondition(PickerModel.targetLabel("here") == "cd here")
         let launcher = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: SlowDirectoryBackend())
         let initialListHeight = PickerStyle.height(for: launcher)
-        precondition(launcher.loading && initialListHeight == 316,
-                     "Launcher must reserve eight rows before its first render")
+        precondition(launcher.loading && initialListHeight == 306,
+                     "Launcher must reserve eight compact rows before its first render")
         launcher.start()
         precondition(PickerStyle.height(for: launcher) == initialListHeight && !launcher.canOpen)
         try await wait { !launcher.loading }
@@ -149,10 +149,10 @@ struct NativeChecks {
         precondition(model.page == .worktrees && model.items.count == 3)
         precondition(model.destinationRoot == "/Users/demo/Projects/example-kit-worktrees",
                      "Default destination must come from shared backend before branch input")
-        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 220,
+        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 198,
                      "The picker must use a wider layout with compact, content-fitted height")
         precondition(PickerStyle.rowHeight == 28 && PickerStyle.worktreeRowHeight == 28,
-                     "Directory and worktree rows must keep compact spacing")
+                     "Directory and worktree rows must keep Rex spacing")
         model.askRemove()
         precondition(model.removalCandidate == nil, "Main worktree must not be removable")
         model.move(1)
@@ -167,7 +167,7 @@ struct NativeChecks {
         try await wait { !model.busy && !model.loading }
         precondition(model.items.count == 2)
         model.beginCreate()
-        precondition(PickerStyle.height(for: model) == 260, "Creation form grew beyond the compact layout")
+        precondition(PickerStyle.height(for: model) == 240, "Creation form grew beyond the compact layout")
         model.branch = "feat/test"
         try await wait { model.previewReady }
         precondition(model.canCreate && model.destination == "/Users/demo/Projects/example-kit-worktrees/feat-test")
@@ -193,7 +193,7 @@ struct NativeChecks {
         compactList.items = (0..<8).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
         let eightRowHeight = PickerStyle.height(for: compactList)
         compactList.items = (0..<30).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
-        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 360,
+        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 338,
                      "Lists must stop growing after eight compact rows")
         let longBranch = PickerItem(path: "/demo/long", branch: "feat/" + String(repeating: "long-name-", count: 15))
         precondition(PickerStyle.branchLines(for: longBranch) == 2,
@@ -237,7 +237,7 @@ struct NativeChecks {
         try await wait { !stale.loading }
         try await Task.sleep(for: .milliseconds(350))
         precondition(stale.items.first?.path == "/demo/new", "Stale query replaced current results")
-        precondition(PickerStyle.height(for: stale) == 148, "Filtered results must shrink the panel")
+        precondition(PickerStyle.height(for: stale) == 138, "Filtered results must shrink the panel")
         stale.choose(); stale.choose()
         try await wait { !stale.busy }
         let dispatches = await scripted.count("dispatch")
@@ -318,21 +318,21 @@ struct NativeChecks {
         let origin = await backend.requestedRepo()
         precondition(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)
         precondition(direct.branch == "feat/typed-early" && direct.base == "main")
-        precondition(PickerStyle.height(for: direct) == 260)
+        precondition(PickerStyle.height(for: direct) == 240)
         direct.validationError = "Branch already exists"
-        precondition(!direct.canSubmitForm && PickerStyle.height(for: direct) == 288)
+        precondition(!direct.canSubmitForm && PickerStyle.height(for: direct) == 264)
         direct.error = "Backend error"
-        precondition(PickerStyle.height(for: direct) == 324)
+        precondition(PickerStyle.height(for: direct) == 296)
         direct.validationError = nil
         direct.error = nil
-        let targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]
-        let labels = ["New tab", "Session", "cd here", "Split right", "Split left", "Split above", "Split below"]
+        let targets = ["tab", "session", "here", "pane_right", "pane_below"]
+        let labels = ["New tab", "Session", "cd here", "Split right", "Split below"]
         precondition(direct.targets == targets)
         for (target, label) in zip(targets, labels) {
             precondition(direct.target == target && PickerModel.targetLabel(target) == label)
             direct.cycleTarget(backward: false)
         }
-        precondition(direct.target == "tab", "Ctrl+O must wrap through all seven targets")
+        precondition(direct.target == "tab", "Ctrl+O must wrap through all five targets")
         for target in targets.reversed() {
             direct.cycleTarget(backward: true)
             precondition(direct.target == target)
@@ -369,7 +369,7 @@ struct NativeChecks {
         try await wait { fallback.canCreate }
         precondition(fallback.page == .create && fallback.items.isEmpty && fallback.branch == "feat/repository")
         fallback.close()
-        print("PASS: immediate direct form, origin metadata, early typing, disabled submit, close during load, stale metadata, direct repository continuation, direct Escape/popover, seven target labels and bidirectional cycling")
+        print("PASS: immediate direct form, origin metadata, early typing, disabled submit, close during load, stale metadata, direct repository continuation, direct Escape/popover, five target labels and bidirectional cycling")
     }
 
     @MainActor private static func wait(_ condition: () -> Bool) async throws {
