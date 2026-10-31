@@ -290,6 +290,9 @@ struct RaptorApplication {
     @MainActor static func main() {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
+        // Seed the palette from the system appearance; the first backend
+        // connection replaces it with the active Rex theme.
+        PickerPalette.useFallback(dark: application.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
         let delegate = RaptorDelegate()
         application.delegate = delegate
         withExtendedLifetime(delegate) { application.run() }

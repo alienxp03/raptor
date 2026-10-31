@@ -9,7 +9,8 @@ import (
 	"github.com/alienxp03/raptor/internal/paths"
 )
 
-// Rex-native terminal palette: warm dark surface with the amber selection.
+// Fallback compact palette (sampled from Rex's Sonoran Dusk). ApplyTheme
+// replaces these with the active Rex theme when it can be resolved.
 var (
 	pickerText     = lipgloss.NewStyle().Foreground(lipgloss.Color("#EDEAE6"))
 	pickerMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9A928A"))
@@ -129,7 +130,7 @@ func pickerTail(value string, width int) string {
 }
 
 func pickerRule(width int) string {
-	return pickerLine(lipgloss.NewStyle().Foreground(lipgloss.Color("#4A443F")).Render(strings.Repeat("─", width)), width)
+	return pickerLine(pickerRail.Render(strings.Repeat("─", width)), width)
 }
 
 func pickerRow(content string, width int, selected bool) string {

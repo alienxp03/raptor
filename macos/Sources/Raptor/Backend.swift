@@ -76,8 +76,9 @@ struct APIResult: Codable, Sendable {
     var baseBranch: String? = nil
     var path: String? = nil
     var validationError: String? = nil
+    var theme: ThemePayload? = nil
     enum CodingKeys: String, CodingKey {
-        case items, targets, target, repo, branches, path
+        case items, targets, target, repo, branches, path, theme
         case destinationRoot = "destination_root"
         case needsRepo = "needs_repo", baseBranch = "base_branch", validationError = "validation_error"
     }

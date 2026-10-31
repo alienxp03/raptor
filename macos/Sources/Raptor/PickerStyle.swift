@@ -3,6 +3,7 @@ import SwiftUI
 
 // Rex-native metrics and palette. Sampled from the Rex Beta picker window
 // (2x capture): compact 28pt rows, warm dark surface, amber selection.
+@MainActor
 enum PickerStyle {
     static let width: CGFloat = 640
     static let topInset: CGFloat = 72
@@ -22,10 +23,13 @@ enum PickerStyle {
     static let rowHeight: CGFloat = 28
     static let worktreeRowHeight: CGFloat = 28
     static let selectedPathHeight: CGFloat = 32
-    static let selection = Color(red: 0.722, green: 0.510, blue: 0.259)
-    static let selectionText = Color(red: 0.153, green: 0.141, blue: 0.133)
-    static let background = Color(red: 0.153, green: 0.141, blue: 0.133)
-    static let fieldBackground = Color(red: 0.243, green: 0.227, blue: 0.224)
+
+    // Colors forward to PickerPalette, which the Go backend refreshes with
+    // the active Rex theme per invocation.
+    static var selection: Color { PickerPalette.selection }
+    static var selectionText: Color { PickerPalette.selectionText }
+    static var background: Color { PickerPalette.background }
+    static var fieldBackground: Color { PickerPalette.fieldBackground }
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {
         CGRect(x: area.midX - width / 2, y: area.maxY - topInset - height,
@@ -76,7 +80,7 @@ private struct RexPanelBackground: ViewModifier {
         content
             .background(PickerStyle.background)
             .clipShape(RoundedRectangle(cornerRadius: PickerStyle.radius))
-            .overlay(RoundedRectangle(cornerRadius: PickerStyle.radius).strokeBorder(Color.white.opacity(0.07)))
+            .overlay(RoundedRectangle(cornerRadius: PickerStyle.radius).strokeBorder(PickerPalette.stroke))
     }
 }
 

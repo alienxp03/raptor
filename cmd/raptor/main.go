@@ -49,8 +49,10 @@ func main() {
 			os.Exit(1)
 		}
 	case "dirs":
+		picker.ApplyTheme()
 		os.Exit(picker.RunDirs(ctx, cfg))
 	case "launcher":
+		picker.ApplyTheme()
 		os.Exit(picker.RunLauncher(ctx, cfg))
 	case "wt":
 		rest := flag.NewFlagSet("wt", flag.ExitOnError)
@@ -58,8 +60,10 @@ func main() {
 		create := rest.Bool("create", false, "open the create-worktree form directly")
 		_ = rest.Parse(fs.Args()[1:])
 		if *create {
+			picker.ApplyTheme()
 			os.Exit(picker.RunCreateWorktree(ctx, cfg, *repo))
 		}
+		picker.ApplyTheme()
 		os.Exit(picker.RunWorktrees(ctx, cfg, *repo))
 	case "task":
 		rest := flag.NewFlagSet("task", flag.ExitOnError)

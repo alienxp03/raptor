@@ -33,9 +33,9 @@ var (
 
 // row is one list entry in the dir picker.
 type row struct {
-	kind    string // "dir"
-	label   string // paths.Basename
-	path    string // full directory path
+	kind  string // "dir"
+	label string // paths.Basename
+	path  string // full directory path
 }
 
 type dirModel struct {
@@ -330,7 +330,7 @@ func renderTargets(cfg config.Config, active string) string {
 			label = "HERE"
 		}
 		if target == active {
-			parts = append(parts, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")).Render("["+label+"]"))
+			parts = append(parts, styTarget.Render("["+label+"]"))
 		} else {
 			parts = append(parts, styDim.Render(" "+label+" "))
 		}

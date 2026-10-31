@@ -313,7 +313,7 @@ struct NativeChecks {
         try await Task.sleep(for: .milliseconds(230))
         let pendingMethods = await backend.methods()
         precondition(direct.page == .create && direct.branch == "feat/typed-early" && !direct.canCreate)
-        precondition(pendingMethods == ["worktrees.list"], "Metadata must precede preview and create")
+        precondition(pendingMethods.filter { $0 != "theme" } == ["worktrees.list"], "Metadata must precede preview and create")
         try await wait { direct.canCreate }
         let origin = await backend.requestedRepo()
         precondition(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)

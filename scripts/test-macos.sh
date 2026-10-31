@@ -20,6 +20,7 @@ xcrun swiftc "${common[@]}" -framework SwiftUI -framework AppKit \
   "$SCRIPT_ROOT/macos/Sources/Raptor/PickerModel.swift" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/PathDisplay.swift" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/PickerStyle.swift" \
+  "$SCRIPT_ROOT/macos/Sources/Raptor/RexTheme.swift" \
   "$SCRIPT_ROOT/macos/Tests/NativeChecks.swift" \
   -o "$app/Contents/MacOS/NativeChecks"
 xcrun swiftc "${common[@]}" "$SCRIPT_ROOT/macos/Tests/TransportFixture.swift" \
@@ -28,6 +29,7 @@ xcrun swiftc "${common[@]}" "$SCRIPT_ROOT/macos/Tests/TransportFixture.swift" \
 xcrun swiftc "${common[@]}" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/Backend.swift" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/PickerRequest.swift" \
+  "$SCRIPT_ROOT/macos/Sources/Raptor/RexTheme.swift" \
   "$SCRIPT_ROOT/macos/Tests/PickerRequestChecks.swift" \
   -o "$work/PickerRequestChecks"
 "$work/PickerRequestChecks"

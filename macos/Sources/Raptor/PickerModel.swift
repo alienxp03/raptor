@@ -28,12 +28,14 @@ final class PickerModel: ObservableObject {
     @Published var removalCandidate: PickerItem?
     @Published var basePickerPresented = false
     @Published var targetPickerPresented = false
+    @Published var themeLoaded = false
     var onClose: (() -> Void)?
     var onFocusSearch: (() -> Void)?
     var onAdvanceFormFocus: ((Bool) -> Void)?
     private var queryTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
     private var operationTask: Task<Void, Never>?
+    private var themeTask: Task<Void, Never>?
     private var generation = 0
     private var previewGeneration = 0
     private var closed = false
@@ -60,11 +62,28 @@ final class PickerModel: ObservableObject {
         }
     }
 
-    func start() { scheduleQuery(immediate: true) }
+    func start() {
+        loadTheme()
+        scheduleQuery(immediate: true)
+    }
+
+    // Fetch the active Rex theme from the backend and repaint. On failure
+    // the current palette stays; RaptorApplication seeds it from the system
+    // appearance before any picker opens.
+    private func loadTheme() {
+        themeTask = Task { [weak self] in
+            let result = try? await self?.backend.request("theme", params: [:])
+            guard let self, !self.closed, !Task.isCancelled else { return }
+            if let payload = result?.theme {
+                PickerPalette.apply(payload)
+            }
+            self.themeLoaded = true
+        }
+    }
     func close() {
         guard !closed else { return }
         closed = true
-        queryTask?.cancel(); previewTask?.cancel(); operationTask?.cancel()
+        queryTask?.cancel(); previewTask?.cancel(); operationTask?.cancel(); themeTask?.cancel()
         onAdvanceFormFocus = nil; onFocusSearch = nil
         backend.close()
         onClose?()

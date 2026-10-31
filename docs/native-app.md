@@ -73,8 +73,15 @@ Errors have an `error` string instead of `result`. IDs identify requests; they d
 | `worktrees.create` | `repo`, `branch`, `base` | Created `path`; does not open it automatically |
 | `worktrees.remove` | `repo`, `path` | Empty result after safe Git removal; branch retained |
 | `dispatch` | `target`, `path` | Empty result after the existing Rex dispatch |
+| `theme` | none | Active Rex theme palette; `error` string when resolution fails |
 
 The native **Create** button sends creation followed by dispatch. These remain separate backend operations: the app records the created path before opening it. If opening fails, **Retry opening** dispatches that existing path without creating again. A timeout during creation can leave the outcome unknown; check the worktree list before trying creation again.
+
+## Rex theme colors
+
+Both interfaces take their colors from the active Rex theme instead of hardcoding them. The Go resolver reads `Workspace.appearance`, `Workspace.interfaceStyle`, `Workspace.darkThemeID`/`Workspace.lightThemeID`, and `Workspace.customThemes` from the `com.superlogical.rex` preferences, then looks the theme up in the Rex app bundle's `SuperUI_SuperDesignTokens` catalog. Tinted interface styles (`blendTheme`, `useTheme`) fall back to built-in colors, as does any resolution failure. The terminal picker applies the resolved ANSI palette on startup; the native app requests the same palette over the `theme` method and repaints.
+
+Set `RAPTOR_THEME=ansi` to force the built-in palette (tests do this for deterministic output), and `RAPTOR_REX_APP` to point at a Rex installation outside the standard `/Applications` and `~/Applications` paths.
 
 The creation form labels the source **Repo** and new **Destination** paths, with branch, searchable local base branch, and open target fields. Direct `wt-create` launches display the form before metadata loads. Escape closes a directly opened form; it returns to the parent list for a form opened from that list. A base-branch popover is dismissed first. Branch matching and validation run in Go. An untouched branch field shows guidance, not a validation error. Tab / Shift+Tab skips disabled controls; Cmd+Enter submits. The branch popover owns its keyboard events: Enter selects, Escape closes it and restores form focus; neither submits nor closes the form beneath it.
 

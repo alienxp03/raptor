@@ -13,6 +13,7 @@ import (
 	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
+	"github.com/alienxp03/raptor/internal/picker"
 	"github.com/alienxp03/raptor/internal/rex"
 	"github.com/alienxp03/raptor/internal/worktree"
 )
@@ -148,6 +149,8 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 	// Decode each method separately: unrelated parameters must not change type
 	// validation for the selected method.
 	switch method {
+	case "theme":
+		return picker.ThemeJSON(), nil
 	case "directories":
 		var p struct {
 			Query     string `json:"query"`

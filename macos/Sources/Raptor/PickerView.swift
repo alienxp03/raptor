@@ -18,6 +18,8 @@ struct PickerView: View {
         .frame(width: PickerStyle.width, height: PickerStyle.height(for: model))
         .pickerGlass()
         .tint(PickerStyle.selection)
+        // Color.primary and system controls follow the Rex theme, not the app's own appearance.
+        .preferredColorScheme(PickerPalette.isDark ? .dark : .light)
         .id(ObjectIdentifier(model))
         .task(id: ObjectIdentifier(model)) {
             guard !Task.isCancelled else { return }
@@ -346,7 +348,7 @@ struct PickerView: View {
         .padding(.horizontal, PickerStyle.horizontalInset)
         .frame(height: PickerStyle.footerHeight)
         .overlay(alignment: .top) {
-            if model.page != .create { Divider().overlay(Color.white.opacity(0.08)) }
+            if model.page != .create { Divider().overlay(PickerPalette.stroke) }
         }
     }
 
@@ -388,7 +390,7 @@ struct PickerView: View {
                 .padding(.horizontal, 8)
                 .frame(height: PickerStyle.controlHeight)
                 .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(field == .target ? PickerStyle.selection : Color.white.opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(field == .target ? PickerStyle.selection : PickerPalette.stroke))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
