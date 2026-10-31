@@ -108,6 +108,10 @@ local function check(case)
 			assert(layer.bounds[1] == (mobile and 0.04 or 0.28))
 		end
 	end
+	local launcher = actions.raptor_launcher(ctx, {})
+	assert(launcher.ui == "terminal", "Experimental launcher must stay terminal-only")
+	local launcher_command = layers[#layers].layout.options.command
+	assert(launcher_command[#launcher_command] == "launcher")
 	local layer_count = #layers
 	picker_open = true
 	actions.raptor_worktree_new(ctx)

@@ -40,17 +40,21 @@ type row struct {
 }
 
 type dirModel struct {
-	cfg       config.Config
-	ctx       rex.Ctx
-	rows      []row // full set
-	view      []int // indices into rows after filtering
-	filter    string
-	sel       int
-	target    string
-	splitMode bool
-	err       string
-	width     int
-	height    int
+	cfg        config.Config
+	ctx        rex.Ctx
+	rows       []row // full set
+	view       []int // indices into rows after filtering
+	filter     string
+	sel        int
+	target     string
+	splitMode  bool
+	launcher   bool
+	actionMenu bool
+	actionSel  int
+	actions    []launcherAction
+	err        string
+	width      int
+	height     int
 	// result of the interaction, read after the program exits
 	picked   *row   // non-nil when a directory was chosen
 	next     string // "wt" or "wt-create" with a repo path in nextRepo
@@ -71,7 +75,16 @@ func loadDirRows(ctx rex.Ctx) []row {
 }
 
 func RunDirs(ctx rex.Ctx, cfg config.Config) int {
-	m := &dirModel{cfg: cfg, ctx: ctx, rows: loadDirRows(ctx), target: cfg.Enter}
+	return runDirs(ctx, cfg, false)
+}
+
+// RunLauncher previews a path's actions before dispatching. Normal pickers stay unchanged.
+func RunLauncher(ctx rex.Ctx, cfg config.Config) int {
+	return runDirs(ctx, cfg, true)
+}
+
+func runDirs(ctx rex.Ctx, cfg config.Config, launcher bool) int {
+	m := &dirModel{cfg: cfg, ctx: ctx, rows: loadDirRows(ctx), target: cfg.Enter, launcher: launcher}
 	m.applyFilter()
 	var dm *dirModel
 	for {
@@ -92,6 +105,7 @@ func RunDirs(ctx rex.Ctx, cfg config.Config) int {
 		}
 		// Resume the same picker rather than constructing a fresh one.
 		dm.next, dm.nextRepo = "", ""
+		dm.actionMenu = false
 		m = dm
 	}
 	if dm.picked == nil {
@@ -140,6 +154,9 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		m.err = ""
+		if m.actionMenu {
+			return m.updateLauncherActions(msg)
+		}
 		if m.splitMode {
 			switch msg.String() {
 			case "ctrl+c":
@@ -211,6 +228,12 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			r := m.selected()
+			if m.launcher {
+				if r != nil {
+					m.openLauncherActions(r.path)
+				}
+				return m, nil
+			}
 			if r != nil {
 				m.picked = r
 			}
@@ -246,6 +269,9 @@ func (m *dirModel) View() string {
 	}
 	if m.width < 4 || m.height < 5 {
 		return pickerTiny(m.width, m.height)
+	}
+	if m.actionMenu {
+		return m.viewLauncherActions()
 	}
 	width := m.width - 2
 	blank := pickerLine("", width)
@@ -285,6 +311,9 @@ func (m *dirModel) View() string {
 		right = splitHint
 	}
 	footer := pickerFooter(left, right, left, width)
+	if m.launcher {
+		footer = pickerLine(pickerMuted.Render("enter Actions · esc Back/close"), width)
+	}
 	if m.splitMode {
 		directions := pickerAccent.Bold(true).Render("h← j↓ k↑ l→")
 		footer = pickerFooter(pickerMuted.Render("Split: ")+directions, pickerMuted.Render("esc cancel"), directions+pickerMuted.Render(" · esc"), width)

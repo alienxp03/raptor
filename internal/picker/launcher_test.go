@@ -1,0 +1,96 @@
+package picker
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/rex"
+	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+)
+
+func launcherFixture(t *testing.T, path string) *dirModel {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Targets = []string{"tab", "session", "here", "pane", "pane_below"}
+	m := &dirModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, launcher: true,
+		rows: []row{{kind: "dir", label: "project", path: path}}, target: "tab", width: 40, height: 12}
+	m.applyFilter()
+	return m
+}
+
+func TestLauncherEnterPreviewsBeforeDispatch(t *testing.T) {
+	m := launcherFixture(t, t.TempDir())
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || !m.actionMenu || m.picked != nil {
+		t.Fatal("first Enter must only show actions")
+	}
+	if len(m.actions) != 5 {
+		t.Fatalf("unexpected actions: %+v", m.actions)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || m.picked == nil || m.target != "session" {
+		t.Fatal("second Enter must execute the selected action")
+	}
+}
+
+func TestLauncherBackPreservesPathSearch(t *testing.T) {
+	m := launcherFixture(t, t.TempDir())
+	m.filter = "project"
+	m.applyFilter()
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.actionMenu || m.filter != "project" || m.sel != 0 || m.picked != nil {
+		t.Fatal("back must preserve path selection/query")
+	}
+}
+
+func TestLauncherGitActionsAndContext(t *testing.T) {
+	repo := fixtureRepo(t)
+	m := launcherFixture(t, repo)
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.actions) != 7 {
+		t.Fatalf("Git actions missing: %+v", m.actions)
+	}
+	m.actionSel = 5
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || m.next != "wt-create" || m.nextRepo != worktreepkg.RepoRoot(repo) || m.picked != nil {
+		t.Fatal("new worktree must carry selected repository without dispatch")
+	}
+	m = launcherFixture(t, t.TempDir())
+	m.ctx.Block = ""
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.actions) != 2 {
+		t.Fatal("without origin block, only session/tab should be offered")
+	}
+}
+
+func TestLauncherEmptyAndNarrow(t *testing.T) {
+	m := launcherFixture(t, t.TempDir())
+	m.filter = "no-match"
+	m.applyFilter()
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || m.actionMenu {
+		t.Fatal("empty results must not close or open actions")
+	}
+	m.filter = ""
+	m.applyFilter()
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	for _, width := range []int{20, 32, 60} {
+		m.width = width
+		m.actionSel = len(m.actions) - 1
+		lines := strings.Split(ansi.Strip(m.View()), "\n")
+		if len(lines) != m.height {
+			t.Fatalf("height overflow at %d: %d", width, len(lines))
+		}
+		for _, line := range lines {
+			if lipgloss.Width(line) > width {
+				t.Fatalf("width overflow at %d: %q", width, line)
+			}
+		}
+	}
+}

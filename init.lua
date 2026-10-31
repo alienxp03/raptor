@@ -156,7 +156,7 @@ function M.setup(options)
 		return "raptor://picker?" .. table.concat(parts, "&")
 	end
 
-	local function show_picker(ctx, mode)
+	local function resolve_context(ctx)
 		-- Function key bindings can omit client_id. The origin terminal's
 		-- owner is the client controlling its input/size, not a random viewer.
 		if ctx.client_id == nil and ctx.block_id then
@@ -169,8 +169,13 @@ function M.setup(options)
 				ctx = resolved
 			end
 		end
+		return ctx
+	end
+
+	local function show_picker(ctx, mode)
+		ctx = resolve_context(ctx)
 		local platform, local_client = client_platform(ctx)
-		if cfg.ui == "gui" or (cfg.ui == "auto" and platform == "macos" and local_client) then
+		if mode ~= "launcher" and (cfg.ui == "gui" or (cfg.ui == "auto" and platform == "macos" and local_client)) then
 			local apps = cfg.app ~= "" and { cfg.app }
 				or { os.getenv("HOME") .. "/Applications/Raptor.app", "/Applications/Raptor.app" }
 			for _, app in ipairs(apps) do
@@ -187,7 +192,7 @@ function M.setup(options)
 				end
 			end
 		end
-		if cfg.ui == "gui" then
+		if cfg.ui == "gui" and mode ~= "launcher" then
 			error("raptor: GUI requested, but Raptor.app was not found or could not be launched", 0)
 		end
 		local args = base_cmd(ctx)
@@ -265,6 +270,38 @@ function M.setup(options)
 				end
 			end
 			return show_picker(ctx, "wt-create")
+		end,
+	})
+
+	rex.action({
+		name = "raptor_launcher",
+		title = "Raptor: Experimental Launcher",
+		description = "Search paths, then choose an action. Terminal-only preview.",
+		category = "Navigate",
+		run = function(ctx)
+			if ctx.session_id == nil then error("raptor: no session context", 0) end
+			return show_picker(ctx, "launcher")
+		end,
+	})
+
+	rex.action({
+		name = "raptor_task_new",
+		title = "Raptor: Instant Pi Worktree",
+		description = "Auto-name a branch/worktree from HEAD, open a tab, and start fresh Pi without a prompt.",
+		category = "Navigate",
+		keywords = "task pi instant branch worktree tab",
+		run = function(ctx)
+			if ctx.session_id == nil or ctx.block_id == nil then
+				error("raptor: instant task needs a session and origin pane", 0)
+			end
+			ctx = resolve_context(ctx)
+			if ctx.client_id == nil then error("raptor: cannot identify the app client", 0) end
+			local command = base_cmd(ctx, false)
+			table.insert(command, "task")
+			local result, err = rex.exec(command, { timeout = 30 })
+			if result == nil then error(err, 0) end
+			if not result.ok then error("raptor: " .. result.stdout .. result.stderr, 0) end
+			return rex.json.decode(result.stdout)
 		end,
 	})
 

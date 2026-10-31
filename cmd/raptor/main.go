@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/picker"
 	"github.com/alienxp03/raptor/internal/rex"
+	"github.com/alienxp03/raptor/internal/task"
 )
 
 // version is set at build time.
@@ -26,7 +28,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|wt|api|direct|last-session|last-pane> [command flags]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|launcher|wt|task|api|direct|last-session|last-pane> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -48,6 +50,8 @@ func main() {
 		}
 	case "dirs":
 		os.Exit(picker.RunDirs(ctx, cfg))
+	case "launcher":
+		os.Exit(picker.RunLauncher(ctx, cfg))
 	case "wt":
 		rest := flag.NewFlagSet("wt", flag.ExitOnError)
 		repo := rest.String("repo", "", "repo path (default: origin block's cwd, else picker)")
@@ -57,6 +61,17 @@ func main() {
 			os.Exit(picker.RunCreateWorktree(ctx, cfg, *repo))
 		}
 		os.Exit(picker.RunWorktrees(ctx, cfg, *repo))
+	case "task":
+		rest := flag.NewFlagSet("task", flag.ExitOnError)
+		repo := rest.String("repo", "", "origin repository (default: current pane)")
+		resume := rest.String("resume", "", "reuse an existing worktree after a tab-open failure")
+		_ = rest.Parse(fs.Args()[1:])
+		result, err := task.Start(ctx, cfg, *repo, *resume)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(result)
 	case "direct":
 		// raptor -session X -block Y -client Z direct <target> <dir>
 		args := fs.Args()[1:]

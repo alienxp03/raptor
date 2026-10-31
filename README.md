@@ -98,6 +98,49 @@ These are example bindings. Change them to keys that work for you. Raptor also a
 
 The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it; Cmd+Q quits completely. Each reopening gets fresh Rex context and a new Go backend. No focus watcher or login item is added. If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`. Set `ui = "gui"` to force the server’s Mac app, including from CLI or iOS; a missing app or failed launch reports an error instead of falling back.
 
+### Instant Pi worktree
+
+`raptor_task_new` skips the form: generate a single-word branch such as
+`otter` from a bundled 473-word list (cryptographically shuffled; collisions try
+another word, never a suffix), create its worktree from the origin repository's committed
+HEAD, open and select a new tab, and run fresh `pi` with no initial prompt.
+Uncommitted changes stay in the original worktree. This action is independent of
+`ui`: Mac and iOS use the same backend flow, without opening either picker.
+Pi must be installed on the server host. Missing context, a missing Pi executable,
+or an unborn/non-Git repository fails before creating a worktree.
+
+```lua
+rex.bind("ctrl+shift+n", function()
+  rex.invoke("raptor_task_new")
+  return true
+end)
+```
+
+CLI equivalent: `raptor -client CLIENT task` (session/block default to Rex's
+terminal environment). `task --repo /path/to/repo` overrides repository detection.
+If opening the tab fails, the error reports the preserved worktree; reuse it with
+`raptor -client CLIENT task --resume /path/to/worktree`. If only switching fails,
+select the already-created tab rather than creating another task. Tabs stay open
+after Pi exits or fails, so startup errors remain visible.
+
+### Experimental two-stage launcher
+
+`raptor launcher` (Rex action `raptor_launcher`) is a terminal-only preview,
+separate from the normal terminal picker and native Mac UI. Search a directory,
+press Enter to choose an action, then Enter again to run it. Escape returns to
+the path list without losing the search or selection. Actions respect configured
+`targets`; Git repositories also offer New Worktree and Browse Worktrees.
+Existing direct-open and worktree shortcuts are unchanged.
+
+For iOS onscreen modifiers, use a function binding:
+
+```lua
+rex.bind("ctrl+m", function()
+  rex.invoke("raptor_launcher")
+  return true
+end)
+```
+
 ### Local Mac package
 
 ```sh
