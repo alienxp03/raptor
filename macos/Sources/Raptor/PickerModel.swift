@@ -306,7 +306,7 @@ final class PickerModel: ObservableObject {
         switch target {
         case "tab": return "New tab"
         case "session": return "Session"
-        case "here": return "Current shell"
+        case "here": return "cd here"
         case "pane": return "Split right"
         case "pane_left": return "Split left"
         case "pane_above": return "Split above"

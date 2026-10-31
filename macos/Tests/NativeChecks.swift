@@ -130,7 +130,7 @@ struct NativeChecks {
                      "Launcher and form must share typography and control sizing")
         precondition(PickerModel.targetLabel("tab") == "New tab")
         precondition(PickerModel.targetLabel("session") == "Session")
-        precondition(PickerModel.targetLabel("here") == "Current shell")
+        precondition(PickerModel.targetLabel("here") == "cd here")
         let launcher = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: SlowDirectoryBackend())
         let initialListHeight = PickerStyle.height(for: launcher)
         precondition(launcher.loading && initialListHeight == 316,
@@ -326,7 +326,7 @@ struct NativeChecks {
         direct.validationError = nil
         direct.error = nil
         let targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]
-        let labels = ["New tab", "Session", "Current shell", "Split right", "Split left", "Split above", "Split below"]
+        let labels = ["New tab", "Session", "cd here", "Split right", "Split left", "Split above", "Split below"]
         precondition(direct.targets == targets)
         for (target, label) in zip(targets, labels) {
             precondition(direct.target == target && PickerModel.targetLabel(target) == label)
