@@ -96,7 +96,7 @@ rex.bind("ctrl+n", "raptor_worktree_new")
 
 These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_worktree_list`, `raptor_worktree_new`, `raptor_session_last`, and `raptor_pane_last` to the Rex command palette. Reload the Rex config after you change it.
 
-The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it; Cmd+Q quits completely. Each reopening gets fresh Rex context and a new Go backend. No focus watcher or login item is added. If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`.
+The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it; Cmd+Q quits completely. Each reopening gets fresh Rex context and a new Go backend. No focus watcher or login item is added. If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`. Set `ui = "gui"` to force the server’s Mac app, including from CLI or iOS; a missing app or failed launch reports an error instead of falling back.
 
 ### Local Mac package
 
@@ -118,9 +118,10 @@ rex.bind("cmd+p", "raptor_pane_last")
 - `raptor_session_last`: toggle the session Raptor left.
 
 Canonical names use resource + action, except `raptor`, which remains the default
-launcher. Old names (`raptor_wt`, `raptor_create`, `raptor_last_pane`,
-`raptor_last_session`, and `raptor_last`) remain compatibility aliases marked
-**legacy** in the command palette.
+launcher. Old action names are no longer registered, keeping the command palette free of
+duplicates. Update existing bindings: `raptor_wt` → `raptor_worktree_list`,
+`raptor_create` → `raptor_worktree_new`, `raptor_last_pane` → `raptor_pane_last`,
+and `raptor_last_session` / `raptor_last` → `raptor_session_last`.
 
 Raptor records the origin when it opens a pane, tab, or different session. Changing directory with `here` does not update pane history. Clicking panes, normal Rex pane shortcuts, and manual tab or session changes do not update either history. No background watcher runs.
 
@@ -205,7 +206,7 @@ The Rex plugin also accepts UI selection and terminal popup settings:
 
 ```lua
 require("raptor").setup{
-  ui = "auto", -- Or "terminal".
+  ui = "auto", -- Or "terminal" / "gui" (force the server’s Mac app).
   -- app = "/custom/path/Raptor.app",
   bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
   mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },

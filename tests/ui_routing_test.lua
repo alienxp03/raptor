@@ -16,7 +16,13 @@ local function check(case)
 		action = function(action)
 			actions[action.name] = action.run
 		end,
-		call = function(method)
+		call = function(method, args)
+			if method == "client.perform" then
+				assert(case.function_binding and args.client_id == "demo-client")
+				assert(args.action == "session.select" and args.block_id == "picker-block")
+				queued[#queued + 1] = { action = args.action, args = args.args }
+				return { performed_by = args.client_id }
+			end
 			assert(method == "client.list")
 			return {
 				clients = {
@@ -46,7 +52,7 @@ local function check(case)
 		},
 		session = {
 			describe_block = function()
-				return { block = { window_id = "demo-window", label = picker_open and "raptor" or "shell" } }
+				return { block = { window_id = "demo-window", label = picker_open and "raptor" or "shell", owner = case.function_binding and "demo-client" or nil } }
 			end,
 			new_layer = function(options)
 				layers[#layers + 1] = options
@@ -62,12 +68,19 @@ local function check(case)
 		end,
 	}
 	dofile("init.lua").setup({ app = app, ui = case.ui or "auto" })
-	assert(actions.raptor_wt == actions.raptor_worktree_list, "Legacy worktree list alias changed")
-	assert(actions.raptor_create == actions.raptor_worktree_new, "Legacy create alias changed")
+	assert(actions.raptor_wt == nil, "Legacy worktree list must not clutter the palette")
+	assert(actions.raptor_create == nil, "Legacy create must not clutter the palette")
 	local ctx = { session_id = "session:demo&safe", block_id = "block:demo space", client_id = "demo-client" }
+	if case.function_binding then ctx.client_id = nil end
 	for _, mode in ipairs({ "dirs", "wt", "wt-create" }) do
 		local action = ({ dirs = "raptor", wt = "raptor_worktree_list", ["wt-create"] = "raptor_worktree_new" })[mode]
-		local result = actions[action](ctx, {})
+		local ok, result = pcall(actions[action], ctx, {})
+		if case.expected_error then
+			assert(not ok and tostring(result):find("GUI requested", 1, true), case.name .. ": expected GUI error")
+			assert(#layers == 0, "Forced GUI must not fall back to terminal")
+			return
+		end
+		assert(ok, tostring(result))
 		assert(result.ui == case.expected, case.name .. ": incorrect UI")
 		if result.ui == "native" then
 			local command = executions[#executions]
@@ -100,7 +113,7 @@ local function check(case)
 	actions.raptor_worktree_new(ctx)
 	assert(#layers == layer_count, "Ctrl+N inside a picker must not nest layers")
 	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+n")
-	if case.platform ~= "macos" or case.kind == "cli" or case.ui == "terminal" or not case.installed or case.transport == "tls" then
+	if case.ui ~= "gui" and (case.platform ~= "macos" or case.kind == "cli" or case.ui == "terminal" or not case.installed or case.transport == "tls") then
 		assert(#executions == 0, case.name .. ": native process unexpectedly started")
 	end
 end
@@ -110,11 +123,16 @@ for _, case in ipairs({
 	{ name = "Mac-hosted CLI is not a viewing app", platform = "macos", kind = "cli", installed = true, expected = "terminal" },
 	{ name = "remote Mac", platform = "macos", transport = "tls", installed = true, expected = "terminal" },
 	{ name = "iPhone", platform = "ios", installed = true, expected = "terminal" },
+	{ name = "iPhone function binding without client ID", platform = "ios", installed = true, function_binding = true, expected = "terminal" },
 	{ name = "iPad", platform = "ipados", installed = true, expected = "terminal" },
 	{ name = "unknown client", installed = true, expected = "terminal" },
 	{ name = "missing app", platform = "macos", expected = "terminal" },
 	{ name = "launch failed", platform = "macos", installed = true, launch_failure = true, expected = "terminal" },
 	{ name = "terminal override", platform = "macos", installed = true, ui = "terminal", expected = "terminal" },
+	{ name = "forced GUI from CLI", platform = "macos", kind = "cli", installed = true, ui = "gui", expected = "native" },
+	{ name = "forced GUI from iPhone", platform = "ios", transport = "tailscale", installed = true, ui = "gui", expected = "native" },
+	{ name = "forced GUI without app", platform = "macos", ui = "gui", expected_error = true },
+	{ name = "forced GUI launch failure", platform = "macos", installed = true, launch_failure = true, ui = "gui", expected_error = true },
 }) do
 	check(case)
 end

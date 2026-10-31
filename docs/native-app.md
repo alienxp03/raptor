@@ -15,14 +15,16 @@ The Mac UI stays warm between uses. Escape hides the window and closes that pick
 
 ## UI selection
 
-The Rex plugin checks the requesting client's platform. With `ui = "auto"`, a local macOS client uses an installed app. iOS, iPadOS, and remotely connected Mac clients use the terminal picker. The plugin requires a local Unix-socket app client before it launches an app on the server machine. CLI clients always use the terminal picker: their platform describes the server executing the CLI, not the device viewing the terminal. This also prevents a CLI invoked from an iPhone from opening the Mac app when Rex supplies the CLI's identity to a registered action. A missing app or failed launch command falls back to the terminal picker. Launch Services delivers a validated `raptor://picker` URL to the existing app instead of starting another instance. URLs contain picker context only, never an action to run automatically. If the app crashes after macOS accepts the launch, the plugin cannot detect that failure; use the terminal override while investigating it.
+The Rex plugin checks the requesting client's platform. With `ui = "auto"`, a local macOS client uses an installed app. iOS, iPadOS, and remotely connected Mac clients use the terminal picker. The plugin requires a local Unix-socket app client before it launches an app on the server machine. In auto mode, CLI clients always use the terminal picker: their platform describes the server executing the CLI, not the device viewing the terminal. This also prevents a CLI invoked from an iPhone from opening the Mac app when Rex supplies the CLI's identity to a registered action. A missing app or failed launch command falls back to the terminal picker. Launch Services delivers a validated `raptor://picker` URL to the existing app instead of starting another instance. URLs contain picker context only, never an action to run automatically. If the app crashes after macOS accepts the launch, the plugin cannot detect that failure; use the terminal override while investigating it.
 
 ```lua
 require("raptor").setup{
-  ui = "auto", -- Or "terminal" on every platform.
+  ui = "auto", -- Or "terminal"; "gui" forces the server’s Mac app.
   -- app = "/custom/path/Raptor.app",
 }
 ```
+
+Set `ui = "gui"` to force the Mac app on the server, regardless of the invoking client (including CLI and iOS). This does not open an app on the iPhone. If the app is missing or cannot be launched, the action fails instead of opening a terminal picker.
 
 All picker actions (`raptor`, `raptor_worktree_list`, and `raptor_worktree_new`) use this setting. `raptor_worktree_new` sends `mode=wt-create` to the native app or runs `raptor wt --create` in the terminal. It only opens a form; it never creates a worktree without confirmation.
 

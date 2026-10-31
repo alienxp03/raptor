@@ -26,7 +26,7 @@ function M.setup(options)
 		bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
 		mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },
 		bin = brew_bin or (os.getenv("HOME") .. "/.local/bin/raptor"),
-		ui = "auto", -- Native Mac app when installed; terminal on mobile.
+		ui = "auto", -- auto, terminal, or gui (force the server's Mac app).
 		app = brew_app or "", -- Explicit options override automatic package discovery.
 	}
 	for key, value in pairs(options or {}) do
@@ -36,22 +36,8 @@ function M.setup(options)
 		cfg[key] = value
 	end
 
-	if cfg.ui ~= "auto" and cfg.ui ~= "terminal" then
-		error("raptor: ui must be auto or terminal", 0)
-	end
-
-	local function register_action(definition, aliases)
-		rex.action(definition)
-		for _, name in ipairs(aliases or {}) do
-			local alias = {}
-			for key, value in pairs(definition) do
-				alias[key] = value
-			end
-			alias.name = name
-			alias.title = definition.title .. " (legacy)"
-			alias.description = "Legacy alias for " .. definition.name
-			rex.action(alias)
-		end
+	if cfg.ui ~= "auto" and cfg.ui ~= "terminal" and cfg.ui ~= "gui" then
+		error("raptor: ui must be auto, terminal, or gui", 0)
 	end
 
 	local function client_platform(ctx)
@@ -136,10 +122,20 @@ function M.setup(options)
 			rex.session.focus_block({ block_id = layer.block_ids[1] })
 		end
 		if ctx.client_id ~= nil and win_id ~= nil then
-			rex.client.queue("session.select", {
-				session_id = ctx.session_id,
-				window_id = win_id,
-			})
+			local selection = { session_id = ctx.session_id, window_id = win_id }
+			if ctx.owner_client then
+				-- queue targets the original caller, whose identity is absent in
+				-- this path. Explicitly target the recovered terminal owner.
+				rex.call("client.perform", {
+					client_id = ctx.client_id,
+					action = "session.select",
+					args = selection,
+					session_id = ctx.session_id,
+					block_id = layer.block_ids and layer.block_ids[1],
+				})
+			else
+				rex.client.queue("session.select", selection)
+			end
 		end
 	end
 
@@ -161,8 +157,20 @@ function M.setup(options)
 	end
 
 	local function show_picker(ctx, mode)
+		-- Function key bindings can omit client_id. The origin terminal's
+		-- owner is the client controlling its input/size, not a random viewer.
+		if ctx.client_id == nil and ctx.block_id then
+			local origin = rex.session.describe_block({ block_id = ctx.block_id })
+			if origin and origin.block and origin.block.owner then
+				local resolved = {}
+				for key, value in pairs(ctx) do resolved[key] = value end
+				resolved.client_id = origin.block.owner
+				resolved.owner_client = true
+				ctx = resolved
+			end
+		end
 		local platform, local_client = client_platform(ctx)
-		if cfg.ui == "auto" and platform == "macos" and local_client then
+		if cfg.ui == "gui" or (cfg.ui == "auto" and platform == "macos" and local_client) then
 			local apps = cfg.app ~= "" and { cfg.app }
 				or { os.getenv("HOME") .. "/Applications/Raptor.app", "/Applications/Raptor.app" }
 			for _, app in ipairs(apps) do
@@ -178,6 +186,9 @@ function M.setup(options)
 					end
 				end
 			end
+		end
+		if cfg.ui == "gui" then
+			error("raptor: GUI requested, but Raptor.app was not found or could not be launched", 0)
 		end
 		local args = base_cmd(ctx)
 		if mode == "wt-create" then
@@ -222,7 +233,7 @@ function M.setup(options)
 		end,
 	})
 
-	register_action({
+	rex.action({
 		name = "raptor_worktree_list",
 		title = "Raptor Worktrees",
 		description = "Browse local worktrees or create one with a branch name and full path preview.",
@@ -234,9 +245,9 @@ function M.setup(options)
 			end
 			return show_picker(ctx, "wt")
 		end,
-	}, { "raptor_wt" })
+	})
 
-	register_action({
+	rex.action({
 		name = "raptor_worktree_new",
 		title = "Raptor: Create Worktree",
 		description = "Open the create-worktree form for the origin pane's repository using the configured UI.",
@@ -255,7 +266,7 @@ function M.setup(options)
 			end
 			return show_picker(ctx, "wt-create")
 		end,
-	}, { "raptor_create" })
+	})
 
 	-- History shortcuts stay in Lua: no binary startup or nested Rex CLI calls.
 	local cache = os.getenv("XDG_CACHE_HOME")
@@ -358,22 +369,22 @@ function M.setup(options)
 		return { selected = pane.block_id }
 	end
 
-	register_action({
+	rex.action({
 		name = "raptor_session_last",
 		title = "Raptor: Last Session",
 		description = "Toggle the session Raptor left. Manual Rex navigation does not update history.",
 		category = "Navigate",
 		keywords = "last session back toggle",
 		run = last_session,
-	}, { "raptor_last_session", "raptor_last" })
-	register_action({
+	})
+	rex.action({
 		name = "raptor_pane_last",
 		title = "Raptor: Last Pane",
 		description = "Toggle the pane Raptor left, even across sessions. No background watcher.",
 		category = "Navigate",
 		keywords = "last pane block back toggle",
 		run = last_pane,
-	}, { "raptor_last_pane" })
+	})
 end
 
 return M

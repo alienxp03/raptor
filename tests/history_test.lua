@@ -85,9 +85,9 @@ rex = {
 }
 
 dofile("init.lua").setup({})
-assert(actions.raptor_last == actions.raptor_session_last, "legacy session alias changed")
-assert(actions.raptor_last_session == actions.raptor_session_last, "legacy session name changed")
-assert(actions.raptor_last_pane == actions.raptor_pane_last, "legacy pane alias changed")
+assert(actions.raptor_last == nil, "legacy session alias must not be registered")
+assert(actions.raptor_last_session == nil, "legacy session name must not be registered")
+assert(actions.raptor_last_pane == nil, "legacy pane alias must not be registered")
 
 local function seed(session)
 	files[session_path] = "previous-session\n"
@@ -117,20 +117,20 @@ for _, stage in ipairs({ "attach", "describe", "focus" }) do
 	seed()
 	local before = files[pane_path]
 	failure = stage
-	assert(not pcall(actions.raptor_last_pane, ctx))
+	assert(not pcall(actions.raptor_pane_last, ctx))
 	assert(files[pane_path] == before, "failed navigation changed pane history")
 	assert(files[session_path] == "previous-session\n")
 end
 
 seed()
 files[pane_path] = nil
-assert(not pcall(actions.raptor_last_pane, ctx))
+assert(not pcall(actions.raptor_pane_last, ctx))
 files[pane_path] = rex.json.encode({ session_id = ctx.session_id, block_id = ctx.block_id })
-assert(not pcall(actions.raptor_last_pane, ctx))
+assert(not pcall(actions.raptor_pane_last, ctx))
 files[session_path] = ctx.session_id
-assert(not pcall(actions.raptor_last_session, ctx))
-assert(not pcall(actions.raptor_last_pane, {}))
-assert(not pcall(actions.raptor_last_session, {}))
+assert(not pcall(actions.raptor_session_last, ctx))
+assert(not pcall(actions.raptor_pane_last, {}))
+assert(not pcall(actions.raptor_session_last, {}))
 
 io.open = real_open
 print("history actions: passed (no subprocesses)")
