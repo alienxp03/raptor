@@ -90,7 +90,7 @@ func Load() Config {
 		parts := strings.Split(strings.Trim(v, "[]\"'"), ",")
 		var targets []string
 		for _, part := range parts {
-			if part = strings.TrimSpace(strings.Trim(part, "\"'")); part != "" {
+			if part = strings.TrimSpace(strings.Trim(strings.TrimSpace(part), "\"'")); part != "" {
 				targets = append(targets, part)
 			}
 		}
