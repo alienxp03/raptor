@@ -9,18 +9,18 @@ import (
 	"github.com/alienxp03/raptor/internal/paths"
 )
 
-// A quiet terminal palette. Use the same surface in every picker and form.
+// Rex-native terminal palette: warm dark surface with the amber selection.
 var (
-	pickerText     = lipgloss.NewStyle().Foreground(lipgloss.Color("#B9C5D1"))
-	pickerMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color("#82909D"))
-	pickerAccent   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A4C5B0"))
-	pickerInput    = lipgloss.NewStyle().Foreground(lipgloss.Color("#B9C5D1")).Background(lipgloss.Color("#252E37"))
-	pickerSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("#C3CDD7")).Background(lipgloss.Color("#343E48"))
-	pickerSurface  = lipgloss.NewStyle().Background(lipgloss.Color("#1B2229"))
-	pickerRail     = lipgloss.NewStyle().Foreground(lipgloss.Color("#414B56"))
-	pickerMark     = lipgloss.NewStyle().Foreground(lipgloss.Color("#C78091"))
-	pickerPrompt   = lipgloss.NewStyle().Foreground(lipgloss.Color("#8DA7BC")).Bold(true)
-	pickerCursor   = lipgloss.NewStyle().Foreground(lipgloss.Color("#4DA6FF"))
+	pickerText     = lipgloss.NewStyle().Foreground(lipgloss.Color("#EDEAE6"))
+	pickerMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9A928A"))
+	pickerAccent   = lipgloss.NewStyle().Foreground(lipgloss.Color("#B88242"))
+	pickerInput    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F5F5F5")).Background(lipgloss.Color("#3E3A39"))
+	pickerSelected = lipgloss.NewStyle().Foreground(lipgloss.Color("#272422")).Background(lipgloss.Color("#B88242"))
+	pickerSurface  = lipgloss.NewStyle().Background(lipgloss.Color("#272422"))
+	pickerRail     = lipgloss.NewStyle().Foreground(lipgloss.Color("#4A443F"))
+	pickerMark     = lipgloss.NewStyle().Foreground(lipgloss.Color("#C96F5A"))
+	pickerPrompt   = lipgloss.NewStyle().Foreground(lipgloss.Color("#B88242")).Bold(true)
+	pickerCursor   = lipgloss.NewStyle().Foreground(lipgloss.Color("#B88242"))
 )
 
 func pickerTiny(width, height int) string {
@@ -129,7 +129,7 @@ func pickerTail(value string, width int) string {
 }
 
 func pickerRule(width int) string {
-	return pickerLine(lipgloss.NewStyle().Foreground(lipgloss.Color("#363E39")).Render(strings.Repeat("─", width)), width)
+	return pickerLine(lipgloss.NewStyle().Foreground(lipgloss.Color("#4A443F")).Render(strings.Repeat("─", width)), width)
 }
 
 func pickerRow(content string, width int, selected bool) string {
