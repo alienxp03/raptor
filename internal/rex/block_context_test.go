@@ -7,6 +7,22 @@ import (
 	"testing"
 )
 
+func TestBlockCwdUsesExplicitSession(t *testing.T) {
+	t.Setenv("REX_SESSION", "unrelated-session")
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	script := `#!/bin/sh
+[ "$1" = do ] && [ "$2" = -s ] && [ "$3" = requested-session ] && [ "$4" = -b ] && [ "$5" = requested-pane ] || exit 1
+printf '%s\n' /correct/repo
+`
+	if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if got := BlockCwdInSession("requested-session", "requested-pane"); got != "/correct/repo" {
+		t.Fatalf("wrong session cwd: %q", got)
+	}
+}
+
 func TestBlockLookupsWithoutInheritedSession(t *testing.T) {
 	t.Setenv("REX_SESSION", "")
 	t.Setenv("REX_BLOCK", "")

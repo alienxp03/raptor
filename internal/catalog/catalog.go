@@ -44,7 +44,7 @@ func ContextDirectories(ctx rex.Ctx, reposOnly bool) []Directory {
 	// These commands are independent; do not add their startup latency together.
 	dirs := make(chan []string, 1)
 	go func() { dirs <- rex.ZoxideList() }()
-	cwd := rex.BlockCwd(ctx.Block)
+	cwd := rex.BlockCwdInSession(ctx.Session, ctx.Block)
 	return DirectoryItemsForCwd(<-dirs, cwd, reposOnly)
 }
 
@@ -133,7 +133,7 @@ func match(entries []string, query string) []int {
 func ResolveRepo(ctx rex.Ctx, repo string) (string, error) {
 	explicit := repo != ""
 	if !explicit {
-		repo = rex.BlockCwd(ctx.Block)
+		repo = rex.BlockCwdInSession(ctx.Session, ctx.Block)
 		if repo == "" {
 			return "", nil
 		}

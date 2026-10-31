@@ -103,6 +103,12 @@ func BlockPwd(blockID string) string {
 // blockCwd returns the cwd of a block's foreground process (works even when
 // the terminal never reported OSC 7, e.g. while a TUI app owns the pane).
 func BlockCwd(blockID string) string {
+	return BlockCwdInSession("", blockID)
+}
+
+// BlockCwdInSession avoids inheriting an unrelated caller's REX_SESSION when
+// a backend was explicitly given context for another session.
+func BlockCwdInSession(sessionID, blockID string) string {
 	if blockID == "" {
 		return ""
 	}
@@ -114,7 +120,12 @@ func BlockCwd(blockID string) string {
 			"local p = rex.block.call('com.superlogical.terminal', 'process', { block_id = '%s' }) "+
 			"print(p and p.foreground and p.foreground.cwd or '') end",
 		blockID, blockID)
-	out, err := Run("do", "-b", blockID, "-e", script)
+	args := []string{"do"}
+	if sessionID != "" {
+		args = append(args, "-s", sessionID)
+	}
+	args = append(args, "-b", blockID, "-e", script)
+	out, err := Run(args...)
 	if err != nil {
 		return ""
 	}
