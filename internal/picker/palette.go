@@ -1,12 +1,14 @@
 package picker
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/alienxp03/raptor/internal/paths"
+	"github.com/alienxp03/raptor/internal/rex"
 )
 
 // Rex-native terminal palette: warm dark surface with the amber selection.
@@ -71,6 +73,100 @@ func pickerDirectory(path string, width int, selected bool) string {
 		style = pickerSelected.Bold(true)
 	}
 	return pickerRow(style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3, 0))), width, selected)
+}
+
+// pickerPills renders the view switcher under the search field. active is
+// 0 (repos) or 1 (tabs & sessions) — same order as the native panel.
+func pickerPills(active int, width int) string {
+	pills := []struct {
+		name string
+		hint string
+	}{{"Repos", ""}, {"Tabs", "⇥"}}
+	parts := make([]string, 0, len(pills))
+	for i, pill := range pills {
+		name := pill.name
+		if pill.hint != "" && width >= 44 {
+			name += " " + pill.hint
+		}
+		if i == active {
+			// The active pill stays quiet; amber belongs to the selected row only.
+			parts = append(parts, pickerInput.Render(" "+name+" "))
+		} else {
+			parts = append(parts, pickerMuted.Render(" "+name+" "))
+		}
+	}
+	content := strings.Join(parts, pickerRail.Render("·"))
+	return pickerLine(content, width)
+}
+
+// pickerDirectoryRow adds the alt-number and pin columns to a directory row.
+func pickerDirectoryRow(path string, pinned bool, position, width int, selected bool) string {
+	style := pickerText
+	if selected {
+		style = pickerSelected.Bold(true)
+	}
+	prefix := ""
+	if position >= 1 && position <= 9 && width >= 24 {
+		label := fmt.Sprintf("%d ", position)
+		if selected {
+			prefix = style.Render(label)
+		} else {
+			prefix = pickerRail.Render(label)
+		}
+	}
+	if pinned {
+		if selected {
+			prefix += style.Render("★ ")
+		} else {
+			prefix += pickerAccent.Render("★ ")
+		}
+	}
+	return pickerRow(prefix+style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3-lipgloss.Width(prefix), 0))), width, selected)
+}
+
+// pickerSessionRow renders one tab or session entry with its right-aligned
+// context ("session" or the owning session's name) and an active marker.
+func pickerSessionRow(entry rex.SessionEntry, position, width int, selected bool) string {
+	style := pickerText
+	if selected {
+		style = pickerSelected.Bold(true)
+	}
+	prefix := ""
+	if position >= 1 && position <= 9 && width >= 24 {
+		label := fmt.Sprintf("%d ", position)
+		if selected {
+			prefix = style.Render(label)
+		} else {
+			prefix = pickerRail.Render(label)
+		}
+	}
+	if entry.Active {
+		if selected {
+			prefix += style.Render("● ")
+		} else {
+			prefix += pickerAccent.Render("● ")
+		}
+	}
+	detail := entry.SessionLabel
+	if entry.Kind == "session" {
+		detail = "session"
+	}
+	nameWidth := maxInt(width-3-lipgloss.Width(prefix), 1)
+	if width >= 36 {
+		nameWidth = maxInt(width/2-2-lipgloss.Width(prefix), 1)
+	}
+	name := ansi.Truncate(entry.Label, nameWidth, "…")
+	content := prefix + style.Render(name)
+	if width >= 36 {
+		gap := strings.Repeat(" ", maxInt(nameWidth-lipgloss.Width(name)+2, 2))
+		pathWidth := maxInt(width-2-lipgloss.Width(prefix)-nameWidth-3, 0)
+		detailStyle := pickerMuted
+		if selected {
+			detailStyle = style
+		}
+		content += detailStyle.Render(gap + pickerTail(detail, pathWidth))
+	}
+	return pickerRow(content, width, selected)
 }
 
 func pickerEntry(label, detail string, width int, selected bool) string {

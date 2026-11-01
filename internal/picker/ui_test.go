@@ -101,8 +101,15 @@ func TestCompactPalette(t *testing.T) {
 		if !strings.Contains(plain, "│") {
 			t.Fatal("missing empty cursor")
 		}
-		if !strings.Contains(ansi.Strip(lines[2]), "demo") {
-			t.Fatal("missing directory name in result row")
+		rowLine := 2
+		if size[1] >= 8 {
+			rowLine = 3
+			if !strings.Contains(ansi.Strip(lines[1]), "Repos") || !strings.Contains(ansi.Strip(lines[1]), "Tabs") {
+				t.Fatal("missing view pills row")
+			}
+		}
+		if !strings.Contains(ansi.Strip(lines[rowLine]), "demo") {
+			t.Fatalf("missing directory name in result row %d", rowLine)
 		}
 		if strings.Count(plain, "demo") != 1 || strings.Contains(plain, "1/1") {
 			t.Fatal("unexpected selected-path or result-count footer")
