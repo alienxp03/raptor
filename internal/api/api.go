@@ -144,10 +144,141 @@ type pathResult struct {
 	Path string `json:"path"`
 }
 
+type pinsResult struct {
+	Pinned bool `json:"pinned"`
+}
+
+type sessionsResult struct {
+	Items   []rex.SessionEntry `json:"items"`
+	Targets []string           `json:"targets"`
+	Target  string             `json:"target"`
+}
+
+// decodeSessionAction validates the shared {kind, session_id, window_id?}
+// envelope of the tab/session mutations.
+func decodeSessionAction(params json.RawMessage) (struct {
+	Kind       string `json:"kind"`
+	SessionID  string `json:"session_id"`
+	WindowID   string `json:"window_id"`
+	Label      string `json:"label"`
+}, rex.SessionEntry, error) {
+	var p struct {
+		Kind       string `json:"kind"`
+		SessionID  string `json:"session_id"`
+		WindowID   string `json:"window_id"`
+		Label      string `json:"label"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return p, rex.SessionEntry{}, err
+	}
+	if p.Kind != "session" && p.Kind != "window" {
+		return p, rex.SessionEntry{}, fmt.Errorf("kind must be session or window")
+	}
+	if p.SessionID == "" {
+		return p, rex.SessionEntry{}, fmt.Errorf("session_id is required")
+	}
+	if p.Kind == "window" && p.WindowID == "" {
+		return p, rex.SessionEntry{}, fmt.Errorf("window_id is required for a window")
+	}
+	entry := rex.SessionEntry{Kind: p.Kind, ID: p.WindowID, SessionID: p.SessionID}
+	if p.Kind == "session" {
+		entry.ID = p.SessionID
+	}
+	return p, entry, nil
+}
+
 func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 	// Decode each method separately: unrelated parameters must not change type
 	// validation for the selected method.
 	switch method {
+	case "context":
+		// The resident backend is shared across opens; every open sends its
+		// origin context here instead of spawning a new process.
+		var p struct {
+			Session string `json:"session"`
+			Block   string `json:"block"`
+			Client  string `json:"client"`
+			Title   string `json:"title"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		h.ctx = rex.Ctx{Session: p.Session, Block: p.Block, Client: p.Client, Title: p.Title}
+		return struct{}{}, nil
+	case "pins.toggle":
+		var p struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		if p.Path == "" {
+			return nil, fmt.Errorf("path is required")
+		}
+		pinned, err := config.TogglePin(p.Path)
+		if err != nil {
+			return nil, err
+		}
+		return pinsResult{Pinned: pinned}, nil
+	case "sessions":
+		var p struct {
+			Query string `json:"query"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		entries, err := rex.SessionEntries(h.ctx.Session)
+		if err != nil {
+			return nil, err
+		}
+		result := sessionsResult{Items: []rex.SessionEntry{}, Targets: []string{}, Target: h.cfg.Enter}
+		for _, i := range catalog.FilterSessions(entries, p.Query) {
+			result.Items = append(result.Items, entries[i])
+		}
+		return result, nil
+	case "sessions.jump":
+		_, entry, err := decodeSessionAction(params)
+		if err != nil {
+			return nil, err
+		}
+		if err := rex.Jump(entry, h.ctx.Client); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
+	case "sessions.close":
+		_, entry, err := decodeSessionAction(params)
+		if err != nil {
+			return nil, err
+		}
+		if entry.Kind == "session" && entry.SessionID == h.ctx.Session {
+			return nil, fmt.Errorf("refusing to close the session this picker opened from")
+		}
+		if entry.Kind == "session" {
+			err = rex.CloseSession(entry.SessionID)
+		} else {
+			err = rex.CloseWindow(entry.SessionID, entry.ID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
+	case "sessions.rename":
+		p, entry, err := decodeSessionAction(params)
+		if err != nil {
+			return nil, err
+		}
+		if p.Label == "" {
+			return nil, fmt.Errorf("label is required")
+		}
+		if entry.Kind == "session" {
+			err = rex.SetSessionLabel(entry.SessionID, p.Label)
+		} else {
+			err = rex.SetWindowLabel(entry.SessionID, entry.ID, p.Label)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
 	case "directories":
 		var p struct {
 			Query     string `json:"query"`
@@ -161,6 +292,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		for _, i := range catalog.FilterDirectories(items, p.Query) {
 			result.Items = append(result.Items, items[i])
 		}
+		result.Items = catalog.ApplyPins(result.Items)
 		return result, nil
 	case "worktrees.list":
 		var p struct {

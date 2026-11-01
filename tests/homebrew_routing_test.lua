@@ -55,13 +55,25 @@ for _, prefix in ipairs({ "/opt/homebrew", "/usr/local", "/custom/homebrew" }) d
 	plugin.setup({ ui = "terminal" })
 	assert(actions.raptor(ctx, {}).ui == "terminal" and command[1] == bin)
 	plugin.setup({})
-	assert(actions.raptor(ctx, {}).ui == "native" and launched[4] == app)
+	assert(actions.raptor(ctx, {}).ui == "native" and launched[1] == bin and launched[2] == "panel",
+		"Native open must use the stable opt CLI over IPC")
 	plugin.setup({ ui = "terminal", bin = "/custom/raptor" })
 	actions.raptor(ctx, {})
 	assert(command[1] == "/custom/raptor", "Explicit CLI must override package discovery")
 	plugin.setup({ app = "/custom/Raptor.app" })
 	actions.raptor(ctx, {})
-	assert(launched[4] == "/custom/Raptor.app", "Explicit app must override package discovery")
+	assert(launched[1] == bin and launched[2] == "panel",
+		"Explicit app must override package discovery for the Launch Services fallback")
+	plugin.setup({ app = "/custom/Raptor.app", bin = "/custom/raptor" })
+	local host_down = rex.exec
+	rex.exec = function(args)
+		launched = args
+		if args[2] == "panel" then return { ok = false } end
+		return { ok = true }
+	end
+	actions.raptor(ctx, {})
+	assert(launched[4] == "/custom/Raptor.app", "Panel failure must fall back to the explicit app")
+	rex.exec = host_down
 end
 io.open, os.getenv = real_open, real_getenv
 print("Homebrew routing: passed (Apple Silicon, Intel, custom prefix, explicit overrides)")

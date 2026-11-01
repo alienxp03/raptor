@@ -31,6 +31,11 @@ mkdir -p "$APP_DESTINATION" "$PREFIX/bin"
 APP_DESTINATION=$(cd "$APP_DESTINATION" && pwd -P)
 PREFIX_BIN=$(cd "$PREFIX/bin" && pwd -P)
 target="$APP_DESTINATION/Raptor.app"
+# The resident panel host runs the app binary from the target path; stop it
+# before replacing anything. Best effort: an absent service must not block.
+if [[ -x $PREFIX_BIN/raptor ]]; then
+	"$PREFIX_BIN/raptor" service stop >/dev/null 2>&1 || true
+fi
 require_stopped_app "$target"
 [[ ! -L $target ]] || fail "Refusing to replace app symlink: $target"
 [[ ! -L $PREFIX_BIN/raptor && ! -d $PREFIX_BIN/raptor ]] || fail "Refusing to replace CLI symlink/directory: $PREFIX_BIN/raptor"
@@ -64,6 +69,14 @@ if [[ $source_app != "$target" ]]; then
   restore=false
 fi
 install -m 0755 "$target/Contents/MacOS/raptor-cli" "$PREFIX_BIN/raptor"
+# Install and start the resident panel service. Optional: without it the
+# picker falls back to launching the app through Launch Services.
+if "$PREFIX_BIN/raptor" service install --app "$target" >/dev/null 2>&1 && \
+	"$PREFIX_BIN/raptor" service start >/dev/null 2>&1; then
+	printf 'Installed resident panel service: %s\n' "$("$PREFIX_BIN/raptor" service status)"
+else
+	printf 'Panel service not installed; the picker will launch the app on demand\n'
+fi
 # Upgrade only installer-owned, unmodified plugin files. Never write through
 # checkout symlinks or replace a user's customized module.
 marker="$REX_PLUGIN_DIR/.raptor-installed-sha256"
