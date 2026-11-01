@@ -10,7 +10,7 @@ struct PickerView: View {
         VStack(spacing: 0) {
             header
             if model.page == .create { createForm } else { results }
-            if model.page == .worktrees { selectedWorktreePath }
+            if model.page == .worktrees && model.view == .repos { selectedWorktreePath }
             status
             footer
         }
@@ -32,15 +32,42 @@ struct PickerView: View {
             field = page == .create ? .branch : .search
         }
         .alert("Remove worktree?", isPresented: Binding(
-            get: { model.removalCandidate != nil },
+            get: { model.removalCandidate != nil && model.view == .repos },
             set: { if !$0 { model.removalCandidate = nil } }
-        ), presenting: model.removalCandidate) { candidate in
+        ), presenting: model.view == .repos ? model.removalCandidate : nil) { candidate in
             Button("Cancel", role: .cancel) { model.removalCandidate = nil }
                 .keyboardShortcut(.defaultAction)
             Button("Remove", role: .destructive) { model.confirmRemove(candidate) }
                 .accessibilityIdentifier("confirm-remove")
         } message: { candidate in
             Text("Remove \(displayPath(candidate.path))?\nGit checks for unsaved changes. The branch is kept.")
+        }
+        .alert("Close tab?", isPresented: Binding(
+            get: { model.removalCandidate != nil && model.view == .tabs },
+            set: { if !$0 { model.removalCandidate = nil } }
+        ), presenting: model.view == .tabs ? model.removalCandidate : nil) { candidate in
+            Button("Cancel", role: .cancel) { model.removalCandidate = nil }
+                .keyboardShortcut(.defaultAction)
+            Button("Close", role: .destructive) { model.confirmCloseEntry() }
+                .accessibilityIdentifier("confirm-close-entry")
+        } message: { candidate in
+            Text("Close \(candidate.label ?? candidate.path)?\(candidate.kind == "session" ? " Every tab in it closes." : " Every pane in it closes.")")
+        }
+        .alert("Rename", isPresented: Binding(
+            get: { model.renameCandidate != nil },
+            set: { if !$0 { model.cancelRename() } }
+        ), presenting: model.renameCandidate) { candidate in
+            TextField("Name", text: Binding(
+                get: { model.renameLabel ?? "" },
+                set: { model.renameLabel = $0 }
+            ))
+                .accessibilityIdentifier("rename-field")
+            Button("Cancel", role: .cancel) { model.cancelRename() }
+                .keyboardShortcut(.defaultAction)
+            Button("Rename") { model.commitRename() }
+                .accessibilityIdentifier("confirm-rename")
+        } message: { candidate in
+            Text("Rename \(candidate.label ?? candidate.path).")
         }
     }
 
@@ -83,6 +110,7 @@ struct PickerView: View {
     }
 
     private var searchPrompt: String {
+        if model.view == .tabs { return "Search tabs and sessions…" }
         switch model.page {
         case .repositories: return "Search repositories…"
         case .worktrees: return "Search worktrees…"
@@ -90,11 +118,44 @@ struct PickerView: View {
         }
     }
 
+    private var viewPills: some View {
+        HStack(spacing: 6) {
+            pill("Repos", active: model.view == .repos, icon: "folder", hint: nil)
+                .accessibilityIdentifier("pill-repos")
+                .onTapGesture { if model.view != .repos { model.switchView() } }
+            pill("Tabs", active: model.view == .tabs, icon: "square.stack.3d.up", hint: "⇥")
+                .accessibilityIdentifier("pill-tabs")
+                .onTapGesture { if model.view != .tabs { model.switchView() } }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, PickerStyle.listInset)
+        .frame(height: PickerStyle.pillsHeight)
+        .accessibilityIdentifier("view-pills")
+    }
+
+    private func pill(_ title: String, active: Bool, icon: String, hint: String?) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            Text(title).font(.system(size: 12, weight: active ? .semibold : .regular))
+            if let hint {
+                Text(hint).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(active ? 0.7 : 0.45))
+            }
+        }
+        .foregroundStyle(active ? Color.primary : Color.primary.opacity(0.55))
+        .padding(.horizontal, 10)
+        .frame(height: 22)
+        .background(active ? Color.primary.opacity(0.12) : Color.primary.opacity(0.05), in: Capsule())
+        .contentShape(Capsule())
+    }
+
     private var results: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(model.items) { item in row(item).id(item.id) }
+                    if model.showsPills { viewPills }
+                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                        row(item, position: index + 1).id(item.id)
+                    }
                 }
                 .padding(.horizontal, PickerStyle.listInset).padding(.vertical, 4)
             }
@@ -112,10 +173,40 @@ struct PickerView: View {
         .accessibilityIdentifier("picker-results")
     }
 
-    private func row(_ item: PickerItem) -> some View {
+    private func row(_ item: PickerItem, position: Int = 0) -> some View {
         let selected = model.selectedID == item.id
-        return HStack(spacing: 10) {
-            if let branch = item.branch {
+        let isTabs = item.isSessionEntry
+        return HoverRow(selected: selected, enabled: !isTabs) {
+            if position >= 1, position <= 9, !isTabs {
+                Text("⌘\(position)")
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.8) : Color.primary.opacity(0.45))
+                    .accessibilityHidden(true)
+            }
+            if item.isPinned == true {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.selection)
+                    .accessibilityLabel("Pinned")
+            }
+            if isTabs {
+                Image(systemName: item.kind == "session" ? "tray.full" : "rectangle.split.toprow")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(selected ? PickerStyle.selectionText : Color.primary.opacity(0.55))
+                    .accessibilityHidden(true)
+                Text(item.label ?? item.path)
+                    .lineLimit(1).truncationMode(.tail)
+                if item.active == true {
+                    Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
+                        .frame(width: 6, height: 6)
+                        .accessibilityLabel("Active")
+                }
+                Spacer(minLength: 8)
+                Text(item.kind == "session" ? "Session" : (item.sessionLabel ?? ""))
+                    .font(.system(size: 11))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.75) : Color.primary.opacity(0.5))
+                    .lineLimit(1).truncationMode(.tail)
+            } else if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
                     .lineLimit(selected ? 2 : 1).truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
@@ -123,7 +214,7 @@ struct PickerView: View {
                 Text(displayPath(item.path))
                     .lineLimit(1).truncationMode(.middle)
             }
-            if selected {
+            if selected && !isTabs {
                 Spacer(minLength: 8)
                 Image(systemName: "checkmark")
                     .font(.system(size: 12, weight: .semibold))
@@ -136,7 +227,7 @@ struct PickerView: View {
         .padding(.horizontal, PickerStyle.rowInset)
         .frame(height: model.page == .worktrees ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight)
         .background {
-            if selected { RoundedRectangle(cornerRadius: 6).fill(PickerStyle.selection) }
+            if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selection) }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -315,13 +406,31 @@ struct PickerView: View {
         }
     }
 
-    private var isListPage: Bool { model.page == .directories || model.page == .worktrees }
+    private var isListPage: Bool { model.view == .tabs || model.page == .directories || model.page == .worktrees }
+
+    private var tabActions: some View {
+        HStack(spacing: 12) {
+            Button("↵ Switch") { model.choose() }.disabled(!model.canOpen)
+                .accessibilityIdentifier("open-selected")
+            Button("⌘R Rename") { model.beginRename() }
+                .disabled(model.busy || model.loading || model.selected?.isSessionEntry != true)
+                .accessibilityIdentifier("rename-entry")
+            Button("⌃X Close") { model.requestCloseEntry() }
+                .disabled(model.busy || model.loading || model.selected?.isSessionEntry != true)
+                .accessibilityIdentifier("close-entry")
+        }
+        .font(.system(size: 10))
+        .fixedSize()
+        .accessibilityIdentifier("tab-actions")
+    }
 
     private var footer: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
                 if model.splitMode {
                     Text("Split ⌃P   j↓  l→").accessibilityIdentifier("keyboard-hint")
+                } else if model.view == .tabs {
+                    Text("Tabs & Sessions").foregroundStyle(.secondary)
                 } else if model.page == .repositories {
                     Text("Choose repository").foregroundStyle(.secondary)
                 } else if model.page == .create {
@@ -330,7 +439,9 @@ struct PickerView: View {
                     openTargetControl
                 }
                 Spacer(minLength: 0)
-                if isListPage && !model.splitMode { listActions }
+                if model.view == .tabs && !model.splitMode {
+                    tabActions
+                } else if isListPage && !model.splitMode { listActions }
                 if model.page == .create { createSubmitButton }
                 if model.page == .repositories {
                     Button("Choose ↵") { model.choose() }
@@ -425,10 +536,30 @@ struct PickerView: View {
     }
 
     private var emptyMessage: String {
+        if model.view == .tabs { return "No matching tabs" }
         switch model.page {
         case .worktrees: return "No matching worktrees"
         case .repositories: return "No matching repositories"
         default: return "No matching directories"
         }
+    }
+}
+
+// Rows brighten under the cursor without stealing the selection.
+private struct HoverRow<Content: View>: View {
+    let selected: Bool
+    let enabled: Bool
+    @ViewBuilder let content: () -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 10) { content() }
+            .background {
+                if hovering, !selected, enabled {
+                    RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.05))
+                }
+            }
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.1), value: hovering)
     }
 }

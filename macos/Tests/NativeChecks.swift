@@ -126,15 +126,15 @@ struct NativeChecks {
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data("{\"needs_repo\":false,\"base_branch\":\"main\",\"items\":[{\"path\":\"/a\",\"branch\":\"main\",\"is_main\":true}]}".utf8))
         precondition(decoded.items?.first?.isMain == true && decoded.baseBranch == "main")
 
-        precondition(PickerStyle.rowFontSize == 13 && PickerStyle.rowHeight == 28 && PickerStyle.createHeaderHeight == PickerStyle.searchHeight,
+        precondition(PickerStyle.rowFontSize == 13 && PickerStyle.rowHeight == 32 && PickerStyle.createHeaderHeight == PickerStyle.searchHeight,
                      "Launcher and form must share typography and control sizing")
         precondition(PickerModel.targetLabel("tab") == "New tab")
         precondition(PickerModel.targetLabel("session") == "Session")
         precondition(PickerModel.targetLabel("here") == "cd here")
         let launcher = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: SlowDirectoryBackend())
         let initialListHeight = PickerStyle.height(for: launcher)
-        precondition(launcher.loading && initialListHeight == 306,
-                     "Launcher must reserve eight compact rows before its first render")
+        precondition(launcher.loading && initialListHeight == 364,
+                     "Launcher must reserve eight compact rows plus the pills row before its first render")
         launcher.start()
         precondition(PickerStyle.height(for: launcher) == initialListHeight && !launcher.canOpen)
         try await wait { !launcher.loading }
@@ -149,9 +149,9 @@ struct NativeChecks {
         precondition(model.page == .worktrees && model.items.count == 3)
         precondition(model.destinationRoot == "/Users/demo/Projects/example-kit-worktrees",
                      "Default destination must come from shared backend before branch input")
-        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 198,
+        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 224,
                      "The picker must use a wider layout with compact, content-fitted height")
-        precondition(PickerStyle.rowHeight == 28 && PickerStyle.worktreeRowHeight == 28,
+        precondition(PickerStyle.rowHeight == 32 && PickerStyle.worktreeRowHeight == 28,
                      "Directory and worktree rows must keep Rex spacing")
         model.askRemove()
         precondition(model.removalCandidate == nil, "Main worktree must not be removable")
@@ -193,7 +193,7 @@ struct NativeChecks {
         compactList.items = (0..<8).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
         let eightRowHeight = PickerStyle.height(for: compactList)
         compactList.items = (0..<30).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
-        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 338,
+        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 364,
                      "Lists must stop growing after eight compact rows")
         let longBranch = PickerItem(path: "/demo/long", branch: "feat/" + String(repeating: "long-name-", count: 15))
         precondition(PickerStyle.branchLines(for: longBranch) == 2,
@@ -205,6 +205,7 @@ struct NativeChecks {
         compactList.close()
 
         try await directCreateChecks()
+        try await residentChecks()
         let directoryCreate = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
         directoryCreate.start()
         try await wait { !directoryCreate.loading }
@@ -237,7 +238,7 @@ struct NativeChecks {
         try await wait { !stale.loading }
         try await Task.sleep(for: .milliseconds(350))
         precondition(stale.items.first?.path == "/demo/new", "Stale query replaced current results")
-        precondition(PickerStyle.height(for: stale) == 138, "Filtered results must shrink the panel")
+        precondition(PickerStyle.height(for: stale) == 172, "Filtered results must shrink the panel")
         stale.choose(); stale.choose()
         try await wait { !stale.busy }
         let dispatches = await scripted.count("dispatch")
@@ -298,6 +299,76 @@ struct NativeChecks {
             try await transportChecks()
         }
         print("PASS: launch flags, decoding, repository fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
+    }
+
+    @MainActor private static func residentChecks() async throws {
+        // Tabs & Sessions view over the long-lived model.
+        let tabsBackend = DemoBackend()
+        let tabs = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: tabsBackend)
+        tabs.start()
+        try await wait { !tabs.loading }
+        precondition(tabs.view == .repos && tabs.page == .directories && tabs.showsPills)
+        tabs.switchView()
+        try await wait { !tabs.loading }
+        precondition(tabs.view == .tabs && tabs.items.count == 5 && tabs.items.first?.kind == "session",
+                     "Tabs view must list sessions and windows")
+        precondition(tabs.items.contains { $0.kind == "window" && $0.active == true }, "Active windows must be marked")
+        precondition(PickerStyle.height(for: tabs) == 268, "Tabs view must use the same compact row height")
+        tabs.openNumbered(2)
+        try await wait { !tabs.busy }
+        let jumpCount = await tabsBackend.count("sessions.jump")
+        precondition(jumpCount == 1, "Numbered open must jump to the tab")
+        tabs.selectedID = tabs.items.last?.id
+        tabs.requestCloseEntry()
+        precondition(tabs.removalCandidate != nil, "Tabs must confirm before closing")
+        tabs.confirmCloseEntry()
+        try await wait { !tabs.busy }
+        try await wait { !tabs.loading }
+        precondition(tabs.items.count == 4, "Closing a tab must refresh the list")
+        tabs.selectedID = tabs.items.first?.id
+        tabs.beginRename()
+        tabs.renameLabel = "renamed"
+        tabs.commitRename()
+        try await wait { !tabs.busy }
+        try await wait { !tabs.loading }
+        precondition(tabs.items.contains { $0.label == "renamed" }, "Rename must refresh the tabs list")
+        let renameCount = await tabsBackend.count("sessions.rename")
+        precondition(renameCount == 1, "Rename must be requested once")
+        tabs.switchView()
+        try await wait { !tabs.loading }
+        precondition(tabs.view == .repos && tabs.page == .directories, "Escape-level switch must return to repos")
+        tabs.close()
+
+        // Pins float to the top of the repos list.
+        let pinsBackend = DemoBackend()
+        let pinned = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: pinsBackend)
+        pinned.start()
+        try await wait { !pinned.loading }
+        pinned.togglePin()
+        try await wait { !pinned.busy && !pinned.loading }
+        precondition(pinned.items.first?.isPinned == true, "Pinned directories must float to the top")
+        let pinCount = await pinsBackend.count("pins.toggle")
+        precondition(pinCount == 1, "Pinning must ask the backend once")
+        pinned.close()
+
+        // Resident reconfigure: one model serves repeated opens.
+        let backend = DemoBackend()
+        let resident = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        resident.start()
+        try await wait { !resident.loading }
+        let contexts = await backend.contextUpdateCount
+        await resident.reconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/Users/demo/Projects/example-kit"]))
+        try await wait { !resident.loading }
+        precondition(resident.page == .worktrees && resident.view == .repos,
+                     "Reconfigure must apply the new mode")
+        let contextsAfter = await backend.contextUpdateCount
+        precondition(contextsAfter == contexts + 1,
+                     "Reconfigure must retell the shared backend its context")
+        await resident.reconfigure(try LaunchOptions(arguments: ["--demo"]))
+        try await wait { !resident.loading }
+        precondition(resident.page == .directories)
+        resident.close()
+        print("PASS: tabs and sessions view, numbered jump, close confirmation, rename, pins, resident reconfigure")
     }
 
     @MainActor private static func directCreateChecks() async throws {

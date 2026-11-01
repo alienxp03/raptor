@@ -17,15 +17,16 @@ enum PickerStyle {
     static let createHeight: CGFloat = 240
     static let searchHeight: CGFloat = 40
     static let searchFieldHeight: CGFloat = 30
+    static let pillsHeight: CGFloat = 26
     static let createHeaderHeight: CGFloat = searchHeight
     static let footerHeight: CGFloat = 34
-    static let rowHeight: CGFloat = 28
+    static let rowHeight: CGFloat = 32
     static let worktreeRowHeight: CGFloat = 28
     static let selectedPathHeight: CGFloat = 32
     static let selection = Color(red: 0.722, green: 0.510, blue: 0.259)
     static let selectionText = Color(red: 0.153, green: 0.141, blue: 0.133)
-    static let background = Color(red: 0.153, green: 0.141, blue: 0.133)
-    static let fieldBackground = Color(red: 0.243, green: 0.227, blue: 0.224)
+    static let background = Color(red: 0.106, green: 0.098, blue: 0.092)
+    static let fieldBackground = Color(red: 0.196, green: 0.182, blue: 0.176)
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {
         CGRect(x: area.midX - width / 2, y: area.maxY - topInset - height,
@@ -45,14 +46,15 @@ enum PickerStyle {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
             return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 32)
         }
-        let rowHeight = model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight
+        let rowHeight = model.page == .worktrees && model.view == .repos ? Self.worktreeRowHeight : Self.rowHeight
         // Reserve the list footprint before the first backend response arrives.
         let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count, 2), 8)
         let rows = CGFloat(rowCount)
         let status: CGFloat = model.error == nil && model.notice == nil ? 0 : 32
-        let detail = model.page == .worktrees ? selectedPathHeight : 0
-        let wrappedRow = model.page == .worktrees && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
-        let content = searchHeight + rows * rowHeight + wrappedRow + 8 + detail + footerHeight + status
+        let pills: CGFloat = model.showsPills ? pillsHeight : 0
+        let detail = model.page == .worktrees && model.view == .repos ? selectedPathHeight : 0
+        let wrappedRow = model.page == .worktrees && model.view == .repos && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
+        let content = searchHeight + pills + rows * rowHeight + wrappedRow + 8 + detail + footerHeight + status
         let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
         return min(content, max(available, 180))
     }

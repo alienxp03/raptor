@@ -3,8 +3,10 @@ import SwiftUI
 @MainActor
 final class PickerModel: ObservableObject {
     enum Page: Equatable { case directories, repositories, worktrees, create }
-    let options: LaunchOptions
+    enum ViewKind: Equatable { case repos, tabs }
+    private(set) var options: LaunchOptions
     private let backend: any BackendClient
+    @Published var view: ViewKind = .repos
     @Published var page: Page
     @Published var query = "" { didSet { if query != oldValue && page != .create { scheduleQuery() } } }
     @Published var items: [PickerItem] = []
@@ -26,6 +28,8 @@ final class PickerModel: ObservableObject {
     @Published var notice: String?
     @Published var splitMode = false
     @Published var removalCandidate: PickerItem?
+    @Published var renameCandidate: PickerItem?
+    @Published var renameLabel: String?
     @Published var basePickerPresented = false
     @Published var targetPickerPresented = false
     var onClose: (() -> Void)?
@@ -48,19 +52,126 @@ final class PickerModel: ObservableObject {
     }
 
     var selected: PickerItem? { items.first { $0.id == selectedID } }
-    var canOpen: Bool { !busy && !loading && selected != nil && !target.isEmpty }
+    /// Resident recovery: did the shared backend connection die?
+    var backendIsClosed: Bool { (backend as? ProcessBackend)?.isClosed ?? false }
+    var canOpen: Bool {
+        guard !busy, !loading, selected != nil else { return false }
+        if view == .tabs { return selected?.isSessionEntry == true }
+        return !target.isEmpty
+    }
     var canCreate: Bool { !busy && !loading && !basePickerPresented && !targetPickerPresented && previewReady && validationError == nil && destination != nil && !branch.isEmpty && !base.isEmpty && !target.isEmpty && createdPath == nil }
     var canSubmitForm: Bool { !basePickerPresented && (canCreate || (!busy && createdPath != nil && !target.isEmpty)) }
     var heading: String {
-        switch page {
-        case .directories: return "Open directory"
-        case .repositories: return "Choose repository"
-        case .worktrees: return "Worktrees"
-        case .create: return "Create worktree"
+        switch view {
+        case .tabs: return "Tabs & Sessions"
+        case .repos:
+            switch page {
+            case .directories: return "Open directory"
+            case .repositories: return "Choose repository"
+            case .worktrees: return "Worktrees"
+            case .create: return "Create worktree"
+            }
         }
     }
 
+    var showsPills: Bool { page != .create && page != .repositories }
+
     func start() { scheduleQuery(immediate: true) }
+
+    /// Retarget one long-lived model for a new open. Visible data stays in
+    /// place (stale-first); the refreshed response replaces it in flight. The
+    /// shared backend is retold its origin context in place.
+    func reconfigure(_ options: LaunchOptions) async {
+        _ = try? await backend.request("context", params: [
+            "session": .text(options.session),
+            "block": .text(options.block),
+            "client": .text(options.client),
+            "title": .text(options.title),
+        ])
+        self.options = options
+        closed = false
+        view = .repos
+        page = options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories)
+        repo = options.repo
+        query = ""
+        splitMode = false
+        error = nil
+        notice = nil
+        createdPath = nil
+        removalCandidate = nil
+        basePickerPresented = false
+        targetPickerPresented = false
+        scheduleQuery(immediate: true)
+    }
+
+    func switchView(backward: Bool = false) {
+        guard !busy, page != .create, page != .repositories else { return }
+        view = view == .repos ? .tabs : .repos
+        query = ""
+        splitMode = false
+        removalCandidate = nil
+        error = nil
+        notice = nil
+        scheduleQuery(immediate: true)
+        onFocusSearch?()
+    }
+
+    /// Open the row at a 1-based position (⌘1–9 / alt-1–9).
+    func openNumbered(_ number: Int) {
+        guard number >= 1, number <= items.count, !busy, !loading else { return }
+        guard view == .tabs || page == .directories || page == .worktrees else { return }
+        selectedID = items[number - 1].id
+        choose()
+    }
+
+    func togglePin() {
+        guard view == .repos, page == .directories, !busy, let selected else { return }
+        let path = selected.path
+        perform {
+            _ = try await self.backend.request("pins.toggle", params: ["path": .text(path)])
+            self.scheduleQuery(immediate: true)
+        }
+    }
+
+    func requestCloseEntry() {
+        guard view == .tabs, !busy, let selected, selected.isSessionEntry else { return }
+        removalCandidate = selected
+    }
+
+    func confirmCloseEntry() {
+        guard view == .tabs, !busy, let candidate = removalCandidate, candidate.isSessionEntry else { return }
+        removalCandidate = nil
+        perform {
+            _ = try await self.backend.request("sessions.close", params: [
+                "kind": .text(candidate.kind ?? "window"),
+                "session_id": .text(candidate.sessionID ?? candidate.path),
+                "window_id": .text(candidate.kind == "window" ? candidate.path : ""),
+            ])
+            self.scheduleQuery(immediate: true)
+        }
+    }
+
+    func beginRename() {
+        guard view == .tabs, !busy, let selected, selected.isSessionEntry else { return }
+        renameCandidate = selected
+        renameLabel = selected.label ?? ""
+    }
+
+    func commitRename() {
+        guard let candidate = renameCandidate, !busy, let label = renameLabel, !label.isEmpty else { return }
+        renameCandidate = nil
+        perform {
+            _ = try await self.backend.request("sessions.rename", params: [
+                "kind": .text(candidate.kind ?? "window"),
+                "session_id": .text(candidate.sessionID ?? candidate.path),
+                "window_id": .text(candidate.kind == "window" ? candidate.path : ""),
+                "label": .text(label),
+            ])
+            self.scheduleQuery(immediate: true)
+        }
+    }
+
+    func cancelRename() { renameCandidate = nil; renameLabel = nil }
     func close() {
         guard !closed else { return }
         closed = true
@@ -79,6 +190,7 @@ final class PickerModel: ObservableObject {
         splitMode = false
         error = nil
         let currentPage = page
+        let currentView = view
         let currentQuery = query
         let currentRepo = repo
         queryTask = Task { [weak self] in
@@ -88,7 +200,9 @@ final class PickerModel: ObservableObject {
                 try Task.checkCancellation()
                 var params: [String: APIValue] = ["query": .text(currentQuery)]
                 let method: String
-                if currentPage == .worktrees || currentPage == .create {
+                if currentView == .tabs {
+                    method = "sessions"
+                } else if currentPage == .worktrees || currentPage == .create {
                     method = "worktrees.list"
                     if let currentRepo { params["repo"] = .text(currentRepo) }
                 } else {
@@ -161,11 +275,26 @@ final class PickerModel: ObservableObject {
 
     func choose() {
         guard !busy, !loading, let selected else { return }
-        if page == .repositories {
+        if view == .tabs {
+            jump(selected)
+        } else if page == .repositories {
             repo = selected.path
             navigate(options.mode == "wt-create" ? .create : .worktrees)
         } else if canOpen {
             dispatch(path: selected.path, target: target)
+        }
+    }
+
+    private func jump(_ entry: PickerItem) {
+        perform {
+            _ = try await self.backend.request("sessions.jump", params: [
+                "kind": .text(entry.kind ?? "window"),
+                "session_id": .text(entry.sessionID ?? entry.path),
+                "window_id": .text(entry.kind == "window" ? entry.path : ""),
+            ])
+            if self.options.demo {
+                self.notice = "Demo only: jumped to \(entry.label ?? entry.path). No Rex call."
+            } else { self.close() }
         }
     }
 
@@ -196,9 +325,14 @@ final class PickerModel: ObservableObject {
 
     func escape() {
         guard removalCandidate == nil, !busy else { return }
+        if renameCandidate != nil { cancelRename(); return }
         if basePickerPresented { basePickerPresented = false; return }
         if targetPickerPresented { targetPickerPresented = false; return }
         if splitMode { splitMode = false; return }
+        if view == .tabs {
+            if !query.isEmpty { query = "" } else { switchView() }
+            return
+        }
         if page == .create {
             if options.mode == "wt-create" { close() } else { navigate(createParent) }
         } else if !query.isEmpty {
