@@ -55,20 +55,20 @@ for _, prefix in ipairs({ "/opt/homebrew", "/usr/local", "/custom/homebrew" }) d
 	plugin.setup({ ui = "terminal" })
 	assert(actions.raptor(ctx, {}).ui == "terminal" and command[1] == bin)
 	plugin.setup({})
-	assert(actions.raptor(ctx, {}).ui == "native" and launched[1] == bin and launched[2] == "panel",
+	assert(actions.raptor(ctx, {}).ui == "native" and launched[1] == bin and launched[8] == "panel",
 		"Native open must use the stable opt CLI over IPC")
 	plugin.setup({ ui = "terminal", bin = "/custom/raptor" })
 	actions.raptor(ctx, {})
 	assert(command[1] == "/custom/raptor", "Explicit CLI must override package discovery")
 	plugin.setup({ app = "/custom/Raptor.app" })
 	actions.raptor(ctx, {})
-	assert(launched[1] == bin and launched[2] == "panel",
+	assert(launched[1] == bin and launched[8] == "panel",
 		"Explicit app must override package discovery for the Launch Services fallback")
 	plugin.setup({ app = "/custom/Raptor.app", bin = "/custom/raptor" })
 	local host_down = rex.exec
 	rex.exec = function(args)
 		launched = args
-		if args[2] == "panel" then return { ok = false } end
+		if args[8] == "panel" then return { ok = false } end
 		return { ok = true }
 	end
 	actions.raptor(ctx, {})

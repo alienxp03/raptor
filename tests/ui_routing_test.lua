@@ -63,7 +63,7 @@ local function check(case)
 			focus_block = function() end,
 		},
 		native_ok = function(args)
-			if args[2] == "panel" then
+			if args[8] == "panel" then
 				-- The resident host needs its app; a stale install cannot serve.
 				if case.panel_failure then return false end
 				return (case.host_running or case.installed) and not case.launch_failure
@@ -109,12 +109,13 @@ local function check(case)
 				assert(#command == 5)
 			else
 				-- Fast path: resident panel host over IPC.
-				assert(command[1] == bin and command[2] == "panel" and command[3] == "open", "native open must try IPC first")
-				assert(command[4] == "--mode" and command[5] == mode)
-				assert(command[6] == "-session" and command[7] == ctx.session_id)
-				assert(command[8] == "-block" and command[9] == ctx.block_id)
-				assert(command[10] == "-client" and command[11] == ctx.client_id)
-				assert(#command == 11, "native IPC must skip title lookups and repo flags")
+				assert(command[1] == bin, "native open must try IPC first")
+				assert(command[2] == "-session" and command[3] == ctx.session_id)
+				assert(command[4] == "-block" and command[5] == ctx.block_id)
+				assert(command[6] == "-client" and command[7] == "demo-client")
+				assert(command[8] == "panel", "global context must precede the subcommand")
+				assert(command[9] == "--mode" and command[10] == mode)
+				assert(#command == 10, "native IPC must omit unsupported open argument, title and repo flags")
 			end
 			assert(title_calls == 0, "native launch must skip terminal-title lookups")
 		else
@@ -148,6 +149,7 @@ end
 
 for _, case in ipairs({
 	{ name = "Mac native", platform = "macos", installed = true, expected = "native" },
+	{ name = "Mac function binding without client ID", platform = "macos", installed = true, function_binding = true, expected = "native" },
 	{ name = "Mac native panel failure falls back to Launch Services", platform = "macos", installed = true, panel_failure = true, expected = "native" },
 	{ name = "resident host without app bundle", platform = "macos", host_running = true, expected = "native" },
 	{ name = "Mac-hosted CLI is not a viewing app", platform = "macos", kind = "cli", installed = true, expected = "terminal" },
