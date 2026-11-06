@@ -53,7 +53,7 @@ func TestTaskCreatesTabWithFreshEmptyPi(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.WindowID != "new-window" || result.BlockID != "new-block" || result.Path == "" || strings.ContainsAny(result.Branch, "/-0123456789") {
+	if result.WindowID != "new-window" || result.BlockID != "new-block" || result.Path == "" || strings.ContainsAny(result.Branch, "/0123456789") || len(strings.Split(result.Branch, "-")) != 2 {
 		t.Fatalf("%+v", result)
 	}
 	data, _ := os.ReadFile(log)

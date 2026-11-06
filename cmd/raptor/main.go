@@ -11,13 +11,20 @@ import (
 	"github.com/alienxp03/raptor/internal/api"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
+	"github.com/alienxp03/raptor/internal/panel"
 	"github.com/alienxp03/raptor/internal/picker"
 	"github.com/alienxp03/raptor/internal/rex"
+	"github.com/alienxp03/raptor/internal/service"
 	"github.com/alienxp03/raptor/internal/task"
 )
 
 // version is set at build time.
 var version = "0.0.1"
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(1)
+}
 
 func main() {
 	// Rex passes context as flags on every subcommand.
@@ -28,7 +35,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|launcher|wt|task|api|direct|last-session|last-pane> [command flags]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|launcher|wt|task|api|direct|last-session|last-pane|panel|service> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -86,6 +93,82 @@ func main() {
 		if err := dispatch.Dispatch(args[0], args[1], ctx, cfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
+		}
+	case "panel":
+		// Open (or toggle) the resident native panel over IPC.
+		rest := flag.NewFlagSet("panel", flag.ExitOnError)
+		mode := rest.String("mode", "dirs", "picker mode: dirs, wt or wt-create")
+		repo := rest.String("repo", "", "repository for worktree modes")
+		_ = rest.Parse(fs.Args()[1:])
+		req := panel.Request{
+			Action: "open", Mode: *mode, Repo: *repo,
+			Session: ctx.Session, Block: ctx.Block, Client: ctx.Client, Title: ctx.Title,
+		}
+		if err := panel.Open(req); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if err == panel.ErrUnavailable {
+				os.Exit(3) // Callers fall back to launching the app.
+			}
+			os.Exit(1)
+		}
+	case "service":
+		rest := flag.NewFlagSet("service", flag.ExitOnError)
+		app := rest.String("app", "", "path to Raptor.app for install (default: auto-discover)")
+		// flag.Parse stops at the first positional, so collect flags and the
+		// subcommand separately and parse the flags alone.
+		var flagArgs, positional []string
+		args := fs.Args()[1:]
+		for i := 0; i < len(args); i++ {
+			if strings.HasPrefix(args[i], "-") {
+				flagArgs = append(flagArgs, args[i])
+				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+					i++
+					flagArgs = append(flagArgs, args[i])
+				}
+				continue
+			}
+			positional = append(positional, args[i])
+		}
+		_ = rest.Parse(flagArgs)
+		command := ""
+		if len(positional) > 0 {
+			command = positional[0]
+		}
+		switch command {
+		case "install":
+			if err := service.Install(*app); err != nil {
+				fail(err)
+			}
+		case "uninstall":
+			if err := service.Uninstall(); err != nil {
+				fail(err)
+			}
+		case "start":
+			if err := service.Start(); err != nil {
+				fail(err)
+			}
+		case "stop":
+			if err := service.Stop(); err != nil {
+				fail(err)
+			}
+		case "restart":
+			_ = service.Stop()
+			if err := service.Start(); err != nil {
+				fail(err)
+			}
+		case "status":
+			running, err := service.Status()
+			if err != nil {
+				fail(err)
+			}
+			if running {
+				fmt.Println("running")
+			} else {
+				fmt.Println("stopped")
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "usage: raptor service install|uninstall|start|stop|restart|status [--app Raptor.app]\n")
+			os.Exit(2)
 		}
 	case "last", "last-session":
 		sid, err := rex.SelectLast(ctx)

@@ -38,6 +38,42 @@ struct LaunchOptions: Sendable {
     var backendArguments: [String] {
         ["--session", session, "--block", block, "--client", client, "--title", title, "api"]
     }
+
+    /// Resident opens compare the full origin context: a repeated ⌘S with the
+    /// same context toggles the panel closed.
+    func matches(_ other: LaunchOptions) -> Bool {
+        mode == other.mode && session == other.session && block == other.block
+            && client == other.client && title == other.title && repo == other.repo && demo == other.demo
+    }
+
+    /// A resident-host socket request converted into launch options.
+    init(panelRequest: PanelRequest) throws {
+        var arguments: [String] = []
+        if let mode = panelRequest.mode, !mode.isEmpty { arguments += ["--mode", mode] }
+        if let session = panelRequest.session, !session.isEmpty { arguments += ["--session", session] }
+        if let block = panelRequest.block, !block.isEmpty { arguments += ["--block", block] }
+        if let client = panelRequest.client, !client.isEmpty { arguments += ["--client", client] }
+        if let title = panelRequest.title, !title.isEmpty { arguments += ["--title", title] }
+        if let repo = panelRequest.repo, !repo.isEmpty { arguments += ["--repo", repo] }
+        try self.init(arguments: arguments)
+    }
+}
+
+// One request per connection on the resident host socket: the CLI writes a
+// JSON line and reads one back. The host answers on the main actor.
+struct PanelRequest: Codable {
+    var action: String?
+    var mode: String?
+    var session: String?
+    var block: String?
+    var client: String?
+    var title: String?
+    var repo: String?
+}
+
+struct PanelReply: Codable {
+    var ok: Bool
+    var error: String?
 }
 
 enum APIError: Error, LocalizedError, Sendable {
@@ -61,8 +97,22 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     var label: String? = nil
     var branch: String? = nil
     var isMain: Bool? = nil
+    // Tabs & Sessions entries reuse the same shape: path carries the session
+    // or window id, and the extra fields carry the sidebar context.
+    var kind: String? = nil // "session" | "window" | nil (directory/worktree)
+    var sessionID: String? = nil
+    var sessionLabel: String? = nil
+    var active: Bool? = nil
+    var isPinned: Bool? = nil
     var id: String { path }
-    enum CodingKeys: String, CodingKey { case path, label, branch; case isMain = "is_main" }
+    var isSessionEntry: Bool { kind == "session" || kind == "window" }
+    enum CodingKeys: String, CodingKey {
+        case path, label, branch, kind, active
+        case isMain = "is_main"
+        case sessionID = "session_id"
+        case sessionLabel = "session_label"
+        case isPinned = "is_pinned"
+    }
 }
 
 struct APIResult: Codable, Sendable {
@@ -94,7 +144,7 @@ protocol BackendClient: Sendable {
 final class ProcessBackend: BackendClient, @unchecked Sendable {
     private let queue = DispatchQueue(label: "raptor.backend.io", qos: .userInitiated)
     private let lock = NSLock()
-    private let options: LaunchOptions
+    private var options: LaunchOptions // queue-only after init
     private var process: Process?
     private var closed = false
     private var activeID: Int?
@@ -104,6 +154,27 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     private var buffer = Data() // I/O queue only
 
     init(options: LaunchOptions) { self.options = options }
+
+    /// Retarget the shared backend for a new picker open. A running child is
+    /// retold its context in place; an idle one simply takes new launch flags.
+    func updateContext(_ options: LaunchOptions) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { [self] in
+                do {
+                    if process != nil {
+                        _ = try exchange("context", params: [
+                            "session": .text(options.session),
+                            "block": .text(options.block),
+                            "client": .text(options.client),
+                            "title": .text(options.title),
+                        ])
+                    }
+                    self.options = options
+                    continuation.resume()
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
 
     private func startIfNeeded() throws {
         lock.lock()
@@ -129,6 +200,13 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         output = stdout.fileHandleForReading
         process = child
+    }
+
+    /// True once the connection is broken or shut down. The resident host
+    /// checks this to swap in a fresh backend; per-open flows surface the error.
+    var isClosed: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return closed
     }
 
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {

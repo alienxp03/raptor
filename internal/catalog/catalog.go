@@ -13,8 +13,9 @@ import (
 )
 
 type Directory struct {
-	Path  string `json:"path"`
-	Label string `json:"label"`
+	Path   string `json:"path"`
+	Label  string `json:"label"`
+	Pinned bool   `json:"is_pinned,omitempty"`
 }
 
 func Directories(reposOnly bool) []Directory {
@@ -44,6 +45,34 @@ func FilterDirectories(items []Directory, query string) []int {
 		entries[i] = item.Label + " " + paths.HomeRelative(item.Path)
 	}
 	return match(entries, query)
+}
+
+// ApplyPins marks and floats pinned directories. Stable sort keeps each
+// group's order; a canonical match survives symlinked zoxide entries.
+func ApplyPins(items []Directory) []Directory {
+	pins := map[string]bool{}
+	for _, pin := range config.LoadPins() {
+		pins[pin] = true
+	}
+	firstUnpinned := 0
+	for i := range items {
+		if items[i].Pinned = pins[paths.Canonical(items[i].Path)]; items[i].Pinned {
+			item := items[i]
+			copy(items[firstUnpinned+1:i+1], items[firstUnpinned:i])
+			items[firstUnpinned] = item
+			firstUnpinned++
+		}
+	}
+	return items
+}
+
+// FilterSessions fuzzy-matches tabs and sessions by name and session.
+func FilterSessions(entries []rex.SessionEntry, query string) []int {
+	texts := make([]string, len(entries))
+	for i, entry := range entries {
+		texts[i] = entry.Label + " " + entry.SessionLabel
+	}
+	return match(texts, query)
 }
 
 func FilterWorktrees(items []worktree.Worktree, query string) []int {

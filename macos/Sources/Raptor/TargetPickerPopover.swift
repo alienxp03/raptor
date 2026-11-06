@@ -36,12 +36,12 @@ struct TargetPickerPopover: View {
             HStack(spacing: 8) {
                 Text(PickerModel.targetLabel(target))
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? PickerStyle.selectionText : Color.primary)
+                    .foregroundStyle(isSelected ? PickerStyle.selectionText : PickerStyle.foreground)
                 Spacer(minLength: 8)
                 if isCurrent {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(isSelected ? PickerStyle.selectionText : Color.primary.opacity(0.6))
+                        .foregroundStyle(isSelected ? PickerStyle.selectionText : PickerStyle.foreground.opacity(0.6))
                         .accessibilityHidden(true)
                 }
             }
