@@ -25,7 +25,7 @@ struct LaunchOptions: Sendable {
             index += 2
         }
         let mode = values["--mode"] ?? "dirs"
-        guard ["dirs", "wt", "wt-create"].contains(mode) else { throw APIError.message("Mode must be dirs, wt or wt-create.") }
+        guard ["dirs", "wt", "wt-create", "agents"].contains(mode) else { throw APIError.message("Mode must be dirs, wt, wt-create or agents.") }
         self.mode = mode
         session = values["--session"] ?? ""
         block = values["--block"] ?? ""
@@ -92,6 +92,19 @@ enum APIValue: Encodable, Sendable {
     }
 }
 
+enum AgentGroup: String, CaseIterable, Sendable {
+    case blocked = "Blocked", working = "Working", idle = "Idle"
+}
+
+struct ActivityProjection: Equatable, Sendable {
+    let blocked: Bool
+    let working: Bool
+
+    func shouldPulse(reduceMotion: Bool, visible: Bool) -> Bool {
+        working && !reduceMotion && visible
+    }
+}
+
 struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     let path: String
     var label: String? = nil
@@ -102,12 +115,85 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     var kind: String? = nil // "session" | "window" | nil (directory/worktree)
     var sessionID: String? = nil
     var sessionLabel: String? = nil
+    var app: String? = nil
+    var state: String? = nil
+    var working: Bool? = nil
+    var updatedAt: String? = nil
+    var cwd: String? = nil
+    var agentID: String? = nil
+    var windowID: String? = nil
+    var windowLabel: String? = nil
+    var blockID: String? = nil
     var active: Bool? = nil
     var isPinned: Bool? = nil
     var id: String { path }
     var isSessionEntry: Bool { kind == "session" || kind == "window" }
+
+    var agentContext: String {
+        // Leading dots are presentation only: .dotfiles and dotfiles name the same tab.
+        func name(_ value: String) -> String {
+            String(value.drop(while: { $0 == "." })).lowercased()
+        }
+        let title = name(label ?? agentID ?? "Agent")
+        return [sessionLabel ?? sessionID, windowLabel ?? windowID]
+            .compactMap { $0 }.filter { !$0.isEmpty && name($0) != title }.joined(separator: " / ")
+    }
+
+    var agentActivity: String? {
+        switch state?.lowercased().filter({ $0.isLetter }) {
+        case "working": return "Working"
+        case "waiting", "blocked", "needsinput": return "Blocked"
+        default: return nil
+        }
+    }
+
+    var activity: ActivityProjection {
+        ActivityProjection(blocked: agentActivity == "Blocked",
+                           working: kind == "agent" ? agentActivity == "Working" : (working == true || agentActivity == "Working"))
+    }
+
+    var agentGroup: AgentGroup {
+        activity.blocked ? .blocked : (activity.working ? .working : .idle)
+    }
+
+    var updatedDate: Date? {
+        guard let updatedAt else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: updatedAt) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: updatedAt)
+    }
+
+    func updatedAge(now: Date = Date()) -> String? {
+        guard let date = updatedDate else { return nil }
+        let seconds = max(0, now.timeIntervalSince(date))
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m" }
+        if seconds < 86400 { return "\(Int(seconds / 3600))h" }
+        return "\(Int(seconds / 86400))d"
+    }
+
+    var activityAccessibility: String {
+        [activity.blocked ? "Blocked" : nil, activity.working ? "Working" : nil].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    var agentAccessibility: String {
+        [label ?? agentID ?? "Agent", app, agentActivity, agentContext.isEmpty ? nil : agentContext]
+            .compactMap { $0 }.joined(separator: ", ")
+    }
+
+    var agentHelp: String {
+        [app, agentActivity, active == true ? "Current pane" : nil]
+            .compactMap { $0 }.joined(separator: ", ")
+    }
     enum CodingKeys: String, CodingKey {
-        case path, label, branch, kind, active
+        case path, label, branch, kind, active, app, state, working, cwd
+        case updatedAt = "updated_at"
+        case agentID = "agent_id"
+        case windowID = "window_id"
+        case windowLabel = "window_label"
+        case blockID = "block_id"
         case isMain = "is_main"
         case sessionID = "session_id"
         case sessionLabel = "session_label"
@@ -124,12 +210,14 @@ struct APIResult: Codable, Sendable {
     var needsRepo: Bool? = nil
     var branches: [String]? = nil
     var baseBranch: String? = nil
+    var suggestedBranch: String? = nil
     var path: String? = nil
     var validationError: String? = nil
     var theme: ThemePayload? = nil
     enum CodingKeys: String, CodingKey {
         case items, targets, target, repo, branches, path, theme
         case destinationRoot = "destination_root"
+        case suggestedBranch = "suggested_branch"
         case needsRepo = "needs_repo", baseBranch = "base_branch", validationError = "validation_error"
     }
 }

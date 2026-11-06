@@ -1,9 +1,11 @@
 import SwiftUI
+import AppKit
 
 struct PickerView: View {
     @ObservedObject var model: PickerModel
     @FocusState private var field: Field?
     @State private var baseReturnFocus: Field = .base
+    @State private var selectedInitialDefault = false
     private enum Field { case search, branch, base, target, submit }
 
     var body: some View {
@@ -32,6 +34,7 @@ struct PickerView: View {
         }
         .onChange(of: model.page) { _, page in
             model.basePickerPresented = false
+            selectedInitialDefault = false
             field = page == .create ? .branch : .search
         }
         .alert("Remove worktree?", isPresented: Binding(
@@ -44,33 +47,6 @@ struct PickerView: View {
                 .accessibilityIdentifier("confirm-remove")
         } message: { candidate in
             Text("Remove \(displayPath(candidate.path))?\nGit checks for unsaved changes. The branch is kept.")
-        }
-        .alert("Close tab?", isPresented: Binding(
-            get: { model.removalCandidate != nil && model.view == .tabs },
-            set: { if !$0 { model.removalCandidate = nil } }
-        ), presenting: model.view == .tabs ? model.removalCandidate : nil) { candidate in
-            Button("Cancel", role: .cancel) { model.removalCandidate = nil }
-                .keyboardShortcut(.defaultAction)
-            Button("Close", role: .destructive) { model.confirmCloseEntry() }
-                .accessibilityIdentifier("confirm-close-entry")
-        } message: { candidate in
-            Text("Close \(candidate.label ?? candidate.path)?\(candidate.kind == "session" ? " Every tab in it closes." : " Every pane in it closes.")")
-        }
-        .alert("Rename", isPresented: Binding(
-            get: { model.renameCandidate != nil },
-            set: { if !$0 { model.cancelRename() } }
-        ), presenting: model.renameCandidate) { candidate in
-            TextField("Name", text: Binding(
-                get: { model.renameLabel ?? "" },
-                set: { model.renameLabel = $0 }
-            ))
-                .accessibilityIdentifier("rename-field")
-            Button("Cancel", role: .cancel) { model.cancelRename() }
-                .keyboardShortcut(.defaultAction)
-            Button("Rename") { model.commitRename() }
-                .accessibilityIdentifier("confirm-rename")
-        } message: { candidate in
-            Text("Rename \(candidate.label ?? candidate.path).")
         }
     }
 
@@ -114,7 +90,7 @@ struct PickerView: View {
     }
 
     private var searchPrompt: String {
-        if model.view == .tabs { return "Search sessions and tabs…" }
+        if model.view == .agents { return "Search agents…" }
         switch model.page {
         case .repositories: return "Search repositories…"
         case .worktrees: return "Search worktrees…"
@@ -126,14 +102,13 @@ struct PickerView: View {
         HStack(spacing: 6) {
             pill("Repos", active: model.view == .repos, icon: "folder", hint: nil)
                 .accessibilityIdentifier("pill-repos")
-                .onTapGesture { if model.view != .repos { model.switchView() } }
-            pill("Sessions", active: model.view == .tabs, icon: "square.stack.3d.up", hint: nil)
-                .accessibilityIdentifier("pill-tabs")
-                .onTapGesture { if model.view != .tabs { model.switchView() } }
+                .onTapGesture { model.selectView(.repos) }
+            pill("Agents", active: model.view == .agents, icon: "cpu", hint: nil)
+                .accessibilityIdentifier("pill-agents")
+                .accessibilityHint("Show Agents, Shift Command A")
+                .help("Show Agents (⇧⌘A)")
+                .onTapGesture { model.selectView(.agents) }
             Spacer(minLength: 0)
-            Text("⇥ Switch view")
-                .font(.system(size: 10))
-                .foregroundStyle(PickerStyle.secondaryText)
         }
         .padding(.horizontal, PickerStyle.listInset)
         .padding(.bottom, 8)
@@ -159,8 +134,25 @@ struct PickerView: View {
     private var results: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                    row(item, position: index + 1).id(item.id)
+                if model.view == .agents {
+                    ForEach(model.agentSections) { section in
+                        Text(section.group.rawValue)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(PickerStyle.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, PickerStyle.rowInset)
+                            .frame(height: PickerStyle.agentGroupHeight)
+                            .padding(.top, section.id == model.agentSections.first?.id ? 0 : PickerStyle.agentGroupSpacing)
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("agent-group:\(section.id)")
+                        ForEach(section.items) { item in
+                            row(item, position: model.numberedPosition(of: item)).id(item.id)
+                        }
+                    }
+                } else {
+                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                        row(item, position: index + 1).id(item.id)
+                    }
                 }
             }
             .scrollTargetLayout()
@@ -179,35 +171,41 @@ struct PickerView: View {
 
     private func row(_ item: PickerItem, position: Int = 0) -> some View {
         let selected = model.selectedID == item.id
-        let isTabs = item.isSessionEntry
-        return HoverRow(selected: selected, enabled: !isTabs) {
-            if position >= 1, position <= 9, !isTabs {
+        let isAgent = model.view == .agents
+        return HoverRow(selected: selected, enabled: true) {
+            if position >= 1, position <= 9 {
                 Text("⌘\(position)")
                     .font(.system(size: 10, weight: .medium).monospacedDigit())
                     .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.45))
                     .accessibilityHidden(true)
             }
-            if item.isPinned == true {
+            if !isAgent && item.isPinned == true {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.selection)
                     .accessibilityLabel("Pinned")
             }
-            if isTabs {
-                Text(item.label ?? item.path)
-                    .fontWeight(item.kind == "session" ? .semibold : .regular)
-                    .lineLimit(1).truncationMode(.tail)
-                    .padding(.leading, item.kind == "session" ? 0 : 8)
-                if item.active == true {
-                    Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
-                        .frame(width: 6, height: 6)
-                        .accessibilityLabel("Active")
-                }
+            if isAgent {
+                AgentIcon(app: item.app)
+                    .frame(width: 16, height: 16).accessibilityHidden(true)
+                Text(item.label ?? item.agentID ?? "Agent")
+                    .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                ActivityIndicator(activity: item.activity)
                 Spacer(minLength: 8)
-                if item.kind == "session" {
-                    Text("Session")
-                        .font(.system(size: 11))
-                        .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.5))
+                if !item.agentContext.isEmpty {
+                    Text(item.agentContext)
+                        .font(.system(size: 10))
+                        .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText)
+                        .lineLimit(1).truncationMode(.tail)
+                        .frame(maxWidth: 220, alignment: .trailing)
+                        .layoutPriority(2)
+                }
+                if let age = item.updatedAge() {
+                    Text(age)
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText)
+                        .fixedSize()
+                        .help(item.updatedAt ?? "")
                 }
             } else if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
@@ -217,7 +215,8 @@ struct PickerView: View {
                 Text(displayPath(item.path))
                     .lineLimit(1).truncationMode(.middle)
             }
-            if selected && !isTabs {
+            if !isAgent { ActivityIndicator(activity: item.activity) }
+            if selected && !isAgent {
                 Spacer(minLength: 8)
                 Image(systemName: "checkmark")
                     .font(.system(size: 12, weight: .semibold))
@@ -228,7 +227,7 @@ struct PickerView: View {
         .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PickerStyle.rowInset)
-        .frame(height: model.page == .worktrees ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight)
+        .frame(height: isAgent ? PickerStyle.agentRowHeight : (model.page == .worktrees && model.view == .repos ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight))
         .background {
             if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selection) }
         }
@@ -242,9 +241,9 @@ struct PickerView: View {
             guard !model.busy, !model.loading else { return }
             model.selectedID = item.id
         }
-        .help(item.path)
+        .help(isAgent ? [item.agentHelp, item.updatedAt].compactMap { $0 }.joined(separator: " · ") : item.path + (item.active == true ? " · Current pane" : ""))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? ""))
+        .accessibilityLabel(isAgent ? item.agentAccessibility : displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? "") + (item.activityAccessibility.isEmpty ? "" : ", " + item.activityAccessibility))
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("path-row:\(item.path)")
@@ -272,15 +271,16 @@ struct PickerView: View {
             pathRow("Repo", value: model.repo.map(displayPath) ?? "Loading…", path: model.repo)
             HStack(spacing: 10) {
                 formLabel("Branch")
-                TextField("feat/my-change", text: $model.branch)
+                TextField("feat/my-change", text: Binding(get: { model.branch }, set: { model.editBranch($0) }))
                     .disableAutocorrection(true)
                     .textFieldStyle(.plain).padding(.horizontal, 9)
                     .frame(height: PickerStyle.controlHeight)
                     .background(field == .branch ? PickerStyle.fieldBackground : PickerStyle.foreground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .branch ? PickerStyle.selection : PickerStyle.foreground.opacity(0.1)))
                     .focused($field, equals: .branch)
-                    .task { await Task.yield(); field = .branch }
-                    .onSubmit { presentBasePicker() }
+                    .task { await Task.yield(); field = .branch; selectInitialBranchDefault() }
+                    .onChange(of: model.branch) { _, _ in selectInitialBranchDefault() }
+                    .onSubmit { model.submitBranch() }
                     .disabled(model.createdPath != nil)
                     .accessibilityLabel("New branch name").accessibilityIdentifier("create-branch")
             }
@@ -379,6 +379,20 @@ struct PickerView: View {
         .accessibilityIdentifier(model.createdPath == nil ? "create-submit" : "open-created")
     }
 
+    private func selectInitialBranchDefault() {
+        // macOS 14 has no TextField selection binding. Use only its active editor;
+        // never move focus or select after the user has changed the value.
+        let value = model.branch
+        guard !selectedInitialDefault, !model.branchWasEdited, !value.isEmpty, field == .branch else { return }
+        DispatchQueue.main.async {
+            guard !selectedInitialDefault, field == .branch, !model.branchWasEdited,
+                  model.branch == value, let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+                  editor.isFieldEditor, editor.string == value else { return }
+            editor.selectAll(nil)
+            selectedInitialDefault = true
+        }
+    }
+
     private func presentBasePicker() {
         guard !model.loading, !model.busy, model.createdPath == nil else { return }
         baseReturnFocus = .base
@@ -409,41 +423,33 @@ struct PickerView: View {
         }
     }
 
-    private var isListPage: Bool { model.view == .tabs || model.page == .directories || model.page == .worktrees }
-
-    private var tabActions: some View {
-        HStack(spacing: 12) {
-            Button("↵ Switch") { model.choose() }.disabled(!model.canOpen)
-                .accessibilityIdentifier("open-selected")
-            Button("⌘R Rename") { model.beginRename() }
-                .disabled(model.busy || model.loading || model.selected?.isSessionEntry != true)
-                .accessibilityIdentifier("rename-entry")
-            Button("⌃X Close") { model.requestCloseEntry() }
-                .disabled(model.busy || model.loading || model.selected?.isSessionEntry != true)
-                .accessibilityIdentifier("close-entry")
-        }
-        .font(.system(size: 10))
-        .fixedSize()
-        .accessibilityIdentifier("tab-actions")
-    }
+    private var isListPage: Bool { model.page == .directories || model.page == .worktrees }
 
     private var footer: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
                 if model.splitMode {
                     Text("Split ⌃P   j↓  l→").accessibilityIdentifier("keyboard-hint")
-                } else if model.view == .tabs {
-                    Text("Sessions").foregroundStyle(PickerStyle.secondaryText)
+                } else if model.view == .agents {
+                    EmptyView()
                 } else if model.page == .repositories {
                     Text("Choose repository").foregroundStyle(PickerStyle.secondaryText)
                 } else if model.page == .create {
-                    Text("Tab fields · ⌃O target").accessibilityIdentifier("keyboard-hint")
+                    if model.createdPath != nil {
+                        Button("Discard recovery") { model.discardCreatedRecovery() }
+                            .disabled(model.busy)
+                            .help("Keep the worktree, but forget Retry opening and dismiss the picker.")
+                            .accessibilityIdentifier("discard-created-recovery")
+                    } else {
+                        Text("Tab fields · ⌃O target").accessibilityIdentifier("keyboard-hint")
+                    }
                 } else {
                     openTargetControl
                 }
                 Spacer(minLength: 0)
-                if model.view == .tabs && !model.splitMode {
-                    tabActions
+                if model.view == .agents {
+                    Button("↵ Switch") { model.choose() }.disabled(!model.canOpen)
+                        .accessibilityIdentifier("open-selected")
                 } else if isListPage && !model.splitMode { listActions }
                 if model.page == .create { createSubmitButton }
                 if model.page == .repositories {
@@ -539,7 +545,7 @@ struct PickerView: View {
     }
 
     private var emptyMessage: String {
-        if model.view == .tabs { return "No matching sessions or tabs" }
+        if model.view == .agents { return "No matching agents" }
         switch model.page {
         case .worktrees: return "No matching worktrees"
         case .repositories: return "No matching repositories"

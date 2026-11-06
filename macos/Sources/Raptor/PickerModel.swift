@@ -3,21 +3,45 @@ import SwiftUI
 @MainActor
 final class PickerModel: ObservableObject {
     enum Page: Hashable { case directories, repositories, worktrees, create }
-    enum ViewKind: Hashable { case repos, tabs }
+    enum ViewKind: Hashable, CaseIterable { case repos, agents }
     private(set) var options: LaunchOptions
     private let backend: any BackendClient
     @Published var view: ViewKind = .repos
     @Published var page: Page
-    @Published var query = "" { didSet { if query != oldValue && page != .create && !changingContext { scheduleQuery() } } }
+    @Published var query = "" {
+        didSet {
+            if query != oldValue && page != .create && !changingContext {
+                // A changed search takes fresh backend relevance, even for a revisited query.
+                agentOrder.removeValue(forKey: cacheKey)
+                agentGroups.removeValue(forKey: cacheKey)
+                scheduleQuery(freshQuery: true)
+            }
+        }
+    }
     @Published var items: [PickerItem] = []
     @Published var selectedID: String?
     @Published var scrollID: String?
     @Published private(set) var refreshing = false
     @Published var targets: [String] = []
     @Published var target = ""
-    @Published var repo: String?
+    @Published var repo: String? {
+        didSet {
+            if repo != oldValue { suggestedBranch = nil }
+        }
+    }
+    private(set) var suggestedBranch: String?
+    private(set) var branchWasEdited = false
+    private var branchDefaultApplied = false
+    private var settingBranchDefault = false
     @Published var branches: [String] = []
-    @Published var branch = "" { didSet { if branch != oldValue { schedulePreview() } } }
+    @Published var branch = "" {
+        didSet {
+            if branch != oldValue {
+                if !settingBranchDefault && page == .create { branchWasEdited = true }
+                schedulePreview()
+            }
+        }
+    }
     @Published var base = "" { didSet { if base != oldValue { schedulePreview() } } }
     @Published var destinationRoot: String?
     @Published var destination: String?
@@ -30,12 +54,11 @@ final class PickerModel: ObservableObject {
     @Published var notice: String?
     @Published var splitMode = false
     @Published var removalCandidate: PickerItem?
-    @Published var renameCandidate: PickerItem?
-    @Published var renameLabel: String?
     @Published var basePickerPresented = false
     @Published var targetPickerPresented = false
     @Published var themeLoaded = false
     var onClose: (() -> Void)?
+    var onDismiss: (() -> Void)?
     var onFocusSearch: (() -> Void)?
     var onAdvanceFormFocus: ((Bool) -> Void)?
     private var queryTask: Task<Void, Never>?
@@ -54,20 +77,69 @@ final class PickerModel: ObservableObject {
     }
     private struct CachedList {
         let result: APIResult
+        var refreshedAt = Date()
         var selectedID: String?
         var scrollID: String?
         var target: String
     }
     private var cache: [CacheKey: CachedList] = [:]
     private var activeKey: CacheKey?
+    // Per presentation and query. Cache stores backend order for the next open.
+    private var agentOrder: [CacheKey: [String]] = [:]
+
+    private var agentGroups: [CacheKey: [String: AgentGroup]] = [:]
+
+    private func orderedAgents(_ rows: [PickerItem], key: CacheKey, capture: Bool = true) -> [PickerItem] {
+        guard key.view == .agents else { return rows }
+        if agentOrder[key] == nil, capture {
+            agentOrder[key] = rows.map(\.id)
+            agentGroups[key] = Dictionary(rows.map { ($0.id, $0.agentGroup) }, uniquingKeysWith: { first, _ in first })
+        }
+        guard let order = agentOrder[key] else { return rows }
+        let byID = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        // New records stay in the raw cache, not in this presentation.
+        return order.compactMap { byID[$0] }
+    }
+
+    struct AgentSection: Identifiable {
+        let group: AgentGroup
+        let items: [PickerItem]
+        var id: String { group.rawValue }
+    }
+
+    var agentSections: [AgentSection] {
+        let groups = agentGroups[cacheKey] ?? [:]
+        return AgentGroup.allCases.compactMap { group in
+            let rows = items.filter { (groups[$0.id] ?? $0.agentGroup) == group }
+            return rows.isEmpty ? nil : AgentSection(group: group, items: rows)
+        }
+    }
+
+    func numberedPosition(of item: PickerItem) -> Int {
+        (items.firstIndex { $0.id == item.id } ?? -1) + 1
+    }
     private var viewQueries: [ViewKind: String] = [:]
     private var changingContext = false
     private var contextGeneration = 0
+    private var reconfigureGeneration = 0
+    private var warmReconfigure: Int?
+    private var queryKey: CacheKey?
+    private let cacheTTL: TimeInterval
     @Published private(set) var contextReady = true
     private var started = false
 
     private var cacheKey: CacheKey {
-        CacheKey(view: view, page: page, repo: page == .directories ? nil : repo, query: query)
+        CacheKey(view: view, page: view == .agents ? .directories : page,
+                 repo: view == .agents || page == .directories ? nil : repo, query: query)
+    }
+
+    private static func initialView(for options: LaunchOptions) -> ViewKind {
+        options.mode == "agents" ? .agents : .repos
+    }
+
+    /// A direct Agents request must route from another visible view, not hide it.
+    func shouldToggle(for options: LaunchOptions) -> Bool {
+        self.options.matches(options) && (options.mode != "agents" || view == .agents)
     }
 
     private func saveListPosition() {
@@ -98,9 +170,11 @@ final class PickerModel: ObservableObject {
         return result
     }
 
-    init(options: LaunchOptions, backend: any BackendClient) {
+    init(options: LaunchOptions, backend: any BackendClient, cacheTTL: TimeInterval = 30) {
+        self.cacheTTL = cacheTTL
         self.options = options
         self.backend = backend
+        self.view = Self.initialView(for: options)
         self.page = options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories)
         self.repo = options.repo
         self.loading = true
@@ -108,17 +182,17 @@ final class PickerModel: ObservableObject {
 
     var selected: PickerItem? { items.first { $0.id == selectedID } }
     /// Resident recovery: did the shared backend connection die?
-    var backendIsClosed: Bool { (backend as? ProcessBackend)?.isClosed ?? false }
+    var backendIsClosed: Bool { closed || ((backend as? ProcessBackend)?.isClosed ?? false) }
     var canOpen: Bool {
         guard contextReady, !busy, !loading, selected != nil else { return false }
-        if view == .tabs { return selected?.isSessionEntry == true }
+        if view == .agents { return selected?.kind == "agent" }
         return !target.isEmpty
     }
     var canCreate: Bool { contextReady && !busy && !loading && !basePickerPresented && !targetPickerPresented && previewReady && validationError == nil && destination != nil && !branch.isEmpty && !base.isEmpty && !target.isEmpty && createdPath == nil }
-    var canSubmitForm: Bool { contextReady && !basePickerPresented && (canCreate || (!busy && createdPath != nil && !target.isEmpty)) }
+    var canSubmitForm: Bool { contextReady && !backendIsClosed && !basePickerPresented && (canCreate || (!busy && createdPath != nil && !target.isEmpty)) }
     var heading: String {
         switch view {
-        case .tabs: return "Sessions"
+        case .agents: return "Agents"
         case .repos:
             switch page {
             case .directories: return "Open directory"
@@ -140,6 +214,7 @@ final class PickerModel: ObservableObject {
     // the current palette stays; RaptorApplication seeds it from the system
     // appearance before any picker opens.
     private func loadTheme() {
+        guard !themeLoaded, themeTask == nil else { return }
         themeTask = Task { [weak self] in
             let result = try? await self?.backend.request("theme", params: [:])
             guard let self, !self.closed, !Task.isCancelled else { return }
@@ -153,10 +228,64 @@ final class PickerModel: ObservableObject {
 
 
     /// Synchronous open boundary: reset origin state before the panel is shown.
-    /// Only global directory results survive. The returned token owns completion.
+    /// Same-origin warm lists remain usable; changed origins keep only
+    /// display-only global directories. The returned token owns completion.
     @discardableResult
     func prepareReconfigure(_ options: LaunchOptions) -> Int {
+        reconfigureGeneration += 1
+        let token = reconfigureGeneration
+        if createdPath != nil {
+            // Keep the backend origin, repo, target and createParent together.
+            // Reopening must neither cancel a mutation nor turn recovery into
+            // another create (even when the incoming request is unrelated).
+            warmReconfigure = token
+            if !busy, !self.options.matches(options) {
+                let warning = "Recover the created worktree in its original context, or discard recovery before opening another picker."
+                if error?.hasPrefix(warning) != true {
+                    error = warning + (error.map { " \($0)" } ?? "")
+                }
+            }
+            return token
+        }
         saveListPosition()
+        agentOrder.removeAll()
+        agentGroups.removeAll()
+        let sameContext = self.options.session == options.session && self.options.block == options.block
+            && self.options.client == options.client && self.options.title == options.title
+            && self.options.demo == options.demo
+        let directories = CacheKey(view: .repos, page: .directories, repo: nil, query: "")
+        let agentsQuery = view == .agents ? query : (viewQueries[.agents] ?? "")
+        let agents = CacheKey(view: .agents, page: .directories, repo: nil, query: agentsQuery)
+        let warmAgents = options.mode == "agents" && cache[agents] != nil
+        let cachedDirectories = cache[directories]
+        let warmDirectories = options.mode == "dirs" && !(cachedDirectories?.result.items ?? []).isEmpty
+            && !(cachedDirectories?.target ?? "").isEmpty
+            && cachedDirectories?.result.targets?.contains(cachedDirectories?.target ?? "") == true
+        if sameContext, contextReady, !closed, !busy, warmDirectories || warmAgents {
+            // The same origin needs no context RPC. Directory opens also keep
+            // any refresh already serving this key; Agents start a new order.
+            warmReconfigure = token
+            changingContext = true
+            self.options = options
+            viewQueries[view] = query
+            view = Self.initialView(for: options); page = .directories; repo = options.repo
+            query = warmAgents ? agentsQuery : ""
+            viewQueries[view] = query
+            previewGeneration += 1
+            previewTask?.cancel()
+            suggestedBranch = nil
+            branches = []; base = ""; resetBranchDefault()
+            destination = nil; destinationRoot = nil; previewReady = false; validationError = nil
+            createdPath = nil; splitMode = false; error = nil; notice = nil
+            removalCandidate = nil
+            basePickerPresented = false; targetPickerPresented = false
+            changingContext = false
+            // Agents take fresh newest-first order once per presentation.
+            // Directory opens retain the existing no-RPC warm fast path.
+            scheduleQuery(immediate: true, reuseFresh: !warmAgents)
+            return token
+        }
+        warmReconfigure = nil
         contextGeneration += 1
         contextReady = false
         changingContext = true
@@ -170,26 +299,27 @@ final class PickerModel: ObservableObject {
         activeKey = nil
         refreshing = false
         previewGeneration += 1
-        previewTask?.cancel(); operationTask?.cancel(); themeTask?.cancel()
+        previewTask?.cancel(); operationTask?.cancel()
         busy = false
         items = []; selectedID = nil; scrollID = nil
         targets = []; target = ""
-        branches = []; base = ""; branch = ""
+        suggestedBranch = nil
+        branches = []; base = ""; resetBranchDefault()
         destination = nil; destinationRoot = nil; previewReady = false; validationError = nil
         viewQueries.removeAll()
         loading = true
         self.options = options
         closed = false
-        view = .repos
+        view = Self.initialView(for: options)
         page = options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories)
         repo = options.repo
+        createParent = .worktrees
         query = ""
         splitMode = false
         error = nil
         notice = nil
         createdPath = nil
         removalCandidate = nil
-        renameCandidate = nil; renameLabel = nil
         basePickerPresented = false
         targetPickerPresented = false
         changingContext = false
@@ -202,12 +332,12 @@ final class PickerModel: ObservableObject {
             loading = false
         }
         refreshing = true
-        return contextGeneration
+        return token
     }
 
     /// Failure leaves every action gated; cached rows remain display-only.
     func completeReconfigure(_ context: Int) async {
-        guard context == contextGeneration, !closed else { return }
+        guard context == reconfigureGeneration, !closed, warmReconfigure != context else { return }
         let options = self.options
         do {
             _ = try await backend.request("context", params: [
@@ -215,13 +345,13 @@ final class PickerModel: ObservableObject {
                 "client": .text(options.client), "title": .text(options.title),
             ])
             try Task.checkCancellation()
-            guard context == contextGeneration, !closed else { return }
+            guard context == reconfigureGeneration, !closed else { return }
             contextReady = true
             started = true
             loadTheme()
             scheduleQuery(immediate: true)
         } catch {
-            guard context == contextGeneration, !closed else { return }
+            guard context == reconfigureGeneration, !closed else { return }
             loading = false
             refreshing = false
             self.error = "Cannot set picker context. Close and reopen. \(error.localizedDescription)"
@@ -233,11 +363,19 @@ final class PickerModel: ObservableObject {
     }
 
     func switchView(backward: Bool = false) {
-        guard contextReady else { return }
-        guard !busy, page != .create, page != .repositories else { return }
+        let views = ViewKind.allCases
+        let index = views.firstIndex(of: view) ?? 0
+        selectView(views[(index + (backward ? views.count - 1 : 1)) % views.count])
+    }
+
+    func selectView(_ desired: ViewKind) {
+        guard contextReady, desired != view else { return }
+        guard !busy, page != .create, page != .repositories,
+              removalCandidate == nil,
+              !basePickerPresented, !targetPickerPresented else { return }
         saveListPosition()
         viewQueries[view] = query
-        view = view == .repos ? .tabs : .repos
+        view = desired
         changingContext = true
         query = viewQueries[view] ?? ""
         changingContext = false
@@ -253,7 +391,7 @@ final class PickerModel: ObservableObject {
     func openNumbered(_ number: Int) {
         guard contextReady else { return }
         guard number >= 1, number <= items.count, !busy, !loading else { return }
-        guard view == .tabs || page == .directories || page == .worktrees else { return }
+        guard view != .repos || page == .directories || page == .worktrees else { return }
         selectedID = items[number - 1].id
         choose()
     }
@@ -269,54 +407,15 @@ final class PickerModel: ObservableObject {
         }
     }
 
-    func requestCloseEntry() {
-        guard contextReady else { return }
-        guard view == .tabs, !busy, let selected, selected.isSessionEntry else { return }
-        removalCandidate = selected
-    }
+    /// Hide only. An issued mutation must finish in its original context.
+    func dismiss() { onDismiss?() }
 
-    func confirmCloseEntry() {
-        guard contextReady else { return }
-        guard view == .tabs, !busy, let candidate = removalCandidate, candidate.isSessionEntry else { return }
-        removalCandidate = nil
-        perform {
-            _ = try await self.request("sessions.close", params: [
-                "kind": .text(candidate.kind ?? "window"),
-                "session_id": .text(candidate.sessionID ?? candidate.path),
-                "window_id": .text(candidate.kind == "window" ? candidate.path : ""),
-            ])
-            self.invalidateLists()
-            self.scheduleQuery(immediate: true)
-        }
-    }
-
-    func beginRename() {
-        guard contextReady else { return }
-        guard view == .tabs, !busy, let selected, selected.isSessionEntry else { return }
-        renameCandidate = selected
-        renameLabel = selected.label ?? ""
-    }
-
-    func commitRename() {
-        guard contextReady else { return }
-        guard let candidate = renameCandidate, !busy, let label = renameLabel, !label.isEmpty else { return }
-        renameCandidate = nil
-        perform {
-            _ = try await self.request("sessions.rename", params: [
-                "kind": .text(candidate.kind ?? "window"),
-                "session_id": .text(candidate.sessionID ?? candidate.path),
-                "window_id": .text(candidate.kind == "window" ? candidate.path : ""),
-                "label": .text(label),
-            ])
-            self.invalidateLists()
-            self.scheduleQuery(immediate: true)
-        }
-    }
-
-    func cancelRename() { renameCandidate = nil; renameLabel = nil }
     func close() {
         guard !closed else { return }
         closed = true
+        // Successful jump/dispatch closes inside perform. Its context-bound
+        // defer cannot clear busy after this generation changes.
+        busy = false
         contextGeneration += 1
         queryTask?.cancel(); previewTask?.cancel(); operationTask?.cancel(); themeTask?.cancel()
         onAdvanceFormFocus = nil; onFocusSearch = nil
@@ -324,23 +423,37 @@ final class PickerModel: ObservableObject {
         onClose?()
     }
 
-    private func scheduleQuery(immediate: Bool = false) {
+    private func scheduleQuery(immediate: Bool = false, reuseFresh: Bool = false, freshQuery: Bool = false) {
         guard !closed, !changingContext, contextReady else { return }
         saveListPosition()
+        let key = cacheKey
+        // A warm reopen must not cancel and requeue the same pipe request.
+        if reuseFresh, refreshing, queryKey == key, activeKey == key { return }
         generation += 1
         let token = generation
         queryTask?.cancel()
-        let key = cacheKey
+        queryKey = nil
         let cached = page == .create ? nil : cache[key]
         activeKey = cached == nil ? nil : key
-        items = cached?.result.items ?? []
+        items = orderedAgents(cached?.result.items ?? [], key: key, capture: cached != nil && !freshQuery)
         selectedID = cached?.selectedID ?? items.first?.id
         scrollID = cached?.scrollID
         if let cached {
             targets = cached.result.targets ?? []
             target = cached.target
+            if view == .repos, page == .worktrees {
+                suggestedBranch = cached.result.suggestedBranch
+                destinationRoot = cached.result.destinationRoot
+                branches = cached.result.branches ?? []
+                base = cached.result.baseBranch ?? branches.first ?? ""
+            }
         }
         loading = cached == nil
+        if reuseFresh, let cached, Date().timeIntervalSince(cached.refreshedAt) < cacheTTL {
+            refreshing = false
+            return
+        }
+        queryKey = key
         refreshing = true
         splitMode = false
         error = nil
@@ -355,8 +468,8 @@ final class PickerModel: ObservableObject {
                 try Task.checkCancellation()
                 var params: [String: APIValue] = ["query": .text(currentQuery)]
                 let method: String
-                if currentView == .tabs {
-                    method = "sessions"
+                if currentView == .agents {
+                    method = "agents"
                 } else if currentPage == .worktrees || currentPage == .create {
                     method = "worktrees.list"
                     if let currentRepo { params["repo"] = .text(currentRepo) }
@@ -372,7 +485,7 @@ final class PickerModel: ObservableObject {
                     return
                 }
                 let previous = self.selectedID
-                self.items = currentPage == .create ? [] : (result.items ?? [])
+                self.items = currentPage == .create ? [] : self.orderedAgents(result.items ?? [], key: key)
                 self.selectedID = self.items.contains { $0.id == previous } ? previous : self.items.first?.id
                 if let targets = result.targets { self.targets = targets }
                 if !self.targets.contains(self.target) { self.target = result.target ?? self.targets.first ?? "" }
@@ -380,7 +493,11 @@ final class PickerModel: ObservableObject {
                     self.repo = result.repo ?? currentRepo
                     self.destinationRoot = result.destinationRoot
                     self.branches = result.branches ?? []
-                    self.base = result.baseBranch ?? self.branches.first ?? ""
+                    self.suggestedBranch = result.suggestedBranch
+                    if currentPage != .create || self.base.isEmpty {
+                        self.base = result.baseBranch ?? self.branches.first ?? ""
+                    }
+                    if currentPage == .create { self.applyBranchDefault() }
                 }
                 if !self.items.contains(where: { $0.id == self.scrollID }) { self.scrollID = nil }
                 self.loading = false
@@ -408,7 +525,12 @@ final class PickerModel: ObservableObject {
         queryTask?.cancel(); previewTask?.cancel()
         saveListPosition()
         activeKey = nil
+        if newPage == .create {
+            base = ""; branches = []; createdPath = nil
+            resetBranchDefault()
+        }
         page = newPage
+        if newPage == .create { applyBranchDefault() }
         items = []; selectedID = nil; scrollID = nil; splitMode = false
         error = nil; notice = nil
         changingContext = true
@@ -428,7 +550,7 @@ final class PickerModel: ObservableObject {
 
     func cycleTarget(backward: Bool) {
         guard contextReady else { return }
-        guard !busy, page != .repositories, !targets.isEmpty else { return }
+        guard view == .repos, !busy, page != .repositories, !targets.isEmpty else { return }
         let index = targets.firstIndex(of: target) ?? 0
         target = targets[(index + (backward ? targets.count - 1 : 1)) % targets.count]
     }
@@ -446,8 +568,9 @@ final class PickerModel: ObservableObject {
     func choose() {
         guard contextReady else { return }
         guard !busy, !loading, let selected else { return }
-        if view == .tabs {
-            jump(selected)
+        if view == .agents {
+            guard canOpen else { return }
+            jumpAgent(selected)
         } else if page == .repositories {
             repo = selected.path
             navigate(options.mode == "wt-create" ? .create : .worktrees)
@@ -456,12 +579,11 @@ final class PickerModel: ObservableObject {
         }
     }
 
-    private func jump(_ entry: PickerItem) {
+    private func jumpAgent(_ entry: PickerItem) {
+        guard let session = entry.sessionID, let window = entry.windowID, let block = entry.blockID else { return }
         perform {
-            _ = try await self.request("sessions.jump", params: [
-                "kind": .text(entry.kind ?? "window"),
-                "session_id": .text(entry.sessionID ?? entry.path),
-                "window_id": .text(entry.kind == "window" ? entry.path : ""),
+            _ = try await self.request("agents.jump", params: [
+                "session_id": .text(session), "window_id": .text(window), "block_id": .text(block),
             ])
             if self.options.demo {
                 self.notice = "Demo only: jumped to \(entry.label ?? entry.path). No Rex call."
@@ -471,19 +593,18 @@ final class PickerModel: ObservableObject {
 
     func showWorktrees() {
         guard contextReady else { return }
-        guard !busy, !loading, page == .directories else { return }
+        guard view == .repos, !busy, !loading, page == .directories else { return }
         repo = selected?.path
         navigate(.worktrees)
     }
 
     func beginCreate() {
-        guard contextReady else { return }
+        guard view == .repos, contextReady else { return }
         guard !busy, !loading else { return }
         if page == .directories {
             guard let selected else { return }
             createParent = .directories
             repo = selected.path
-            branch = ""
             navigate(.create)
             return
         }
@@ -497,39 +618,83 @@ final class PickerModel: ObservableObject {
         page = .create
         splitMode = false
         error = nil; notice = nil; createdPath = nil
-        branch = ""
+        resetBranchDefault()
+        applyBranchDefault()
         schedulePreview()
     }
 
+    /// Forget only the recovery UI, never remove the created worktree.
+    /// Disable actions until the next request installs its own context.
+    func discardCreatedRecovery() {
+        guard !busy, createdPath != nil else { return }
+        createdPath = nil
+        previewReady = false
+        destination = nil
+        error = nil
+        notice = nil
+        contextReady = false
+        dismiss()
+    }
+
     func escape() {
-        if !contextReady { close(); return }
-        guard removalCandidate == nil, !busy else { return }
-        if renameCandidate != nil { cancelRename(); return }
+        if busy || !contextReady || (createdPath != nil && notice == nil) { dismiss(); return }
+        // Demo dispatch succeeded and stays visible only to show its notice.
+        if createdPath != nil { createdPath = nil }
+        guard removalCandidate == nil else { return }
         if basePickerPresented { basePickerPresented = false; return }
         if targetPickerPresented { targetPickerPresented = false; return }
         if splitMode { splitMode = false; return }
-        if view == .tabs {
-            if !query.isEmpty { query = "" } else { switchView() }
+        if view != .repos || page == .directories {
+            dismiss()
             return
         }
         if page == .create {
-            if options.mode == "wt-create" { close() } else { navigate(createParent) }
+            if options.mode == "wt-create" { dismiss() } else { navigate(createParent) }
         } else if !query.isEmpty {
             query = ""
         } else if page == .worktrees || page == .repositories {
             navigate(.directories)
-        } else { close() }
+        } else { dismiss() }
     }
 
     func split(_ direction: String) {
-        guard splitMode, canOpen, page != .repositories, let selected else { return }
+        guard view == .repos, splitMode, canOpen, page != .repositories, let selected else { return }
         splitMode = false
         dispatch(path: selected.path, target: direction)
     }
 
     func toggleSplit() {
-        guard canOpen, page == .directories || page == .worktrees else { return }
+        guard view == .repos, canOpen, page == .directories || page == .worktrees else { return }
         splitMode.toggle()
+    }
+
+    // Record even an explicit empty edit before metadata arrives.
+    func editBranch(_ value: String) {
+        branchWasEdited = true
+        branch = value
+    }
+
+    private func resetBranchDefault() {
+        settingBranchDefault = true
+        branch = ""
+        settingBranchDefault = false
+        branchWasEdited = false
+        branchDefaultApplied = false
+    }
+
+    private func applyBranchDefault() {
+        guard !branchWasEdited, !branchDefaultApplied, branch.isEmpty,
+              let suggestedBranch, !suggestedBranch.isEmpty else { return }
+        branchDefaultApplied = true
+        settingBranchDefault = true
+        branch = suggestedBranch
+        settingBranchDefault = false
+    }
+
+    // Never queue Enter for a pending preview.
+    func submitBranch() {
+        guard page == .create, canSubmitForm else { return }
+        create()
     }
 
     private func schedulePreview() {
@@ -580,13 +745,13 @@ final class PickerModel: ObservableObject {
 
     func askRemove() {
         guard contextReady else { return }
-        guard !busy, !loading, page == .worktrees, let selected, selected.isMain == false else { return }
+        guard view == .repos, !busy, !loading, page == .worktrees, let selected, selected.isMain == false else { return }
         removalCandidate = selected
     }
 
     func confirmRemove(_ candidate: PickerItem) {
         guard contextReady else { return }
-        guard let repo, !busy, page == .worktrees, candidate.isMain == false else { return }
+        guard view == .repos, let repo, !busy, page == .worktrees, candidate.isMain == false else { return }
         removalCandidate = nil
         perform {
             _ = try await self.request("worktrees.remove", params: ["repo": .text(repo), "path": .text(candidate.path)])
@@ -597,7 +762,7 @@ final class PickerModel: ObservableObject {
 
     func openCreated() {
         guard contextReady else { return }
-        guard !busy, let path = createdPath, !target.isEmpty else { return }
+        guard !busy, !backendIsClosed, let path = createdPath, !target.isEmpty else { return }
         dispatch(path: path, target: target)
     }
 
@@ -610,7 +775,10 @@ final class PickerModel: ObservableObject {
         invalidateLists()
         if options.demo {
             notice = "Demo only: opened \(PathDisplay.abbreviate(path, home: "/Users/demo")) → \(Self.targetLabel(target)). No Rex call."
-        } else { close() }
+        } else {
+            createdPath = nil // Dispatch succeeded: no recovery remains to preserve.
+            close()
+        }
     }
 
     private func perform(_ operation: @escaping @MainActor () async throws -> Void) {

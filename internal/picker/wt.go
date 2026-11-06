@@ -21,33 +21,36 @@ import (
 type worktree = worktreepkg.Worktree
 
 type wtModel struct {
-	cfg           config.Config
-	ctx           rex.Ctx
-	repo          string
-	root          string
-	rows          []worktree
-	view          []int
-	filter        string
-	sel           int
-	width, height int
-	err           string
-	form          bool
-	closeOnCancel bool // Direct form launch has no parent list.
-	loading       bool // Repository metadata loads after the first form render.
-	field         int  // branch, base chooser, open target, create button
-	errField      int  // -1 for a general error
-	baseSelecting bool
-	baseQuery     string
-	baseSel       int
-	branch        string
-	base          string
-	branches      []string
-	confirm       bool
-	busy          bool
-	splitMode     bool
-	target        string
-	action        string
-	chosen        *worktree
+	cfg             config.Config
+	ctx             rex.Ctx
+	repo            string
+	root            string
+	rows            []worktree
+	view            []int
+	filter          string
+	sel             int
+	width, height   int
+	err             string
+	form            bool
+	closeOnCancel   bool // Direct form launch has no parent list.
+	loading         bool // Repository metadata loads after the first form render.
+	field           int  // branch, base chooser, open target, create button
+	errField        int  // -1 for a general error
+	baseSelecting   bool
+	baseQuery       string
+	baseSel         int
+	branch          string
+	branchEdited    bool // Includes clearing the input while metadata loads.
+	branchPrefilled bool
+	suggestedBranch string
+	base            string
+	branches        []string
+	confirm         bool
+	busy            bool
+	splitMode       bool
+	target          string
+	action          string
+	chosen          *worktree
 }
 type wtCreatedMsg struct {
 	path string
@@ -60,7 +63,10 @@ type wtLoadedMsg struct {
 	err  error
 }
 
-const returnToDirectories = -1
+const (
+	returnToDirectories = -1
+	returnToAgents      = -2
+)
 
 func RunCreateWorktree(ctx rex.Ctx, cfg config.Config, repo string) int {
 	return runWorktreePicker(ctx, cfg, repo, false, true)
@@ -88,37 +94,50 @@ func runWorktreePicker(ctx rex.Ctx, cfg config.Config, repo string, fromDirector
 		}
 		m = newWtModel(ctx, cfg, repo)
 	}
-	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	model := final.(*wtModel)
-	if model.action == "choose-repo" {
-		repo = pickRepo(ctx, cfg)
-		if repo == "" {
-			return 0
-		}
-		return runWorktreePicker(ctx, cfg, repo, fromDirectories, create)
-	}
-	if model.action == "back" {
-		if fromDirectories {
-			return returnToDirectories
-		}
-		return RunDirs(ctx, cfg)
-	}
-	if model.chosen != nil {
-		if err := dispatch.Dispatch(model.target, model.chosen.Path, ctx, cfg); err != nil {
+	for {
+		final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
+		model := final.(*wtModel)
+		if model.action == "choose-repo" {
+			repo = pickRepo(ctx, cfg)
+			if repo == "" {
+				return 0
+			}
+			if create {
+				m = model.continueCreate(repo)
+			} else {
+				m = newWtModel(ctx, cfg, repo)
+			}
+			continue
+		}
+		if model.action == "agents" {
+			if fromDirectories {
+				return returnToAgents
+			}
+			return RunAgents(ctx, cfg)
+		}
+		if model.action == "back" {
+			if fromDirectories {
+				return returnToDirectories
+			}
+			return RunDirs(ctx, cfg)
+		}
+		if model.chosen != nil {
+			if err := dispatch.Dispatch(model.target, model.chosen.Path, ctx, cfg); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+		}
+		return 0
 	}
-	return 0
 }
 func newWtModel(ctx rex.Ctx, cfg config.Config, repo string) *wtModel {
 	info := catalog.ListWorktrees(repo, cfg)
 	m := &wtModel{ctx: ctx, cfg: cfg, repo: repo, branches: info.Branches, rows: info.Items,
-		root: info.Root, base: info.BaseBranch, errField: -1, target: cfg.Enter}
+		root: info.Root, base: info.BaseBranch, suggestedBranch: info.SuggestedBranch, errField: -1, target: cfg.Enter}
 	m.applyFilter()
 	return m
 }
@@ -133,6 +152,14 @@ func (m *wtModel) formTargets() config.Config {
 func newCreateModel(ctx rex.Ctx, cfg config.Config, repo string, closeOnCancel bool) *wtModel {
 	return &wtModel{ctx: ctx, cfg: cfg, repo: repo, form: true, loading: true,
 		closeOnCancel: closeOnCancel, errField: -1, target: cfg.Enter}
+}
+
+func (m *wtModel) continueCreate(repo string) *wtModel {
+	next := newCreateModel(m.ctx, m.cfg, repo, m.closeOnCancel)
+	if m.branchEdited {
+		next.branch, next.branchEdited = m.branch, true
+	}
+	return next
 }
 
 func (m *wtModel) Init() tea.Cmd {
@@ -226,6 +253,14 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.repo, m.root = msg.repo, msg.info.Root
 		m.rows, m.branches, m.base = msg.info.Items, msg.info.Branches, msg.info.BaseBranch
+		m.suggestedBranch = msg.info.SuggestedBranch
+		if m.form && !m.branchPrefilled {
+			if !m.branchEdited {
+				m.branch = m.suggestedBranch
+			}
+			m.branchPrefilled = true
+			m.suggestedBranch = ""
+		}
 		m.applyFilter()
 	case wtCreatedMsg:
 		m.busy = false
@@ -260,8 +295,8 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			// Branch input is safe before metadata arrives; Git actions are not.
-			if m.field == 0 {
-				editQuery(&m.branch, msg)
+			if m.field == 0 && editQuery(&m.branch, msg) {
+				m.branchEdited = true
 			}
 			return m, nil
 		}
@@ -329,6 +364,10 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if key == "ctrl+a" && !m.form {
+			m.action = "agents"
+			return m, tea.Quit
+		}
 		if m.form {
 			switch key {
 			case "ctrl+o":
@@ -352,14 +391,6 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.field = 3
 					return m, nil
 				}
-				if m.field == 0 {
-					if err := worktreepkg.ValidateNewBranch(m.repo, m.branch); err != nil {
-						m.err, m.errField = err.Error(), 0
-						return m, nil
-					}
-					m.field = 1
-					return m, nil
-				}
 				if m.field == 1 {
 					m.openBaseChooser()
 					return m, nil
@@ -378,6 +409,7 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				if m.field == 0 {
 					if editQuery(&m.branch, msg) {
+						m.branchEdited = true
 						m.err, m.errField = "", -1
 					}
 				} else if m.field == 1 && (msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace) {
@@ -410,7 +442,12 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+n", "f2":
 			m.form = true
 			m.field = 0
-			m.branch = ""
+			m.branch = m.suggestedBranch
+			m.suggestedBranch = ""
+			if m.branch == "" {
+				m.branch, _ = worktreepkg.SuggestTaskName(m.repo, m.cfg)
+			}
+			m.branchEdited, m.branchPrefilled = false, true
 			m.err, m.errField = "", -1
 		case "ctrl+x", "delete":
 			if r := m.selected(); r != nil {
@@ -542,7 +579,7 @@ func (m *wtModel) View() string {
 			formButton = pickerAccent.Bold(true).Render("▸ Create")
 		}
 		footerRows++
-		footer = "Tab next · ^o target · ↵ select · esc back"
+		footer = "Tab next · ^o target · ↵ create/select · esc back"
 		if width < 40 {
 			footer = "tab · ^o · ↵ · esc"
 		}

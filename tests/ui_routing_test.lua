@@ -15,6 +15,7 @@ local function check(case)
 	end
 	rex = {
 		action = function(action)
+			if action.name == "raptor_agents" then assert(action.title == "Open Agents") end
 			actions[action.name] = action.run
 		end,
 		call = function(method, args)
@@ -83,8 +84,8 @@ local function check(case)
 	assert(actions.raptor_create == nil, "Legacy create must not clutter the palette")
 	local ctx = { session_id = "session:demo&safe", block_id = "block:demo space", client_id = "demo-client" }
 	if case.function_binding then ctx.client_id = nil end
-	for _, mode in ipairs({ "dirs", "wt", "wt-create" }) do
-		local action = ({ dirs = "raptor", wt = "raptor_worktree_list", ["wt-create"] = "raptor_worktree_new" })[mode]
+	for _, mode in ipairs({ "dirs", "agents", "wt", "wt-create" }) do
+		local action = ({ dirs = "raptor", agents = "raptor_agents", wt = "raptor_worktree_list", ["wt-create"] = "raptor_worktree_new" })[mode]
 		local ok, result = pcall(actions[action], ctx, {})
 		if case.expected_error then
 			assert(not ok and tostring(result):find("GUI requested", 1, true), case.name .. ": expected GUI error")
@@ -140,6 +141,14 @@ local function check(case)
 	actions.raptor_worktree_new(ctx)
 	assert(#layers == layer_count, "Ctrl+N inside a picker must not nest layers")
 	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+n")
+	local execution_count = #executions
+	local queue_count = #queued
+	local agents_result = actions.raptor_agents(ctx)
+	assert(agents_result.ui == "terminal")
+	assert(#layers == layer_count, "Ctrl+A inside a picker must not nest layers")
+	assert(#executions == execution_count, "Ctrl+A inside a picker must not launch native UI")
+	assert(#queued == queue_count + 1, "Ctrl+A must forward exactly once")
+	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+a")
 	if case.ui ~= "gui" and (case.platform ~= "macos" or case.kind == "cli" or case.ui == "terminal" or (not case.installed and not case.host_running) or case.transport == "tls") then
 		for _, ok in ipairs(native_results) do
 			assert(not ok, case.name .. ": native process unexpectedly started")
@@ -157,6 +166,8 @@ for _, case in ipairs({
 	{ name = "iPhone", platform = "ios", installed = true, expected = "terminal" },
 	{ name = "iPhone function binding without client ID", platform = "ios", installed = true, function_binding = true, expected = "terminal" },
 	{ name = "iPad", platform = "ipados", installed = true, expected = "terminal" },
+	{ name = "iPad function binding without client ID", platform = "ipados", installed = true, function_binding = true, expected = "terminal" },
+	{ name = "remote Mac function binding without client ID", platform = "macos", transport = "tls", installed = true, function_binding = true, expected = "terminal" },
 	{ name = "unknown client", installed = true, expected = "terminal" },
 	{ name = "missing app", platform = "macos", expected = "terminal" },
 	{ name = "launch failed", platform = "macos", installed = true, launch_failure = true, expected = "terminal" },

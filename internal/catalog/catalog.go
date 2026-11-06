@@ -13,9 +13,11 @@ import (
 )
 
 type Directory struct {
-	Path   string `json:"path"`
-	Label  string `json:"label"`
-	Pinned bool   `json:"is_pinned,omitempty"`
+	Path    string `json:"path"`
+	Label   string `json:"label"`
+	Pinned  bool   `json:"is_pinned,omitempty"`
+	State   string `json:"state,omitempty"`
+	Working bool   `json:"working,omitempty"`
 }
 
 func Directories(reposOnly bool) []Directory {
@@ -145,14 +147,17 @@ func ResolveRepo(ctx rex.Ctx, repo string) (string, error) {
 }
 
 type Worktrees struct {
-	Items      []worktree.Worktree
-	Branches   []string
-	BaseBranch string
-	Root       string
+	Items           []worktree.Worktree
+	Branches        []string
+	BaseBranch      string
+	SuggestedBranch string
+	Root            string
 }
 
 func ListWorktrees(repo string, cfg config.Config) Worktrees {
 	info := Worktrees{Items: worktree.List(repo), Branches: worktree.LocalBranches(repo)}
+	// Suggestions are read-only and optional; unavailable names must not hide trees.
+	info.SuggestedBranch, _ = worktree.SuggestTaskName(repo, cfg)
 	primary := repo
 	if len(info.Items) > 0 {
 		primary = info.Items[0].Path

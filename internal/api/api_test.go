@@ -192,6 +192,77 @@ func fixtureRepo(t *testing.T) string {
 	return worktree.RepoRoot(repo)
 }
 
+func TestWorktreeListSuggestedBranch(t *testing.T) {
+	repo := fixtureRepo(t)
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.WorktreeRoot = filepath.Join(root, "not-created")
+	call := client(t, New(rex.Ctx{}, cfg))
+	beforeBranches, beforeTrees := worktree.LocalBranches(repo), worktree.List(repo)
+	var wire map[string]json.RawMessage
+	if err := call("worktrees.list", map[string]any{"repo": repo, "query": "no-matching-worktree"}, &wire); err != "" {
+		t.Fatal(err)
+	}
+	var name string
+	if err := json.Unmarshal(wire["suggested_branch"], &name); err != nil || name == "" {
+		t.Fatalf("missing suggested_branch: %v %v", wire, err)
+	}
+	parts := strings.Split(name, "-")
+	if len(parts) != 2 || parts[0] == parts[1] {
+		t.Fatalf("not two distinct words: %q", name)
+	}
+	if err := worktree.Validate(repo, name, "main", worktree.Path(repo, name, cfg)); err != nil {
+		t.Fatalf("unavailable suggestion: %v", err)
+	}
+	if !reflect.DeepEqual(beforeBranches, worktree.LocalBranches(repo)) || !reflect.DeepEqual(beforeTrees, worktree.List(repo)) {
+		t.Fatal("list claimed a name or created a worktree")
+	}
+	if _, err := os.Lstat(cfg.WorktreeRoot); !os.IsNotExist(err) {
+		t.Fatalf("list created destination: %v", err)
+	}
+	// The suggestion is not reserved; create still rejects a later collision.
+	if _, err := worktree.GitOut(repo, "branch", name); err != nil {
+		t.Fatal(err)
+	}
+	if err := call("worktrees.create", map[string]any{"repo": repo, "branch": name, "base": "main"}, nil); !strings.Contains(err, "already exists") {
+		t.Fatalf("stale suggestion bypassed validation: %s", err)
+	}
+}
+
+func TestWorktreeListOmitsUnavailableSuggestion(t *testing.T) {
+	for _, scenario := range []string{"no-repo", "unborn", "destination-error"} {
+		t.Run(scenario, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.WorktreeRoot = t.TempDir()
+			params := map[string]any{}
+			if scenario == "unborn" {
+				repo := t.TempDir()
+				if _, err := worktree.GitOut(repo, "init", "-b", "main"); err != nil {
+					t.Fatal(err)
+				}
+				params["repo"] = repo
+			} else if scenario == "destination-error" {
+				params["repo"] = fixtureRepo(t)
+				cfg.WorktreeRoot = filepath.Join(cfg.WorktreeRoot, "loop")
+				if err := os.Symlink(cfg.WorktreeRoot, cfg.WorktreeRoot); err != nil {
+					t.Fatal(err)
+				}
+			}
+			call := client(t, New(rex.Ctx{}, cfg))
+			var result map[string]json.RawMessage
+			if err := call("worktrees.list", params, &result); err != "" {
+				t.Fatal(err)
+			}
+			if _, exists := result["suggested_branch"]; exists {
+				t.Fatalf("empty suggestion must be omitted: %v", result)
+			}
+			if result["items"] == nil || result["branches"] == nil || result["destination_root"] == nil {
+				t.Fatalf("normal metadata lost: %v", result)
+			}
+		})
+	}
+}
+
 func TestWorktreeLifecycle(t *testing.T) {
 	repo := fixtureRepo(t)
 	cfg := config.Default()

@@ -102,6 +102,8 @@ private actor SlowDirectoryBackend: BackendClient {
 private actor CachedListBackend: BackendClient {
     private var pending: [String: [CheckedContinuation<APIResult, Error>]] = [:]
     private var calls: [String] = []
+    private var lastParams: [String: [String: APIValue]] = [:]
+    func parameters(_ method: String) -> [String: APIValue] { lastParams[method] ?? [:] }
     private var held: Set<String> = []
     func hold(_ method: String) { held.insert(method) }
     nonisolated func close() {}
@@ -115,7 +117,8 @@ private actor CachedListBackend: BackendClient {
     }
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         calls.append(method)
-        if ["directories", "sessions", "worktrees.list"].contains(method) || held.contains(method) {
+        lastParams[method] = params
+        if ["directories", "sessions", "agents", "worktrees.list"].contains(method) || held.contains(method) {
             return try await withCheckedThrowingContinuation { pending[method, default: []].append($0) }
         }
         return APIResult()
@@ -135,7 +138,7 @@ struct NativeChecks {
             _ = try LaunchOptions(arguments: ["--repo"])
             preconditionFailure("Missing argument accepted")
         } catch {}
-        for mode in ["WT-CREATE", "wt-create-extra", "wt-create ", ""] {
+        for mode in ["WT-CREATE", "wt-create-extra", "wt-create ", "AGENTS", "agents-extra", "agents ", ""] {
             do {
                 _ = try LaunchOptions(arguments: ["--mode", mode])
                 preconditionFailure("Invalid create mode accepted")
@@ -229,8 +232,16 @@ struct NativeChecks {
         compactList.close()
 
         try await directCreateChecks()
+        try await suggestedBranchChecks()
         try await residentChecks()
+        try launcherEscapeChecks()
+        try await agentsChecks()
+        try await directAgentsChecks()
+        try await stableAgentsChecks()
+        try await groupedActivityChecks()
         try await cachedListChecks()
+        try await warmReopenChecks()
+        try await dismissalChecks()
         let directoryCreate = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
         directoryCreate.start()
         try await wait { !directoryCreate.loading }
@@ -304,13 +315,13 @@ struct NativeChecks {
         retry.escape()
         precondition(!retry.basePickerPresented && retry.page == .create && retry.branch == "feat/demo",
                      "Escape must dismiss the branch popover without discarding the form")
-        retry.create(); retry.create()
+        retry.submitBranch(); retry.submitBranch()
         try await wait { !retry.busy }
         let firstCounts = await retryBackend.counts()
         precondition(firstCounts.0 == 1 && firstCounts.1 == 1 && retry.createdPath == "/demo/new-worktree")
         precondition(retry.error?.contains("Worktree created, but opening failed") == true && retry.canSubmitForm && !retry.canCreate)
         retry.cycleTarget(backward: false)
-        retry.create(); retry.create() // Retry the open step only, even after repeated submission.
+        retry.submitBranch(); retry.submitBranch() // Retry the open step only, even after repeated submission.
         try await wait { !retry.busy }
         let retriedCounts = await retryBackend.counts()
         let openedTargets = await retryBackend.targets()
@@ -326,43 +337,366 @@ struct NativeChecks {
         print("PASS: launch flags, decoding, repository fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
     }
 
+    @MainActor private static func groupedActivityChecks() async throws {
+        let json = #"{"path":"a","kind":"agent","state":"working","updated_at":"2026-01-02T03:04:05.123Z","cwd":"/repo","working":false}"#
+        var item = try JSONDecoder().decode(PickerItem.self, from: Data(json.utf8))
+        precondition(item.cwd == "/repo" && item.updatedDate != nil && item.activity.working)
+        let date = item.updatedDate!
+        precondition(item.updatedAge(now: date.addingTimeInterval(-100)) == "now")
+        precondition(item.updatedAge(now: date.addingTimeInterval(120)) == "2m")
+        precondition(item.updatedAge(now: date.addingTimeInterval(3600)) == "1h")
+        item.updatedAt = "2026-01-02T03:04:05Z"
+        precondition(item.updatedDate != nil)
+        item.updatedAt = nil
+        precondition(item.updatedAge() == nil)
+        let heartbeatOnly = try JSONDecoder().decode(PickerItem.self, from: Data(#"{"path":"legacy","metadata":{"heartbeat":"2026-01-02T03:04:05Z"}}"#.utf8))
+        precondition(heartbeatOnly.updatedAge() == nil, "Never use metadata heartbeat as updated_at")
+        item.updatedAt = "bad"
+        precondition(item.updatedAge() == nil)
+        for kind in ["session", "window", "directory"] {
+            item.kind = kind; item.state = "blocked"; item.working = true
+            precondition(item.activity == ActivityProjection(blocked: true, working: true))
+            precondition(item.activityAccessibility == "Blocked, Working")
+            precondition(item.activity.shouldPulse(reduceMotion: false, visible: true))
+            precondition(!item.activity.shouldPulse(reduceMotion: true, visible: true))
+            precondition(!item.activity.shouldPulse(reduceMotion: false, visible: false))
+            item.working = false
+            precondition(!item.activity.shouldPulse(reduceMotion: false, visible: true))
+        }
+        item.kind = "agent"; item.state = "idle"; item.working = true
+        precondition(!item.activity.working, "Agent activity must derive only from state")
+
+        let backend = CachedListBackend()
+        let options = try LaunchOptions(arguments: ["--demo", "--mode", "agents"])
+        let model = PickerModel(options: options, backend: backend)
+        func row(_ id: String, _ state: String) -> PickerItem {
+            PickerItem(path: id, label: id, kind: "agent", state: state)
+        }
+        let first = [row("b", "blocked"), row("w", "working"), row("i", "idle")]
+        model.start()
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: first))
+        try await wait { !model.refreshing }
+        precondition(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
+        precondition(model.agentSections.flatMap(\.items).map { model.numberedPosition(of: $0) } == [1, 2, 3])
+        let fullHeight = PickerStyle.height(for: model)
+        model.selectView(.repos)
+        try await pending("directories", backend)
+        await backend.reply("directories", APIResult(items: []))
+        try await wait { !model.refreshing }
+        model.selectView(.agents)
+        try await pending("agents", backend)
+        let fresh = [row("new", "blocked"), row("i", "blocked"), row("w", "working"), row("b", "idle")]
+        await backend.reply("agents", APIResult(items: fresh))
+        try await wait { !model.refreshing }
+        precondition(model.items.map(\.id) == ["b", "w", "i"])
+        precondition(model.items[0].state == "idle", "Live activity changes in place")
+        precondition(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
+        precondition(model.agentSections[0].items.map(\.id) == ["b"], "Snapshot membership stays fixed")
+        precondition(PickerStyle.height(for: model) == fullHeight)
+        let token = model.prepareReconfigure(options)
+        precondition(model.items.map(\.id) == fresh.map(\.id), "Next open uses raw cached backend order, including deferred records")
+        precondition(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
+        precondition(model.agentSections[0].items.map(\.id) == ["new", "i"])
+        await model.completeReconfigure(token)
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: fresh))
+        try await wait { !model.refreshing }
+        model.query = "filtered"
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [fresh[1], fresh[2]]))
+        try await wait { !model.refreshing }
+        precondition(model.agentSections.map(\.id) == ["Blocked", "Working"])
+        precondition(model.items.map(\.id) == ["i", "w"])
+        precondition(model.numberedPosition(of: model.items[1]) == 2)
+        precondition(PickerStyle.height(for: model) == fullHeight - PickerStyle.agentRowHeight - PickerStyle.agentGroupHeight - PickerStyle.agentGroupSpacing)
+        model.close()
+        print("PASS: native timestamps/ages, aggregate projections/pulse gates, snapshot groups, deferred records, raw cache reopen, search groups and header height/numbering")
+    }
+
+    @MainActor private static func stableAgentsChecks() async throws {
+        let options = try LaunchOptions(arguments: ["--demo"])
+        let backend = CachedListBackend()
+        let model = PickerModel(options: options, backend: backend)
+        let repos = APIResult(items: [PickerItem(path: "/repo")], targets: ["tab"], target: "tab")
+        func agent(_ id: String, _ label: String? = nil) -> PickerItem {
+            PickerItem(path: id, label: label ?? id, kind: "agent", sessionID: "s", app: "Pi", state: "idle", windowID: "w", blockID: id)
+        }
+        model.start()
+        try await pending("directories", backend)
+        await backend.reply("directories", repos)
+        try await wait { !model.refreshing }
+        model.selectView(.agents)
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [agent("b"), agent("a")]))
+        try await wait { !model.refreshing }
+        model.selectedID = "a"; model.scrollID = "a"
+
+        func refresh(_ rows: [PickerItem]) async throws {
+            model.selectView(.repos)
+            try await pending("directories", backend)
+            await backend.reply("directories", repos)
+            try await wait { !model.refreshing }
+            model.selectView(.agents)
+            precondition(!model.loading && model.canOpen, "Cached Agents must remain usable")
+            try await pending("agents", backend)
+            await backend.reply("agents", APIResult(items: rows))
+            try await wait { !model.refreshing }
+        }
+        try await refresh([agent("c"), agent("a", "Renamed"), agent("b")])
+        precondition(model.items.map(\.id) == ["b", "a"] && model.selectedID == "a" && model.scrollID == "a")
+        precondition(model.items[1].label == "Renamed", "Stable identity must still update row content")
+        model.openNumbered(1)
+        try await wait { !model.busy }
+        precondition(model.selectedID == "b", "Numbered targets must not move during refresh")
+        try await refresh([agent("d"), agent("c"), agent("a")])
+        precondition(model.items.map(\.id) == ["a"], "Remove gone records; defer all new records")
+        model.query = "ranked"
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [agent("d"), agent("a")]))
+        try await wait { !model.refreshing }
+        precondition(model.items.map(\.id) == ["d", "a"], "Search changes must use backend relevance")
+        model.query = ""
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [agent("d"), agent("c"), agent("a")]))
+        try await wait { !model.refreshing }
+        precondition(model.items.map(\.id) == ["d", "c", "a"], "Revisited search must also take fresh backend relevance")
+        try await refresh([agent("a"), agent("c"), agent("d")])
+        precondition(model.items.map(\.id) == ["d", "c", "a"], "Refresh after search must freeze the new relevance order")
+        let token = model.prepareReconfigure(options)
+        precondition(model.canOpen && !model.loading, "Warm open must remain synchronous")
+        await model.completeReconfigure(token)
+        model.selectView(.agents)
+        precondition(!model.loading && model.canOpen)
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [agent("a"), agent("c"), agent("d")]))
+        try await wait { !model.refreshing }
+        precondition(model.items.map(\.id) == ["a", "c", "d"], "New presentation must reset frozen order")
+        model.close()
+        print("PASS: stable Agents refresh identities, content, numbered targets, removal/deferred additions, search order, instant new-open reset")
+    }
+
+    @MainActor private static func directAgentsChecks() async throws {
+        let options = try LaunchOptions(arguments: ["--demo", "--mode", "agents", "--session", "S"])
+        let backend = CachedListBackend()
+        let model = PickerModel(options: options, backend: backend)
+        func agent(_ id: String) -> PickerItem {
+            PickerItem(path: id, kind: "agent", sessionID: "S", windowID: "W", blockID: id)
+        }
+        precondition(model.view == .agents && model.page == .directories && model.loading)
+        model.start()
+        try await pending("agents", backend)
+        let coldDirectories = await backend.count("directories")
+        precondition(coldDirectories == 0, "Cold Agents must not load directories")
+        await backend.reply("agents", APIResult(items: [agent("b"), agent("a")]))
+        try await wait { !model.refreshing }
+        model.query = "filtered"
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [agent("b"), agent("a")]))
+        try await wait { !model.refreshing }
+        model.selectedID = "a"; model.scrollID = "a"
+        model.selectView(.agents)
+        precondition(model.query == "filtered" && model.selectedID == "a" && model.shouldToggle(for: options))
+        let shortcutCalls = await backend.count("agents")
+        precondition(shortcutCalls == 2, "Active Agents shortcut must be idempotent")
+        model.selectView(.repos)
+        precondition(!model.shouldToggle(for: options), "A routed Agents request must not hide another view")
+        try await pending("directories", backend)
+        await backend.reply("directories", APIResult(items: []))
+        try await wait { !model.refreshing }
+        let token = model.prepareReconfigure(options)
+        precondition(model.view == .agents && model.contextReady && model.canOpen && !model.loading)
+        precondition(model.query == "filtered" && model.selectedID == "a" && model.scrollID == "a")
+        await model.completeReconfigure(token)
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [agent("a"), agent("b")]))
+        try await wait { !model.refreshing }
+        precondition(model.items.map(\.id) == ["b", "a"], "New presentation captures the latest raw cache at first display")
+        model.selectView(.repos)
+        try await pending("directories", backend)
+        await backend.reply("directories", APIResult(items: []))
+        try await wait { !model.refreshing }
+        model.selectView(.agents)
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [agent("b"), agent("a"), agent("c")]))
+        try await wait { !model.refreshing }
+        precondition(model.items.map(\.id) == ["b", "a"], "Freeze order and defer new records within a presentation")
+        model.askRemove(); model.beginCreate(); model.togglePin()
+        precondition(!model.busy && model.removalCandidate == nil)
+        for method in ["sessions", "context", "pins.toggle", "worktrees.remove", "sessions.close", "sessions.rename", "dispatch", "agents.jump"] {
+            let calls = await backend.count(method)
+            precondition(calls == 0, "Direct route must not issue unrelated actions: \(method)")
+        }
+        await backend.hold("context")
+        let changed = try LaunchOptions(arguments: ["--demo", "--mode", "agents", "--session", "changed"])
+        let changedToken = model.prepareReconfigure(changed)
+        precondition(model.view == .agents && model.items.isEmpty && model.loading && !model.contextReady && !model.canOpen)
+        model.choose(); model.openNumbered(1); model.selectView(.repos)
+        precondition(model.view == .agents && !model.busy)
+        let completion = Task { await model.completeReconfigure(changedToken) }
+        try await pending("context", backend)
+        let gatedAgents = await backend.count("agents")
+        precondition(gatedAgents == 4, "Agents must wait for context acknowledgement")
+        await backend.reply("context", APIResult())
+        await completion.value
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [agent("new")]))
+        try await wait { !model.refreshing }
+        precondition(model.canOpen && model.items.map(\.id) == ["new"] && model.query.isEmpty)
+        let totalDirectories = await backend.count("directories")
+        precondition(totalDirectories == 2, "Only explicit Repos visits may load directories")
+        model.close()
+
+        // The shortcut uses selectView; forms, confirmations and popovers keep ownership.
+        let guarded = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
+        guarded.busy = true; guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.busy = false; guarded.page = .create
+        guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.page = .directories; guarded.removalCandidate = PickerItem(path: "confirm")
+        guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.removalCandidate = nil; guarded.basePickerPresented = true
+        guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.basePickerPresented = false; guarded.targetPickerPresented = true
+        guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.targetPickerPresented = false; guarded.selectView(.agents)
+        precondition(guarded.view == .agents)
+        guarded.close()
+    }
+
+    @MainActor private static func agentsChecks() async throws {
+        let payload = Data("""
+        {"path":"record-unique","kind":"agent","label":"Plan","app":"Pi","state":"working","agent_id":"a","session_id":"s","session_label":"Project","window_id":"w","window_label":"Build","block_id":"b","active":true}
+        """.utf8)
+        let item = try JSONDecoder().decode(PickerItem.self, from: payload)
+        precondition(item.id == "record-unique" && item.agentID == "a" && item.windowID == "w" && item.blockID == "b")
+        precondition(item.app == "Pi" && item.state == "working" && item.windowLabel == "Build" && !item.isSessionEntry)
+        precondition(PickerStyle.agentRowHeight == 32 && PickerStyle.agentRowHeight == PickerStyle.rowHeight)
+        var compact = item
+        compact.label = ".dotfiles"; compact.sessionLabel = "personal"; compact.windowLabel = "dotfiles"
+        precondition(compact.agentContext == "personal")
+        compact.windowLabel = "namedtest"
+        precondition(compact.agentContext == "personal / namedtest")
+        compact.state = "idle"
+        precondition(compact.agentActivity == nil && !compact.agentAccessibility.lowercased().contains("idle") && !compact.agentHelp.lowercased().contains("idle"))
+        precondition(compact.agentAccessibility.contains("Pi") && compact.agentHelp.contains("Current pane"))
+        for state in ["blocked", "needs_input", "needs-input", "waiting"] {
+            compact.state = state
+            precondition(compact.agentActivity == "Blocked" && compact.agentAccessibility.contains("Blocked"))
+        }
+        compact.state = "working"
+        precondition(compact.agentActivity == "Working")
+        let backend = DemoBackend()
+        let options = try LaunchOptions(arguments: ["--demo"])
+        let model = PickerModel(options: options, backend: backend)
+        model.start()
+        try await wait { !model.refreshing }
+        precondition(PickerModel.ViewKind.allCases == [.repos, .agents], "Only Repos and Agents are navigable")
+        for expected: PickerModel.ViewKind in [.agents, .repos, .agents, .repos] {
+            model.switchView()
+            precondition(model.view == expected)
+            try await wait { !model.refreshing }
+        }
+        for expected: PickerModel.ViewKind in [.agents, .repos, .agents, .repos] {
+            model.switchView(backward: true)
+            precondition(model.view == expected)
+            try await wait { !model.refreshing }
+        }
+        model.selectView(.agents)
+        precondition(model.view == .agents && !model.loading && model.canOpen)
+        try await wait { !model.refreshing }
+        precondition(model.items.count == 3 && Set(model.items.map(\.id)).count == 3)
+        model.query = "picker"
+        try await wait { !model.refreshing }
+        precondition(model.items.count == 2)
+        model.selectedID = model.items[1].id; model.scrollID = model.items[1].id
+        let selected = model.selectedID
+        model.selectView(.repos)
+        model.selectView(.agents)
+        precondition(model.view == .agents && model.query == "picker" && model.selectedID == selected && model.scrollID == selected && model.canOpen)
+        model.selectView(.agents)
+        precondition(model.view == .agents, "Clicking an active pill must not cycle")
+        model.togglePin(); model.askRemove(); model.beginCreate(); model.showWorktrees(); model.toggleSplit()
+        precondition(model.removalCandidate == nil && !model.splitMode && model.page == .directories && !model.busy)
+        model.openNumbered(2)
+        try await wait { !model.busy }
+        var params = await backend.parameters("agents.jump")
+        precondition(params.count == 3)
+        if case .text("session:demo-1") = params["session_id"],
+           case .text("window:demo-1a") = params["window_id"],
+           case .text("block:demo-left") = params["block_id"] {} else {
+            preconditionFailure("Agents jump must focus the exact pane, not record identity")
+        }
+        model.selectedID = model.items[0].id
+        var dismissed = false
+        model.onDismiss = { dismissed = true }
+        model.choose()
+        model.escape()
+        precondition(dismissed && model.busy, "Busy Escape must hide without cancelling navigation")
+        try await wait { !model.busy }
+        params = await backend.parameters("agents.jump")
+        if case .text("block:demo-right") = params["block_id"] {} else { preconditionFailure("Enter must jump to selected agent") }
+        for method in ["sessions.close", "sessions.rename", "pins.toggle", "worktrees.remove", "worktrees.create", "dispatch"] {
+            let count = await backend.count(method)
+            precondition(count == 0, "Agents are navigation only: \(method)")
+        }
+        try await wait { !model.refreshing }
+        model.selectedID = selected
+        let token = model.prepareReconfigure(options)
+        precondition(model.contextReady && !model.loading && model.canOpen && model.view == .repos)
+        await model.completeReconfigure(token)
+        model.selectView(.agents)
+        precondition(!model.loading && model.query == "picker" && model.selectedID == selected && model.scrollID == selected)
+        dismissed = false
+        model.escape()
+        precondition(dismissed && model.view == .agents && model.query == "picker",
+                     "Escape must dismiss, not clear search or select Repos")
+        let changed = model.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "changed"]))
+        await model.completeReconfigure(changed)
+        try await wait { !model.refreshing }
+        model.selectView(.agents)
+        precondition(model.loading && model.items.isEmpty, "Changed context must discard the Agents cache")
+        try await wait { !model.refreshing }
+        model.close()
+        print("PASS: Agents decoding, two-view forward/backward cycle and exact pills, cached query/selection/scroll, warm reopen, context invalidation, exact-pane Enter/numbered jump, no destructive actions, busy dismissal")
+    }
+
+    @MainActor private static func launcherEscapeChecks() throws {
+        for view in PickerModel.ViewKind.allCases {
+            for query in ["", "filtered"] {
+                let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
+                model.view = view
+                model.query = query
+                var dismissals = 0
+                model.onDismiss = { dismissals += 1 }
+                model.escape()
+                precondition(dismissals == 1 && model.view == view && model.query == query,
+                             "Escape must dismiss every launcher view without clearing search or selecting Repos")
+                model.close()
+            }
+        }
+    }
+
     @MainActor private static func residentChecks() async throws {
-        // Tabs & Sessions view over the long-lived model.
-        let tabsBackend = DemoBackend()
-        let tabs = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: tabsBackend)
-        tabs.start()
-        try await wait { !tabs.loading }
-        precondition(tabs.view == .repos && tabs.page == .directories && tabs.showsPills)
-        tabs.switchView()
-        try await wait { !tabs.loading }
-        precondition(tabs.view == .tabs && tabs.items.count == 5 && tabs.items.first?.kind == "session",
-                     "Tabs view must list sessions and windows")
-        precondition(tabs.items.contains { $0.kind == "window" && $0.active == true }, "Active windows must be marked")
-        precondition(PickerStyle.height(for: tabs) == 276, "Tabs view must use the same compact row height")
-        tabs.openNumbered(2)
-        try await wait { !tabs.busy }
-        let jumpCount = await tabsBackend.count("sessions.jump")
-        precondition(jumpCount == 1, "Numbered open must jump to the tab")
-        tabs.selectedID = tabs.items.last?.id
-        tabs.requestCloseEntry()
-        precondition(tabs.removalCandidate != nil, "Tabs must confirm before closing")
-        tabs.confirmCloseEntry()
-        try await wait { !tabs.busy }
-        try await wait { !tabs.loading }
-        precondition(tabs.items.count == 4, "Closing a tab must refresh the list")
-        tabs.selectedID = tabs.items.first?.id
-        tabs.beginRename()
-        tabs.renameLabel = "renamed"
-        tabs.commitRename()
-        try await wait { !tabs.busy }
-        try await wait { !tabs.loading }
-        precondition(tabs.items.contains { $0.label == "renamed" }, "Rename must refresh the tabs list")
-        let renameCount = await tabsBackend.count("sessions.rename")
-        precondition(renameCount == 1, "Rename must be requested once")
-        tabs.switchView()
-        try await wait { !tabs.loading }
-        precondition(tabs.view == .repos && tabs.page == .directories, "Escape-level switch must return to repos")
-        tabs.close()
+        // Agents view over the long-lived model.
+        let agentsBackend = DemoBackend()
+        let agents = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: agentsBackend)
+        agents.start()
+        try await wait { !agents.loading }
+        precondition(agents.view == .repos && agents.page == .directories && agents.showsPills)
+        agents.switchView()
+        try await wait { !agents.loading }
+        precondition(agents.view == .agents && agents.items.count == 3 && agents.items.allSatisfy { $0.kind == "agent" })
+        precondition(agents.items.contains { $0.active == true }, "Active agents must be marked")
+        agents.openNumbered(2)
+        try await wait { !agents.busy }
+        let jumpCount = await agentsBackend.count("agents.jump")
+        precondition(jumpCount == 1, "Numbered open must jump to the agent")
+        agents.switchView(backward: true)
+        try await wait { !agents.loading }
+        precondition(agents.view == .repos && agents.page == .directories, "Reverse switch must return to Repos")
+        let sessionCalls = await agentsBackend.count("sessions")
+        precondition(sessionCalls == 0, "View navigation must never request Sessions")
+        agents.close()
 
         // Pins float to the top of the repos list.
         let pinsBackend = DemoBackend()
@@ -393,14 +727,14 @@ struct NativeChecks {
         try await wait { !resident.loading }
         precondition(resident.page == .directories)
         resident.close()
-        print("PASS: tabs and sessions view, numbered jump, close confirmation, rename, pins, resident reconfigure")
+        print("PASS: resident Agents view, numbered jump, reverse switch, no Sessions route, pins, resident reconfigure")
     }
 
     @MainActor private static func cachedListChecks() async throws {
         let backend = CachedListBackend()
         let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
         let repos = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0) }, targets: ["tab", "session"], target: "tab")
-        let sessions = APIResult(items: ["S1", "S2", "S3"].map { PickerItem(path: $0, kind: "session") })
+        let agents = APIResult(items: ["A1", "A2", "A3"].map { PickerItem(path: $0, kind: "agent", sessionID: "S", windowID: "W", blockID: $0) })
         model.start()
         try await pending("directories", backend)
         await backend.reply("directories", repos)
@@ -409,23 +743,23 @@ struct NativeChecks {
         model.switchView()
         precondition(model.loading && model.items.isEmpty && model.selectedID == nil && model.scrollID == nil,
                      "An uncached view must clear the other view before its request starts")
-        try await pending("sessions", backend)
-        await backend.reply("sessions", sessions)
+        try await pending("agents", backend)
+        await backend.reply("agents", agents)
         try await wait { !model.refreshing }
-        model.selectedID = "S2"; model.scrollID = "S3"
-        model.switchView()
+        model.selectedID = "A2"; model.scrollID = "A3"
+        model.selectView(.repos)
         precondition(!model.loading && model.refreshing && model.canOpen && model.selectedID == "/b" && model.scrollID == "/c" && model.target == "session",
                      "Cached repos must restore selection, scroll and target before refreshing, with Open enabled")
         try await pending("directories", backend)
         model.switchView()
-        precondition(!model.loading && model.canOpen && model.selectedID == "S2" && model.scrollID == "S3")
-        try await pending("sessions", backend)
+        precondition(!model.loading && model.canOpen && model.selectedID == "A2" && model.scrollID == "A3")
+        try await pending("agents", backend)
         await backend.reply("directories", APIResult(items: [PickerItem(path: "/obsolete")]))
-        await backend.reply("sessions", APIResult(items: [PickerItem(path: "S1", kind: "session")]))
+        await backend.reply("agents", APIResult(items: [agents.items![0]]))
         try await wait { !model.refreshing }
-        precondition(model.selectedID == "S1" && model.scrollID == nil,
+        precondition(model.selectedID == "A1" && model.scrollID == nil,
                      "Refresh must repair selection and scroll when their rows disappear")
-        model.switchView()
+        model.selectView(.repos)
         precondition(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c",
                      "A cancelled reply must not overwrite the inactive cache")
         try await pending("directories", backend)
@@ -441,8 +775,8 @@ struct NativeChecks {
         try await wait { !model.refreshing }
         model.selectedID = "/c"; model.scrollID = "/b"
         model.switchView()
-        try await pending("sessions", backend)
-        model.switchView()
+        try await pending("agents", backend)
+        model.selectView(.repos)
         precondition(model.query == "filtered" && model.selectedID == "/c" && model.scrollID == "/b" && model.canOpen,
                      "Each view must retain its own query and list position")
         try await pending("directories", backend)
@@ -450,22 +784,17 @@ struct NativeChecks {
         try await wait { !model.busy }
         let cachedDispatches = await backend.count("dispatch")
         precondition(cachedDispatches == 1, "Cached numbered Open must not wait for refresh")
-        // Dispatch invalidates both lists: a new session may now exist.
-        await backend.reply("sessions", sessions)
+        // Dispatch invalidates both lists: new agent metadata may now exist.
+        await backend.reply("agents", agents)
         await backend.reply("directories", repos)
         model.switchView()
-        precondition(model.loading && model.items.isEmpty)
-        try await pending("sessions", backend)
-        await backend.reply("sessions", sessions)
+        precondition(model.loading && model.items.isEmpty, "Dispatch must invalidate the Agents cache too")
+        try await pending("agents", backend)
+        await backend.fail("agents")
         try await wait { !model.refreshing }
-        model.beginRename(); model.renameLabel = "renamed"; model.commitRename()
-        try await wait { !model.busy }
-        precondition(model.loading && model.items.isEmpty, "Mutation refresh must not reuse pre-mutation rows")
-        try await pending("sessions", backend)
-        await backend.fail("sessions")
-        try await wait { !model.refreshing }
-        model.switchView()
-        precondition(model.loading && model.items.isEmpty, "Mutation must invalidate the other view too")
+        precondition(model.items.isEmpty && model.error != nil, "Failed post-mutation refresh must not restore stale rows")
+        model.selectView(.repos)
+        precondition(model.loading && model.items.isEmpty, "Mutation must invalidate the Repos cache too")
         try await pending("directories", backend)
 
         // Reconfigure while an old-origin reply is pending. No old rows can
@@ -478,13 +807,13 @@ struct NativeChecks {
         await backend.reply("worktrees.list", worktrees)
         try await wait { !model.refreshing }
         model.switchView()
-        precondition(model.loading && model.items.isEmpty, "New origin must not reuse old session rows")
-        try await pending("sessions", backend)
-        await backend.reply("sessions", sessions)
+        precondition(model.loading && model.items.isEmpty, "New origin must not reuse old agent rows")
+        try await pending("agents", backend)
+        await backend.reply("agents", agents)
         try await wait { !model.refreshing }
         precondition(model.repo == "/new-repo" && model.base == "main",
-                     "Session replies on the worktree page must not replace repository metadata")
-        model.switchView()
+                     "Agents replies on the worktree page must not replace repository metadata")
+        model.selectView(.repos)
         precondition(model.items == worktrees.items && model.canOpen)
         try await pending("worktrees.list", backend)
         model.beginCreate()
@@ -533,10 +862,9 @@ struct NativeChecks {
                      "Cached directories must not restore old-origin targets or repository state")
         mutation.openNumbered(2); mutation.choose(); mutation.togglePin()
         mutation.showWorktrees(); mutation.beginCreate(); mutation.switchView()
-        mutation.beginRename(); mutation.requestCloseEntry(); mutation.confirmCloseEntry(); mutation.commitRename()
         mutation.askRemove(); mutation.confirmRemove(PickerItem(path: "/old", isMain: false))
         mutation.create(); mutation.openCreated(); mutation.cycleTarget(backward: false); mutation.toggleSplit()
-        precondition(mutation.page == .directories && mutation.view == .repos && mutation.repo == nil && !mutation.busy && mutation.removalCandidate == nil && mutation.renameCandidate == nil,
+        precondition(mutation.page == .directories && mutation.view == .repos && mutation.repo == nil && !mutation.busy && mutation.removalCandidate == nil,
                      "Actions must not change navigation or candidates before context is ready")
         let reopen = Task { await mutation.completeReconfigure(context) }
         try await pending("context", mutationBackend)
@@ -585,12 +913,376 @@ struct NativeChecks {
         print("PASS: instant cached switching, per-view query/selection/scroll, cached Open, cancelled replies, refresh failure, mutation invalidation, origin/repo/page isolation, synchronous directory reopen, blocked context action gates, context failure/retry, startup warmup race")
     }
 
+    @MainActor private static func dismissalChecks() async throws {
+        let options = try LaunchOptions(arguments: []) // Real success path, not demo notices.
+        let rows = APIResult(items: [PickerItem(path: "/repo")], targets: ["tab"], target: "tab")
+        for method in ["agents.jump", "dispatch"] {
+            let backend = CachedListBackend()
+            await backend.hold(method)
+            let model = PickerModel(options: options, backend: backend)
+            var closes = 0
+            var dismissals = 0
+            model.onClose = { closes += 1 }
+            model.onDismiss = { dismissals += 1 }
+            model.start()
+            try await pending("directories", backend)
+            await backend.reply("directories", rows)
+            try await wait { !model.loading }
+            if method == "agents.jump" {
+                model.selectView(.agents)
+                try await pending("agents", backend)
+                await backend.reply("agents", APIResult(items: [PickerItem(path: "record", kind: "agent", sessionID: "S", windowID: "W", blockID: "B")]))
+                try await wait { !model.loading }
+            }
+            model.choose()
+            try await pending(method, backend)
+            model.escape()
+            model.dismiss() // Window close / resident toggle / Command-Q use this API.
+            model.choose()
+            precondition(model.busy && dismissals == 2 && closes == 0 && !model.backendIsClosed,
+                         "Dismiss must hide without closing or cancelling a live operation")
+            await backend.reply(method, APIResult())
+            try await wait { closes == 1 }
+            precondition(!model.busy && model.backendIsClosed,
+                         "Successful non-demo jump/dispatch must close without sticky busy; resident recovery must be eligible")
+            let calls = await backend.count(method)
+            precondition(calls == 1, "Dismiss and repeated Open must not replay an operation")
+            // The resident delegate replaces a closed backend before reconfiguration.
+            let freshBackend = CachedListBackend()
+            let fresh = PickerModel(options: options, backend: freshBackend)
+            await fresh.reconfigure(options)
+            try await pending("directories", freshBackend)
+            await freshBackend.reply("directories", rows)
+            try await wait { fresh.canOpen }
+            precondition(!fresh.busy && !fresh.backendIsClosed)
+            fresh.close()
+        }
+
+        // A hidden create must retain its committed path if opening fails.
+        let backend = CachedListBackend()
+        await backend.hold("worktrees.create")
+        await backend.hold("dispatch")
+        let createOptions = try LaunchOptions(arguments: ["--mode", "wt-create", "--repo", "/repo", "--session", "original", "--block", "B", "--client", "C", "--title", "Original"])
+        let create = PickerModel(options: createOptions, backend: backend)
+        var hidden = 0
+        create.onDismiss = { hidden += 1 }
+        create.start()
+        try await pending("worktrees.list", backend)
+        await backend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/repo", branches: ["main"], baseBranch: "main"))
+        try await wait { !create.loading }
+        create.branch = "feat/new"
+        create.destination = "/repo-new"; create.previewReady = true
+        create.create()
+        try await pending("worktrees.create", backend)
+        create.escape(); create.dismiss(); create.create()
+        precondition(create.busy && hidden == 2 && !create.backendIsClosed)
+        await backend.reply("worktrees.create", APIResult(path: "/repo-new"))
+        try await pending("dispatch", backend)
+        create.escape() // Hide after create committed, while dispatch is pending.
+        let busyReopen = create.prepareReconfigure(createOptions)
+        await create.completeReconfigure(busyReopen)
+        precondition(create.busy && create.createdPath == "/repo-new")
+        await backend.fail("dispatch")
+        try await wait { !create.busy }
+        precondition(create.createdPath == "/repo-new" && create.error != nil,
+                     "Hidden create must finish and retain its path after dispatch failure")
+        let savedError = create.error
+        let reopen = create.prepareReconfigure(createOptions)
+        await create.completeReconfigure(reopen)
+        precondition(create.page == .create && create.createdPath == "/repo-new"
+                     && create.error == savedError && create.canSubmitForm && !create.canCreate,
+                     "Actual resident reopen must restore Retry opening and its failure")
+        create.escape()
+        precondition(hidden == 4 && create.createdPath == "/repo-new",
+                     "Escape must hide recovery without discarding it")
+        let unrelated = try LaunchOptions(arguments: ["--mode", "wt-create", "--repo", "/other", "--session", "new", "--block", "new", "--client", "new", "--title", "New"])
+        for incoming in [unrelated, try LaunchOptions(arguments: ["--mode", "agents"])] {
+            let changed = create.prepareReconfigure(incoming)
+            await create.completeReconfigure(changed)
+            precondition(create.options.matches(createOptions) && create.repo == "/repo"
+                         && create.target == "tab" && create.createdPath == "/repo-new"
+                         && create.error?.contains("original context") == true && !create.canCreate,
+                         "Unrelated requests must show recovery, not retarget its repo or origin")
+        }
+        let contexts = await backend.count("context")
+        let lists = await backend.count("worktrees.list")
+        precondition(contexts == 0 && lists == 1,
+                     "Recovery reopen must not reconfigure the backend or regenerate the form")
+        create.submitBranch() // Retry opens only, never creates again.
+        try await pending("dispatch", backend)
+        await backend.reply("dispatch", APIResult())
+        try await wait { create.backendIsClosed }
+        let creates = await backend.count("worktrees.create")
+        let opens = await backend.count("dispatch")
+        let openParams = await backend.parameters("dispatch")
+        if case .text("/repo-new") = openParams["path"], case .text("tab") = openParams["target"] {} else {
+            preconditionFailure("Retry must open the committed path with the retained target")
+        }
+        precondition(creates == 1 && opens == 2 && !create.busy && create.createdPath == nil,
+                     "Successful retry must clear recovery so the resident can replace the closed backend")
+
+        // Directory-origin Create has a different createParent. Neither a hide
+        // nor an unrelated launch may navigate away and erase its recovery.
+        let discardBackend = CachedListBackend()
+        await discardBackend.hold("worktrees.create")
+        await discardBackend.hold("dispatch")
+        let discard = PickerModel(options: options, backend: discardBackend)
+        discard.start()
+        try await pending("directories", discardBackend)
+        await discardBackend.reply("directories", rows)
+        try await wait { !discard.loading }
+        discard.beginCreate()
+        try await pending("worktrees.list", discardBackend)
+        await discardBackend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/repo", branches: ["main"], baseBranch: "main"))
+        try await wait { !discard.loading }
+        discard.branch = "feat/discard"
+        discard.destination = "/repo-discard"; discard.previewReady = true
+        discard.create()
+        try await pending("worktrees.create", discardBackend)
+        await discardBackend.reply("worktrees.create", APIResult(path: "/repo-discard"))
+        try await pending("dispatch", discardBackend)
+        discard.escape()
+        await discardBackend.fail("dispatch")
+        try await wait { !discard.busy }
+        let retained = discard.prepareReconfigure(unrelated)
+        await discard.completeReconfigure(retained)
+        discard.escape()
+        precondition(discard.page == .create && discard.createdPath == "/repo-discard" && discard.repo == "/repo")
+        discard.discardCreatedRecovery()
+        discard.submitBranch(); discard.create(); discard.openCreated()
+        precondition(discard.createdPath == nil && !discard.contextReady && !discard.canCreate,
+                     "Explicit discard must gate all old-context actions until a new request")
+        let freshContext = discard.prepareReconfigure(unrelated)
+        await discard.completeReconfigure(freshContext)
+        try await pending("worktrees.list", discardBackend)
+        precondition(discard.options.matches(unrelated) && discard.repo == "/other")
+        let contextParams = await discardBackend.parameters("context")
+        if case .text("new") = contextParams["session"], case .text("new") = contextParams["block"] {} else {
+            preconditionFailure("Only explicit discard may install the new origin")
+        }
+        await discardBackend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/other", branches: ["main"], baseBranch: "main"))
+        try await wait { !discard.loading }
+        let discardedCreates = await discardBackend.count("worktrees.create")
+        let discardedOpens = await discardBackend.count("dispatch")
+        precondition(discardedCreates == 1 && discardedOpens == 1)
+        discard.close()
+
+        let pinBackend = CachedListBackend()
+        await pinBackend.hold("pins.toggle")
+        let pin = PickerModel(options: options, backend: pinBackend)
+        pin.onDismiss = { hidden += 1 }
+        pin.start()
+        try await pending("directories", pinBackend)
+        await pinBackend.reply("directories", rows)
+        try await wait { !pin.loading }
+        pin.togglePin()
+        try await pending("pins.toggle", pinBackend)
+        pin.escape(); pin.dismiss(); pin.togglePin()
+        precondition(pin.busy && !pin.backendIsClosed)
+        await pinBackend.reply("pins.toggle", APIResult())
+        try await pending("directories", pinBackend)
+        await pinBackend.reply("directories", APIResult(items: []))
+        try await wait { !pin.busy && !pin.refreshing }
+        let pins = await pinBackend.count("pins.toggle")
+        precondition(pins == 1 && pin.items.isEmpty && pin.error == nil,
+                     "Hidden pin mutation must finish once and refresh, without cancellation or replay")
+        pin.close()
+        print("PASS: non-demo jump/dispatch closes without sticky busy, resident replacement reopens, pending Escape/dismiss preserves create/pin, real recovery reconfigure retains error/path/origin without recreation, explicit discard gates stale actions")
+    }
+
+    @MainActor private static func warmReopenChecks() async throws {
+        let options = try LaunchOptions(arguments: ["--demo", "--session", "S", "--block", "B", "--client", "C", "--title", "T"])
+        let repos = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0) }, targets: ["tab", "session"], target: "tab")
+        // Zero TTL forces an expired refresh without a wall-clock sleep.
+        for ttl: TimeInterval in [30, 0] {
+            let backend = CachedListBackend()
+            let model = PickerModel(options: options, backend: backend, cacheTTL: ttl)
+            model.start()
+            try await pending("directories", backend)
+            await backend.reply("directories", repos)
+            try await wait { !model.refreshing && model.themeLoaded }
+            model.selectedID = "/b"; model.scrollID = "/c"; model.target = "session"
+            model.query = "filtered"
+            try await pending("directories", backend)
+            await backend.reply("directories", APIResult(items: [PickerItem(path: "/filtered")], targets: ["tab"], target: "tab"))
+            try await wait { !model.refreshing }
+            model.switchView()
+            try await pending("agents", backend)
+            await backend.reply("agents", APIResult(items: [PickerItem(path: "A", kind: "agent", sessionID: "S", windowID: "W", blockID: "B")]))
+            try await wait { !model.refreshing }
+
+            let token = model.prepareReconfigure(options)
+            precondition(model.contextReady && model.canOpen && !model.loading && model.view == .repos && model.page == .directories && model.query.isEmpty,
+                         "Warm same-context reopen must enable Open synchronously, before any backend reply")
+            precondition(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c" && model.targets == ["tab", "session"] && model.target == "session",
+                         "Warm reopen must restore unfiltered repos, selection, scroll and valid cached targets")
+            await model.completeReconfigure(token)
+            if ttl == 0 { try await pending("directories", backend) }
+            for _ in 0..<10 {
+                await model.reconfigure(options)
+                precondition(model.canOpen && model.target == "session" && model.selectedID == "/b" && model.scrollID == "/c")
+                await Task.yield()
+            }
+            let contexts = await backend.count("context")
+            let themes = await backend.count("theme")
+            let directories = await backend.count("directories")
+            precondition(contexts == 0 && themes == 1 && directories == (ttl == 0 ? 3 : 2),
+                         "Warm reopen must skip context/theme RPCs, honor TTL and coalesce an in-flight refresh")
+            model.choose()
+            try await wait { !model.busy }
+            let opens = await backend.count("dispatch")
+            precondition(opens == 1, "Cached Open must dispatch before the background directory reply")
+            if ttl == 0 { await backend.reply("directories", repos) }
+            model.close()
+        }
+
+        // Each backend context component must independently disable the fast path.
+        for flag in ["--session", "--block", "--client", "--title"] {
+            let backend = CachedListBackend()
+            let model = PickerModel(options: options, backend: backend)
+            model.start()
+            try await pending("directories", backend)
+            await backend.reply("directories", repos)
+            try await wait { !model.refreshing && model.themeLoaded }
+            await backend.hold("context")
+            let changed = try LaunchOptions(arguments: ["--demo", "--session", "S", "--block", "B", "--client", "C", "--title", "T", flag, "changed"])
+            let token = model.prepareReconfigure(changed)
+            precondition(!model.contextReady && !model.canOpen && model.targets.isEmpty && model.target.isEmpty,
+                         "A changed context component must gate actions and discard cached targets")
+            model.choose(); model.showWorktrees(); model.switchView()
+            let completion = Task { await model.completeReconfigure(token) }
+            try await pending("context", backend)
+            let directoryCalls = await backend.count("directories")
+            let dispatches = await backend.count("dispatch")
+            precondition(directoryCalls == 1 && dispatches == 0 && !model.contextReady)
+            await backend.reply("context", APIResult())
+            await completion.value
+            try await pending("directories", backend)
+            precondition(!model.canOpen, "Context acknowledgement alone must not trust old-origin targets")
+            await backend.reply("directories", repos)
+            try await wait { !model.refreshing }
+            precondition(model.canOpen)
+            let themes = await backend.count("theme")
+            precondition(themes == 1, "A loaded theme must not reload on reopen")
+            model.close()
+        }
+        print("PASS: synchronous warm reopen, unfiltered repos and targets, pre-reply Open, theme/context RPC bypass, refresh TTL/coalescing, all changed-context components gated")
+    }
+
     @MainActor private static func pending(_ method: String, _ backend: CachedListBackend) async throws {
         for _ in 0..<150 {
             if await backend.waiting(method) { return }
             try await Task.sleep(for: .milliseconds(20))
         }
         preconditionFailure("Timed out waiting for \(method)")
+    }
+
+    @MainActor private static func suggestedBranchChecks() async throws {
+        let decoded = try JSONDecoder().decode(APIResult.self, from: Data(#"{"suggested_branch":"amber-falcon"}"#.utf8))
+        precondition(decoded.suggestedBranch == "amber-falcon")
+        let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/demo"])
+        let demo = DemoBackend()
+        let direct = PickerModel(options: options, backend: demo)
+        direct.start()
+        direct.submitBranch() // Loading Enter must not be queued.
+        try await wait { direct.canCreate }
+        precondition(direct.branch == "amber-falcon" && direct.base == "main" && direct.target == "tab")
+        precondition(direct.destination == "/Users/demo/Projects/example-kit-worktrees/amber-falcon")
+        let before = await demo.count("worktrees.create")
+        precondition(before == 0 && !direct.basePickerPresented)
+        direct.submitBranch()
+        direct.submitBranch()
+        try await wait { direct.createdPath != nil && !direct.busy }
+        let creates = await demo.count("worktrees.create"), opens = await demo.count("dispatch")
+        precondition(creates == 1 && opens == 1, "One Enter creates and opens; repeated Enter cannot duplicate")
+        let params = await demo.parameters("worktrees.create")
+        if case .text("amber-falcon") = params["branch"], case .text("main") = params["base"],
+           case .text("/Users/demo/Projects/example-kit") = params["repo"] {} else { preconditionFailure("Wrong default create params") }
+        let dispatch = await demo.parameters("dispatch")
+        if case .text("tab") = dispatch["target"], case .text("/Users/demo/Projects/example-kit-worktrees/amber-falcon") = dispatch["path"] {} else { preconditionFailure("Wrong default dispatch") }
+        direct.close()
+
+        // Explicit metadata responses cover loading, early edits and authoritative collisions.
+        for edit in [nil, "feat/early", ""] as [String?] {
+            let backend = CachedListBackend()
+            await backend.hold("worktrees.preview")
+            let model = PickerModel(options: options, backend: backend)
+            model.start()
+            try await pending("worktrees.list", backend)
+            if let edit { model.editBranch(edit) }
+            model.submitBranch()
+            await backend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/demo",
+                branches: ["main"], baseBranch: "main", suggestedBranch: "quiet-otter"))
+            try await wait { !model.loading }
+            precondition(model.branch == (edit ?? "quiet-otter"), "Metadata must preserve early typing and explicit blank")
+            if edit != "" {
+                try await pending("worktrees.preview", backend)
+                model.submitBranch()
+                await backend.reply("worktrees.preview", APIResult(path: "/demo/new", validationError: "Branch already exists"))
+                try await wait { model.previewReady }
+                model.submitBranch()
+                precondition(!model.canCreate && !model.basePickerPresented)
+            }
+            let count = await backend.count("worktrees.create")
+            precondition(count == 0, "Loading or collision must block Enter")
+            model.close()
+        }
+
+        let backend = CachedListBackend()
+        let listOptions = try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/demo"])
+        let list = PickerModel(options: listOptions, backend: backend)
+        func metadata(_ suggestion: String?) -> APIResult {
+            APIResult(items: [PickerItem(path: "/demo/main")], targets: ["tab"], target: "tab", repo: "/demo",
+                      destinationRoot: "/trees", branches: ["main"], baseBranch: "main", suggestedBranch: suggestion)
+        }
+        list.start()
+        try await pending("worktrees.list", backend)
+        await backend.reply("worktrees.list", metadata("first-otter"))
+        try await wait { !list.loading }
+        list.query = "refresh"
+        try await pending("worktrees.list", backend)
+        await backend.reply("worktrees.list", metadata("fresh-otter"))
+        try await wait { !list.refreshing }
+        list.beginCreate()
+        precondition(list.branch == "fresh-otter" && list.base == "main", "List entry must prefill synchronously with current metadata")
+        list.query = "default-form-query"
+        try await Task.sleep(for: .milliseconds(200))
+        precondition(list.branch == "fresh-otter", "Query must not replace the initial default")
+        list.editBranch("feat/custom")
+        list.query = "ignored-form-query"
+        try await Task.sleep(for: .milliseconds(200))
+        precondition(list.branch == "feat/custom", "Query must not rename the form")
+        list.escape()
+        try await pending("worktrees.list", backend)
+        await backend.reply("worktrees.list", metadata("next-otter"))
+        try await wait { !list.refreshing }
+        list.beginCreate()
+        precondition(list.branch == "next-otter" && !list.branchWasEdited, "New form resets edit/default flags")
+        list.escape()
+        try await pending("worktrees.list", backend)
+        await backend.reply("worktrees.list", metadata(nil))
+        try await wait { !list.refreshing }
+        list.beginCreate()
+        precondition(list.branch.isEmpty && !list.canCreate, "Missing suggestion requires manual input")
+        list.editBranch("feat/manual")
+        precondition(list.branch == "feat/manual" && list.branchWasEdited)
+        list.close()
+
+        let continuation = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt-create"]), backend: DemoBackend())
+        continuation.start()
+        try await wait { continuation.page == .repositories && !continuation.loading }
+        continuation.choose()
+        try await wait { continuation.canCreate }
+        precondition(continuation.branch == "amber-falcon")
+        continuation.editBranch("feat/old-repo")
+        let newRepoOptions = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/another-repo"])
+        let token = continuation.prepareReconfigure(newRepoOptions)
+        precondition(continuation.branch.isEmpty && !continuation.branchWasEdited)
+        await continuation.completeReconfigure(token)
+        try await wait { continuation.canCreate }
+        precondition(continuation.branch == "amber-falcon")
+        continuation.close()
+        print("PASS: suggested branch decoding, direct/list prefill, one-Enter create/open, early edits/blank, refresh, reset, missing suggestion, collision and loading gates")
     }
 
     @MainActor private static func directCreateChecks() async throws {
@@ -632,6 +1324,7 @@ struct NativeChecks {
         }
         var closed = false
         direct.onClose = { closed = true }
+        direct.onDismiss = { direct.close() } // Nonresident idle dismissal.
         direct.basePickerPresented = true
         direct.escape()
         precondition(!direct.basePickerPresented && !closed && direct.page == .create)
@@ -641,6 +1334,7 @@ struct NativeChecks {
         let slow = PickerModel(options: options, backend: DelayedMetadataBackend())
         var slowClosed = false
         slow.onClose = { slowClosed = true }
+        slow.onDismiss = { slow.close() } // Nonresident idle dismissal.
         slow.start()
         slow.branch = "feat/typed-early"
         try await Task.sleep(for: .milliseconds(40))

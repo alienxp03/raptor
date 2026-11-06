@@ -27,6 +27,36 @@ func CreateTask(repo string, cfg config.Config) (Worktree, error) {
 	return createTask(repo, cfg, taskNamePairs(words))
 }
 
+// SuggestTaskName returns an available task name without claiming it or changing
+// the repository or filesystem. Creation must still validate the name.
+func SuggestTaskName(repo string, cfg config.Config) (string, error) {
+	words, err := shuffledTaskWords()
+	if err != nil {
+		return "", err
+	}
+	return suggestTaskName(repo, cfg, taskNamePairs(words))
+}
+
+func suggestTaskName(repo string, cfg config.Config, names []string) (string, error) {
+	if _, err := taskHEAD(repo); err != nil {
+		return "", err
+	}
+	blocked, err := taskBlockedBranches(repo)
+	if err != nil {
+		return "", err
+	}
+	for _, branch := range names {
+		path, err := taskDestination(repo, branch, cfg, blocked)
+		if err != nil {
+			return "", err
+		}
+		if path != "" {
+			return branch, nil
+		}
+	}
+	return "", taskNamesExhausted(len(names))
+}
+
 // Shuffle once so collisions always try another pair, never a suffix or a
 // repeated candidate. Each name joins a word from each half of the shuffled
 // list, so every word is used at most once and every pair is considered
@@ -51,29 +81,67 @@ func shuffledTaskWords() ([]string, error) {
 	return names, nil
 }
 
-func createTask(repo string, cfg config.Config, names []string) (Worktree, error) {
+func taskHEAD(repo string) (string, error) {
 	head, err := GitOut(repo, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
-		return Worktree{}, fmt.Errorf("repository needs a committed HEAD: %w", err)
+		return "", fmt.Errorf("repository needs a committed HEAD: %w", err)
 	}
-	// A branch such as otter/topic also prevents creating the word otter.
+	return head, nil
+}
+
+func taskBlockedBranches(repo string) (map[string]bool, error) {
+	// Read refs with errors intact: a failed read must not suggest a taken name.
+	out, err := GitOut(repo, "for-each-ref", "--format=%(refname:strip=2)", "refs/heads/")
+	if err != nil {
+		return nil, err
+	}
 	blocked := map[string]bool{}
-	for _, existing := range LocalBranches(repo) {
+	for _, existing := range strings.Fields(out) {
 		blocked[existing] = true
+		// A branch such as otter/topic also prevents creating the word otter.
 		blocked[strings.SplitN(existing, "/", 2)[0]] = true
 	}
+	return blocked, nil
+}
+
+// An empty destination means a collision or invalid candidate. Lstat also
+// rejects dangling symlinks; other filesystem errors stop selection.
+func taskDestination(repo, branch string, cfg config.Config, blocked map[string]bool) (string, error) {
+	if blocked[branch] {
+		return "", nil
+	}
+	if err := ValidateNewBranch(repo, branch); err != nil {
+		return "", nil
+	}
+	path := Path(repo, branch, cfg)
+	if _, err := os.Lstat(path); err == nil {
+		return "", nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	return path, nil
+}
+
+func taskNamesExhausted(count int) error {
+	return fmt.Errorf("all %d two-word branch names are taken by existing branches or destinations", count)
+}
+
+func createTask(repo string, cfg config.Config, names []string) (Worktree, error) {
+	head, err := taskHEAD(repo)
+	if err != nil {
+		return Worktree{}, err
+	}
+	blocked, err := taskBlockedBranches(repo)
+	if err != nil {
+		return Worktree{}, err
+	}
 	for _, branch := range names {
-		if blocked[branch] {
-			continue
-		}
-		if err := ValidateNewBranch(repo, branch); err != nil {
-			continue
-		}
-		path := Path(repo, branch, cfg)
-		if _, err := os.Lstat(path); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
+		path, err := taskDestination(repo, branch, cfg, blocked)
+		if err != nil {
 			return Worktree{}, err
+		}
+		if path == "" {
+			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return Worktree{}, err
@@ -88,5 +156,5 @@ func createTask(repo string, cfg config.Config, names []string) (Worktree, error
 		}
 		return Worktree{Path: path, Branch: branch}, nil
 	}
-	return Worktree{}, fmt.Errorf("all %d two-word branch names are taken by existing branches or destinations", len(names))
+	return Worktree{}, taskNamesExhausted(len(names))
 }

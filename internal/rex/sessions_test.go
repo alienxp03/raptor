@@ -56,6 +56,78 @@ func TestSessionEntriesGroupedShape(t *testing.T) {
 	}
 }
 
+func TestSessionEntriesTerminalTitleFallback(t *testing.T) {
+	const windowID = "window:01a1b042-8b2e-793f-92c1-bedeb0439b58"
+	const blockID = "block:01a1b042-8b07-7a4c-9490-09c43f411fde"
+	const generated = "Window b0439b58"
+	for _, tt := range []struct {
+		name, label, focused, response, want string
+		fail, call                           bool
+	}{
+		{name: "generated", label: generated, focused: blockID, response: `{"title":"castty","owner":"process"}`, want: "castty", call: true},
+		{name: "blank", focused: blockID, response: `{"title":"castty"}`, want: "castty", call: true},
+		{name: "custom", label: "Build", focused: blockID, want: "Build"},
+		{name: "different suffix", label: "Window 12345678", focused: blockID, want: "Window 12345678"},
+		{name: "no focus", label: generated, want: generated},
+		{name: "nonterminal or error", label: generated, focused: blockID, fail: true, want: generated, call: true},
+		{name: "empty title", label: generated, focused: blockID, response: `{"title":""}`, want: generated, call: true},
+		{name: "whitespace title", label: generated, focused: blockID, response: `{"title":"  "}`, want: generated, call: true},
+		{name: "missing title", label: generated, focused: blockID, response: `{}`, want: generated, call: true},
+		{name: "invalid response", label: generated, focused: blockID, response: `{`, want: generated, call: true},
+		{name: "blank fallback", focused: blockID, fail: true, call: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			log := filepath.Join(dir, "calls")
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("REX_TEST_LOG", log)
+			view, err := json.Marshal(sessionView{
+				ActiveWindowID: windowID,
+				Windows:        []apiWindow{{WindowID: windowID, Label: tt.label, FocusedBlockID: tt.focused}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("REX_TEST_VIEW", string(view))
+			t.Setenv("REX_TEST_TITLE", tt.response)
+			t.Setenv("REX_TEST_TITLE_FAIL", fmt.Sprint(tt.fail))
+			script := `#!/bin/sh
+printf '%s\n' "$*" >> "$REX_TEST_LOG"
+case "$*" in
+  'ls --json') echo '{"sessions":[{"session_id":"s","label":"Project"}]}' ;;
+  'api call -s s session.view '* ) printf '%s' "$REX_TEST_VIEW" ;;
+  'block call -s s -b ` + blockID + ` title')
+    if [ "$REX_TEST_TITLE_FAIL" = true ]; then exit 1; fi
+    printf '%s' "$REX_TEST_TITLE" ;;
+  *) exit 1 ;;
+esac
+`
+			if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := SessionEntries("s")
+			if err != nil || len(entries) != 2 {
+				t.Fatalf("entries = %+v, error = %v", entries, err)
+			}
+			want := SessionEntry{Kind: "window", ID: windowID, Path: windowID, SessionID: "s", Label: tt.want, SessionLabel: "Project", Active: true}
+			if entries[1] != want {
+				t.Fatalf("window = %+v, want %+v", entries[1], want)
+			}
+			calls, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantCalls := "ls --json\napi call -s s session.view {\"session_id\":\"s\"}\n"
+			if tt.call {
+				wantCalls += "block call -s s -b " + blockID + " title\n"
+			}
+			if string(calls) != wantCalls {
+				t.Fatalf("calls = %q, want %q", calls, wantCalls)
+			}
+		})
+	}
+}
+
 func TestSessionEntriesListErrors(t *testing.T) {
 	fakeSessionRex(t)
 	for _, failure := range []string{"list", "json"} {
@@ -98,7 +170,7 @@ func TestSessionEntriesBoundedParallelOrderAndFailures(t *testing.T) {
 			windowID := id + suffix
 			want = append(want, SessionEntry{
 				Kind: "window", ID: windowID, Path: windowID, SessionID: id,
-				Label: windowID, SessionLabel: id, Active: suffix == "a",
+				Label: "title-" + windowID, SessionLabel: id, Active: suffix == "a",
 			})
 		}
 	}
@@ -127,6 +199,11 @@ while ! mkdir "$state/slot-$slot" 2>/dev/null; do
 done
 trap 'rmdir "$state/slot-$slot"' EXIT
 touch "$state/started-$id"
+if [ "$1" = block ]; then
+  touch "$state/title-$6"
+  printf '{"title":"title-%%s"}' "$6"
+  exit
+fi
 while [ ! -f "$state/release" ]; do sleep 0.01; done
 # Force a later sidebar session to finish before the first session.
 if [ "$id" = s0 ]; then
@@ -137,7 +214,7 @@ case "$id" in
   s2) exit 1 ;;
   s3) echo '{'; exit 0 ;;
 esac
-printf '{"active_window_id":"%%sa","windows":[{"window_id":"%%sb","label":"%%sb"},{"window_id":"%%sa","label":"%%sa"}]}' "$id" "$id" "$id" "$id" "$id"
+printf '{"active_window_id":"%%sa","windows":[{"window_id":"%%sb","label":"","focused_block_id":"%%sb"},{"window_id":"%%sa","label":"","focused_block_id":"%%sa"}]}' "$id" "$id" "$id" "$id" "$id"
 `, sessionWindowWorkers)
 	if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -180,6 +257,10 @@ printf '{"active_window_id":"%%sa","windows":[{"window_id":"%%sb","label":"%%sb"
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("session listing did not finish")
+	}
+	titles, err := filepath.Glob(filepath.Join(dir, "title-*"))
+	if err != nil || len(titles) != (len(sessions)-2)*2 {
+		t.Fatalf("title calls = %d, error = %v", len(titles), err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "overflow")); !os.IsNotExist(err) {
 		t.Fatalf("window concurrency exceeded %d (stat error: %v)", sessionWindowWorkers, err)

@@ -22,6 +22,9 @@ enum PickerStyle {
     static let createHeaderHeight: CGFloat = searchHeight
     static let footerHeight: CGFloat = 34
     static let rowHeight: CGFloat = 32
+    static let agentRowHeight: CGFloat = 32
+    static let agentGroupHeight: CGFloat = 22
+    static let agentGroupSpacing: CGFloat = 8
     static let worktreeRowHeight: CGFloat = 28
     static let selectedPathHeight: CGFloat = 32
 
@@ -54,7 +57,7 @@ enum PickerStyle {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
             return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 32)
         }
-        let rowHeight = model.page == .worktrees && model.view == .repos ? Self.worktreeRowHeight : Self.rowHeight
+        let rowHeight = model.view == .agents ? Self.agentRowHeight : (model.page == .worktrees && model.view == .repos ? Self.worktreeRowHeight : Self.rowHeight)
         // Reserve the list footprint before the first backend response arrives.
         let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count, 2), 8)
         let rows = CGFloat(rowCount)
@@ -62,7 +65,9 @@ enum PickerStyle {
         let pills: CGFloat = model.showsPills ? pillsHeight : 0
         let detail = model.page == .worktrees && model.view == .repos ? selectedPathHeight : 0
         let wrappedRow = model.page == .worktrees && model.view == .repos && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
-        let content = searchHeight + pills + rows * rowHeight + wrappedRow + 8 + detail + footerHeight + status
+        let groupCount = model.view == .agents ? model.agentSections.count : 0
+        let groups = CGFloat(groupCount) * agentGroupHeight + CGFloat(max(groupCount - 1, 0)) * agentGroupSpacing
+        let content = searchHeight + pills + rows * rowHeight + groups + wrappedRow + 8 + detail + footerHeight + status
         let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
         return min(content, max(available, 180))
     }

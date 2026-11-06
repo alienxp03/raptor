@@ -55,10 +55,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let backend: any BackendClient = ProcessBackend(options: options)
         let next = PickerModel(options: options, backend: backend)
         model = next
-        next.onClose = { [weak self, weak next] in
-            guard let self, let next, self.model === next else { return }
-            self.dismissPicker()
-        }
+        bindDismissal(next)
         _ = makePanel(for: next)
         sizeSubscription = next.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.resizePanel() }
@@ -79,9 +76,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let options: LaunchOptions
         do { options = try LaunchOptions(panelRequest: request) }
         catch { return PanelReply(ok: false, error: error.localizedDescription) }
-        // Same context while visible toggles the panel closed.
-        if let panel, panel.isVisible, let model, model.options.matches(options) {
-            dismissPicker()
+        // Same context while visible hides without cancelling an operation.
+        if let panel, panel.isVisible, let model, model.shouldToggle(for: options) {
+            model.dismiss()
             return PanelReply(ok: true, error: nil)
         }
         openResident(options)
@@ -90,15 +87,22 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func openResident(_ options: LaunchOptions) {
         guard let current = model else { return }
-        guard !current.busy, current.removalCandidate == nil, current.renameCandidate == nil else {
-            current.error = "Finish the current operation before opening another picker."
+        if current.backendIsClosed, current.createdPath != nil {
+            // Replacing the model here would silently lose a committed worktree.
+            current.error = "Worktree created, but the backend closed. Open the Destination manually, or discard recovery before opening another picker."
             showResidentPanel()
             return
         }
         if current.backendIsClosed {
-            // The shared backend died (crash or a hung request). Rebuild it —
-            // the resident flow never leaves the picker wedged.
+            // A closed connection cannot finish more work. Recover before the
+            // busy gate, but never replace a live pending mutation.
             attach(PickerModel(options: options, backend: ProcessBackend(options: options)))
+        }
+        guard let current = model else { return }
+        guard !current.busy, current.removalCandidate == nil else {
+            current.error = "Finish the current operation before opening another picker."
+            showResidentPanel()
+            return
         }
         guard let model else { return }
         let context = model.prepareReconfigure(options)
@@ -109,10 +113,14 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 panel.setFrame(PickerStyle.panelFrame(in: area, height: PickerStyle.height(for: model)).clamped(to: screen.visibleFrame), display: false)
             }
         }
-        // Keep the hosting root for the same model. Show before any backend await.
+        // Warm same-origin directories are already actionable here, including
+        // targets and list position. Only a cold/changed origin needs completion.
+        // Showing the panel alone is not the warm-reopen fast path.
         showResidentPanel()
-        Task { [weak model] in
-            await model?.completeReconfigure(context)
+        if !model.contextReady {
+            Task { [weak model] in
+                await model?.completeReconfigure(context)
+            }
         }
     }
 
@@ -122,10 +130,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model?.onClose = nil
         model?.close()
         model = next
-        next.onClose = { [weak self, weak next] in
-            guard let self, let next, self.model === next else { return }
-            self.dismissPicker()
-        }
+        bindDismissal(next)
         if let host = panelPickerHost {
             host.rootView = PickerView(model: next)
         }
@@ -137,8 +142,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showResidentPanel() {
         guard let panel else { return }
         NSApp.unhide(nil)
-        // Plain orderFront at full alpha; the system panel fade from
-        // animationBehavior = .default provides the entrance, same as resh.
+        // Show at full alpha with no entrance animation.
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
     }
@@ -199,10 +203,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let backend: any BackendClient = options.demo ? DemoBackend() : ProcessBackend(options: options)
         let next = PickerModel(options: options, backend: backend)
         model = next
-        next.onClose = { [weak self, weak next] in
-            guard let self, let next, self.model === next else { return }
-            self.dismissPicker()
-        }
+        bindDismissal(next)
         let picker: RaptorPanel
         if let panel {
             picker = panel
@@ -233,12 +234,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         picker.isOpaque = false
         picker.backgroundColor = .clear
         picker.hasShadow = true
-        // resh parity: resh leaves its panel at the NSPanel default animation
-        // behavior, and AppKit's built-in panel convention is a quick system
-        // fade when the window orders in/out — that IS resh's appear/dismiss
-        // animation. Keep .default so the system provides it; never add
-        // custom scale or slide motion on top.
-        picker.animationBehavior = .default
+        // Opening and closing must not wait for AppKit's panel fade.
+        picker.animationBehavior = .none
         picker.level = .floating
         picker.hidesOnDeactivate = false
         picker.isFloatingPanel = true
@@ -330,10 +327,19 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         picker.makeKeyAndOrderFront(nil)
     }
 
+    private func bindDismissal(_ next: PickerModel) {
+        let dismiss: () -> Void = { [weak self, weak next] in
+            guard let self, let next, self.model === next else { return }
+            self.dismissPicker()
+        }
+        next.onClose = dismiss
+        next.onDismiss = dismiss
+    }
+
     private func dismissPicker() {
-        if resident {
-            // Keep the model, the Go backend and the resize subscription warm;
-            // the next open reuses them.
+        if resident || model?.busy == true {
+            // Keep resident state warm. In either mode, hiding pending work
+            // must not close its backend or cancel its task.
             dismissResidentPanel()
             return
         }
@@ -359,12 +365,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard model?.busy != true else { return false }
-        if resident {
-            dismissPicker()
-            return false
-        }
-        model?.close()
+        model?.dismiss()
         return false
     }
 
@@ -399,7 +400,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "q" {
             if resident {
                 // A resident host must survive ⌘Q; hide the picker instead.
-                dismissPicker()
+                model?.dismiss()
+            } else if model?.busy == true {
+                model?.dismiss()
             } else {
                 NSApp.terminate(nil)
             }
@@ -425,11 +428,15 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let option = flags.contains(.option)
         let shift = flags.contains(.shift)
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        guard !model.busy else {
-            // Keep the panel visible until a mutation finishes; do not accept repeated commands.
-            return event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 48 || control
-        }
         if event.keyCode == 53 { model.escape(); return true }
+        guard !model.busy else {
+            // Escape hides; other operation shortcuts cannot submit again.
+            return event.keyCode == 36 || event.keyCode == 48 || control
+        }
+        if command && shift && !option && !control && key == "a" {
+            model.selectView(.agents)
+            return true
+        }
         // Numbered rows: ⌘1–9 opens that result directly with the chosen target.
         if command && !option && !control, let number = event.charactersIgnoringModifiers.flatMap(Int.init), (1...9).contains(number) {
             model.openNumbered(number)
@@ -438,10 +445,6 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if command && shift && !option && !control && key == "p" {
             model.togglePin()
             return true
-        }
-        if model.view == .tabs {
-            if (command || control) && !option && key == "r" { model.beginRename(); return true }
-            if control && !command && !option && key == "x" { model.requestCloseEntry(); return true }
         }
         // Tab switches views everywhere except the create form, which keeps
         // its field-focus behavior.
@@ -473,10 +476,10 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if model.canSubmitForm { model.create() }
             return true
         }
-        if (command || control) && !option && key == "n" && (model.page == .worktrees || model.page == .directories) {
+        if model.view == .repos && (command || control) && !option && key == "n" && (model.page == .worktrees || model.page == .directories) {
             model.beginCreate(); return true
         }
-        if model.page == .worktrees && ((command && event.keyCode == 51) || (control && key == "x")) {
+        if model.view == .repos && model.page == .worktrees && ((command && event.keyCode == 51) || (control && key == "x")) {
             model.askRemove(); return true
         }
         if control && !command && !option {

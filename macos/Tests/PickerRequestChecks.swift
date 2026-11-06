@@ -17,6 +17,16 @@ struct PickerRequestChecks {
         precondition(direct.mode == "wt-create" && direct.repo == "/demo" && direct.block.isEmpty)
         let directNoRepo = try parse("raptor://picker?mode=wt-create&session=S&client=C")
         precondition(directNoRepo.mode == "wt-create" && directNoRepo.repo == nil)
+        let agents = try parse("raptor://picker?mode=agents&session=S&block=B&client=C")
+        precondition(agents.mode == "agents" && agents.session == "S" && agents.block == "B")
+        let panel = try LaunchOptions(panelRequest: PanelRequest(mode: "agents", session: "S", block: "B", client: "C"))
+        precondition(panel.matches(agents))
+        for mode in ["AGENTS", "agents-extra", "agents ", "sessions"] {
+            do {
+                _ = try LaunchOptions(panelRequest: PanelRequest(mode: mode))
+                preconditionFailure("Invalid panel mode accepted")
+            } catch {}
+        }
         let unicode = try parse("raptor://picker?mode=wt&session=S&client=C&repo=%2FUsers%2F%E7%8C%AB%20%26%20caf%C3%A9")
         precondition(unicode.repo == "/Users/猫 & café")
         let percent = try parse("raptor://picker?mode=wt&session=S&client=C&repo=%2Ftmp%2F%2520%252F%25ZZ+plus")
@@ -52,6 +62,11 @@ struct PickerRequestChecks {
             "raptor://picker?mode=dirs&session=S",
             "raptor://picker?mode=other&session=S&client=C",
             "raptor://picker?mode=DIRS&session=S&client=C",
+            "raptor://picker?mode=AGENTS&session=S&client=C",
+            "raptor://picker?mode=agents-extra&session=S&client=C",
+            "raptor://picker?mode=agents%20&session=S&client=C",
+            "raptor://picker?mode=agents&mode=dirs&session=S&client=C",
+            "raptor://picker?mode=agents&session=S&client=C&action=jump",
             "raptor://picker?mode=WT-CREATE&session=S&client=C",
             "raptor://picker?mode=wt-create-extra&session=S&client=C",
             "raptor://picker?mode=wt-create%20&session=S&client=C",

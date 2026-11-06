@@ -39,6 +39,7 @@ func TestWorktreeForm(t *testing.T) {
 		t.Fatal("local picker must not fetch GitHub")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("feat/login")})
 	if !m.form || m.branch != "feat/login" {
 		t.Fatal("form not editable")
@@ -49,11 +50,8 @@ func TestWorktreeForm(t *testing.T) {
 			t.Fatal("missing " + s)
 		}
 	}
+	m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil || m.busy || m.field != 1 {
-		t.Fatal("Enter on branch must advance, not create")
-	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.baseSelecting {
 		t.Fatal("base chooser did not open")
 	}

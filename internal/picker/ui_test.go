@@ -32,8 +32,11 @@ func TestDirectoryPickerLoadsPathsOnly(t *testing.T) {
 			t.Fatalf("unexpected row: %+v", r)
 		}
 	}
-	if m.Init() != nil {
-		t.Fatal("directory picker must not start session retrieval")
+	if m.Init() == nil {
+		t.Fatal("directory picker must schedule background activity retrieval")
+	}
+	if m.agentsLoading {
+		t.Fatal("activity retrieval must not load the selectable agent view")
 	}
 	plain := ansi.Strip(m.View())
 	for _, icon := range []string{"📁", "◉", "▣", "├─", "└─"} {
@@ -104,7 +107,7 @@ func TestCompactPalette(t *testing.T) {
 		rowLine := 2
 		if size[1] >= 8 {
 			rowLine = 3
-			if !strings.Contains(ansi.Strip(lines[1]), "Repos") || !strings.Contains(ansi.Strip(lines[1]), "Sessions") {
+			if !strings.Contains(ansi.Strip(lines[1]), "Repos") || !strings.Contains(ansi.Strip(lines[1]), "Agents") {
 				t.Fatal("missing view pills row")
 			}
 		}

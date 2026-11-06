@@ -109,6 +109,18 @@ func TestRepositoryDiscoveryAndMetadata(t *testing.T) {
 	if len(info.Items) != 1 || !info.Items[0].IsMain || info.BaseBranch != "main" || !reflect.DeepEqual(info.Branches, []string{"main"}) {
 		t.Fatalf("metadata: %+v", info)
 	}
+	if info.SuggestedBranch == "" {
+		t.Fatal("missing default branch suggestion")
+	}
+	if err := worktree.Validate(repo, info.SuggestedBranch, info.BaseBranch, worktree.Path(repo, info.SuggestedBranch, cfg)); err != nil {
+		t.Fatalf("unavailable suggestion: %v", err)
+	}
+	if entries, err := os.ReadDir(cfg.WorktreeRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("metadata created destinations: %v %v", entries, err)
+	}
+	if len(worktree.LocalBranches(repo)) != 1 || len(worktree.List(repo)) != 1 {
+		t.Fatal("metadata created a branch or worktree")
+	}
 	if got := filepath.Join(info.Root, worktree.Folder("feat/shared")); got != worktree.Path(repo, "feat/shared", cfg) {
 		t.Fatalf("destination differs: %s", got)
 	}
@@ -127,6 +139,35 @@ func TestRepositoryDiscoveryAndMetadata(t *testing.T) {
 	detached := ListWorktrees(repo, cfg)
 	if len(detached.Branches) == 0 || detached.BaseBranch != detached.Branches[0] {
 		t.Fatalf("detached fallback: %+v", detached)
+	}
+}
+
+func TestWorktreeSuggestionUnavailableKeepsMetadata(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unborn", true: "destination-error"}[committed], func(t *testing.T) {
+			repo := t.TempDir()
+			if _, err := worktree.GitOut(repo, "init", "-b", "main"); err != nil {
+				t.Fatal(err)
+			}
+			root := t.TempDir()
+			cfg := config.Config{WorktreeRoot: root}
+			if committed {
+				if _, err := worktree.GitOut(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial"); err != nil {
+					t.Fatal(err)
+				}
+				cfg.WorktreeRoot = filepath.Join(root, "loop")
+				if err := os.Symlink(cfg.WorktreeRoot, cfg.WorktreeRoot); err != nil {
+					t.Fatal(err)
+				}
+			}
+			info := ListWorktrees(repo, cfg)
+			if info.SuggestedBranch != "" || len(info.Items) != 1 || !info.Items[0].IsMain || info.BaseBranch != "main" || info.Root == "" {
+				t.Fatalf("suggestion failure changed metadata: %+v", info)
+			}
+			if committed && !reflect.DeepEqual(info.Branches, []string{"main"}) {
+				t.Fatalf("branches lost: %v", info.Branches)
+			}
+		})
 	}
 }
 

@@ -1,21 +1,19 @@
 package picker
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/rex"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
-
-func pickerSession(id, label string) rex.SessionEntry {
-	return rex.SessionEntry{Kind: "session", ID: id, SessionID: id, Label: label, SessionLabel: label}
-}
 
 func pickerRexLog(t *testing.T) string {
 	t.Helper()
@@ -30,97 +28,33 @@ func pickerRexLog(t *testing.T) string {
 	return log
 }
 
-func TestSessionsFirstLoadRunsOnlyInCommand(t *testing.T) {
-	log := pickerRexLog(t)
-	m := &dirModel{width: 60, height: 10}
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if cmd == nil || !m.tabsLoading || m.tabsLoaded {
-		t.Fatal("first switch must start an asynchronous load")
-	}
-	if _, err := os.Stat(log); !os.IsNotExist(err) {
-		t.Fatal("Update ran Rex before returning its command")
-	}
-	if !strings.Contains(ansi.Strip(m.View()), "Loading sessions") {
-		t.Fatal("first load must show loading state")
-	}
-	// Input stays available while the command is pending.
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("find")})
-	msg := cmd()
-	if m.tabsLoaded {
-		t.Fatal("command mutated the model instead of returning a message")
-	}
-	m.Update(msg)
-	if !m.tabsLoaded || m.tabsLoading || m.filter != "find" {
-		t.Fatal("load did not keep input entered while pending")
-	}
-}
-
 func TestPickerSwitchKeepsEachViewsFilterSelectionAndScroll(t *testing.T) {
-	m := &dirModel{width: 60, height: 8, filter: "repo", sel: 7, tabsLoaded: true}
-	for i := 0; i < 10; i++ {
-		m.rows = append(m.rows, row{label: fmt.Sprintf("repo%d", i), path: fmt.Sprintf("/repo%d", i)})
-		m.tabs = append(m.tabs, pickerSession(fmt.Sprint(i), fmt.Sprintf("session%d", i)))
-	}
-	m.applyFilter()
-	beforeRepos := m.View()
-	if m.switchToTabs() == nil || m.filter != "" || m.sel != 0 || len(m.tabsView) != 10 {
-		t.Fatal("cached sessions must appear immediately with independent state")
-	}
-	m.filter, m.sel = "session", 8
-	m.applyTabFilter()
-	beforeSessions := m.View()
-	m.switchToRepos()
-	if m.filter != "repo" || m.sel != 7 || m.View() != beforeRepos {
-		t.Fatal("repository filter, selection, or viewport changed")
-	}
-	if cmd := m.switchToTabs(); cmd != nil {
-		t.Fatal("switch must not duplicate a pending refresh")
-	}
-	if m.filter != "session" || m.sel != 8 || m.View() != beforeSessions {
-		t.Fatal("session filter, selection, or viewport changed")
-	}
-}
-
-func TestSessionRefreshKeepsLatestSelectionAndInactiveViewState(t *testing.T) {
-	m := &dirModel{tabs: []rex.SessionEntry{pickerSession("a", "session a"), pickerSession("b", "session b")}, tabsLoaded: true}
-	m.switchToTabs()
-	request := m.tabsRequest
-	m.filter, m.sel = "session", 1
-	m.applyTabFilter()
-	m.switchToRepos()
-	m.filter = "repo query"
-	m.Update(tabsLoadedMsg{request: request, entries: []rex.SessionEntry{pickerSession("b", "session b"), pickerSession("a", "session a")}})
-	if m.viewMode != 0 || m.filter != "repo query" || m.sel != 0 {
-		t.Fatal("inactive session refresh changed the repository view")
-	}
-	if cmd := m.switchToTabs(); cmd == nil {
-		t.Fatal("completed cache must refresh again on the next switch")
-	}
-	if m.filter != "session" || m.selectedEntry().ID != "b" || m.sel != 0 {
-		t.Fatal("refresh lost saved query or selected identity")
-	}
-}
-
-func TestSessionRefreshRejectsStaleResponsesAndKeepsCacheOnFailure(t *testing.T) {
-	m := &dirModel{viewMode: 1, tabs: []rex.SessionEntry{pickerSession("a", "alpha")}, tabsLoaded: true}
-	m.applyTabFilter()
-	m.loadTabs(false)
-	stale := m.tabsRequest
-	m.loadTabs(true)
-	latest := m.tabsRequest
-	m.Update(tabsLoadedMsg{request: stale, entries: []rex.SessionEntry{pickerSession("stale", "stale")}})
-	m.Update(tabsLoadedMsg{request: stale, err: errors.New("stale error")})
-	if !m.tabsLoading || m.err != "" || m.selectedEntry().ID != "a" {
-		t.Fatal("stale response changed the cache or loading state")
-	}
-	m.Update(tabsLoadedMsg{request: latest, err: errors.New("offline")})
-	if m.tabsLoading || m.err != "offline" || m.selectedEntry().ID != "a" {
-		t.Fatal("failed refresh discarded cached rows")
-	}
-	// Even a duplicate response for the completed request is ignored.
-	m.Update(tabsLoadedMsg{request: latest, entries: nil})
-	if len(m.tabs) != 1 {
-		t.Fatal("duplicate response replaced cached rows")
+	for _, key := range []tea.KeyType{tea.KeyTab, tea.KeyShiftTab} {
+		m := &dirModel{width: 60, height: 8, filter: "repo", sel: 7, agentsLoaded: true}
+		for i := 0; i < 10; i++ {
+			m.rows = append(m.rows, row{label: fmt.Sprintf("repo%d", i), path: fmt.Sprintf("/repo%d", i)})
+			m.agents = append(m.agents, pickerAgent(fmt.Sprint(i)))
+		}
+		m.applyFilter()
+		beforeRepos := m.View()
+		_, cmd := m.Update(tea.KeyMsg{Type: key})
+		if cmd == nil || m.viewMode != 2 || m.filter != "" || m.sel != 0 || len(m.agentsView) != 10 {
+			t.Fatal("cached agents must appear immediately with independent state")
+		}
+		m.filter, m.sel = "Agent", 8
+		m.applyAgentFilter()
+		beforeAgents := m.View()
+		m.Update(tea.KeyMsg{Type: key})
+		if m.viewMode != 0 || m.filter != "repo" || m.sel != 7 || m.View() != beforeRepos {
+			t.Fatal("repository filter, selection, or viewport changed")
+		}
+		_, cmd = m.Update(tea.KeyMsg{Type: key})
+		if cmd != nil {
+			t.Fatal("switch must not duplicate a pending refresh")
+		}
+		if m.viewMode != 2 || m.filter != "Agent" || m.sel != 8 || m.View() != beforeAgents {
+			t.Fatal("agent filter, selection, or viewport changed")
+		}
 	}
 }
 
@@ -130,15 +64,15 @@ func TestRepositoryRefreshKeepsSelectionAndInactiveState(t *testing.T) {
 	m.applyFilter()
 	m.refreshRepos()
 	request := m.reposRequest
-	m.switchToTabs()
-	m.filter = "sessions query"
+	m.switchView(2)
+	m.filter = "agents query"
 	m.Update(reposLoadedMsg{request: request + 1, rows: nil})
 	if !m.reposLoading || len(m.rows) != 2 {
 		t.Fatal("stale repository refresh was accepted")
 	}
 	m.Update(reposLoadedMsg{request: request, rows: []row{{label: "b", path: "/b"}, {label: "a", path: "/a"}}})
-	if m.filter != "sessions query" || m.viewMode != 1 {
-		t.Fatal("repository refresh changed active session state")
+	if m.filter != "agents query" || m.viewMode != 2 {
+		t.Fatal("repository refresh changed active agent state")
 	}
 	m.switchToRepos()
 	if m.filter != "" || m.sel != 0 || m.selected().path != "/b" {
@@ -146,93 +80,96 @@ func TestRepositoryRefreshKeepsSelectionAndInactiveState(t *testing.T) {
 	}
 }
 
-func TestRenameKeepsOriginalTargetAcrossRefreshAndInvalidatesOldLoad(t *testing.T) {
-	log := pickerRexLog(t)
-	m := &dirModel{viewMode: 1, tabsLoaded: true, tabs: []rex.SessionEntry{pickerSession("a", "alpha")}}
-	m.applyTabFilter()
-	m.loadTabs(false)
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
-	m.renameBuf = "renamed"
-	m.Update(tabsLoadedMsg{request: m.tabsRequest, entries: []rex.SessionEntry{pickerSession("b", "beta")}})
-	// A second background load can still be pending when rename completes.
-	m.loadTabs(false)
-	stale := m.tabsRequest
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil || m.renaming || m.renameEntry != nil || m.tabsRequest <= stale {
-		t.Fatal("rename must exit and force a new refresh")
-	}
-	calls, err := os.ReadFile(log)
-	if err != nil || !strings.Contains(string(calls), `session.set_label {"label":"renamed","session_id":"a"}`) {
-		t.Fatalf("rename targeted a changed selection: %s (%v)", calls, err)
-	}
-	m.Update(tabsLoadedMsg{request: stale, entries: nil})
-	if len(m.tabs) != 1 || !m.tabsLoading {
-		t.Fatal("pre-mutation response replaced the cache")
-	}
-}
-
-func TestCloseRefreshAndConfirmationSafety(t *testing.T) {
-	for _, kind := range []string{"session", "window"} {
-		t.Run(kind, func(t *testing.T) {
-			log := pickerRexLog(t)
-			entry := pickerSession("other", "Other")
-			entry.Kind = kind
-			m := &dirModel{viewMode: 1, ctx: rex.Ctx{Session: "current"}, tabsLoaded: true, tabs: []rex.SessionEntry{entry}}
-			m.applyTabFilter()
-			m.loadTabs(false)
-			stale := m.tabsRequest
-			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
-			if cmd != nil || m.closeArm == "" {
-				t.Fatal("first close must only arm confirmation")
-			}
-			_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
-			if cmd == nil || m.closeArm != "" || m.tabsRequest <= stale {
-				t.Fatal("confirmed close must invalidate pending loads and refresh")
-			}
-			calls, err := os.ReadFile(log)
-			method := "session.destroy"
-			if kind == "window" {
-				method = "session.close_window"
-			}
-			if err != nil || !strings.Contains(string(calls), method) {
-				t.Fatalf("wrong close mutation: %s (%v)", calls, err)
-			}
-			m.Update(tabsLoadedMsg{request: stale, entries: []rex.SessionEntry{pickerSession("stale", "Stale")}})
-			m.Update(cmd())
-			if len(m.tabs) != 0 || m.tabsLoading {
-				t.Fatal("close refresh did not remove closed entry")
-			}
-		})
-	}
-}
-
-func TestRefreshAndNavigationDisarmClose(t *testing.T) {
-	m := &dirModel{viewMode: 1, tabsLoaded: true, tabs: []rex.SessionEntry{pickerSession("a", "A"), pickerSession("b", "B")}}
-	m.applyTabFilter()
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if m.closeArm != "" {
-		t.Fatal("navigation must cancel confirmation")
-	}
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
-	m.loadTabs(false)
-	m.Update(tabsLoadedMsg{request: m.tabsRequest, entries: []rex.SessionEntry{pickerSession("a", "A")}})
-	if m.closeArm != "" {
-		t.Fatal("a removed selection must cancel confirmation")
-	}
-	m.ctx.Session = "a"
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
-	if m.closeArm != "" || m.err != "cannot close this session" {
-		t.Fatal("current session close guard changed")
-	}
-}
-
 func TestPickerResumeRestartsPendingLoads(t *testing.T) {
 	m := &dirModel{}
-	m.loadTabs(false)
+	m.loadAgents(false)
 	m.refreshRepos()
-	tabs, repos := m.tabsRequest, m.reposRequest
-	if m.Init() == nil || m.tabsRequest <= tabs || m.reposRequest <= repos {
+	agents, repos := m.agentsRequest, m.reposRequest
+	if m.Init() == nil || m.agentsRequest <= agents || m.reposRequest <= repos {
 		t.Fatal("resumed picker must restart interrupted loads")
+	}
+}
+
+func TestRemovedSessionViewCannotBeOpened(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	pickerRexLog(t)
+	m := newDirModel(rex.Ctx{}, config.Default(), false, 1)
+	if m.viewMode != 0 {
+		t.Fatal("legacy startup must use Repos")
+	}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	for _, view := range []int{0, 2} {
+		m.switchView(view)
+		before := m.View()
+		if cmd := m.switchView(1); cmd != nil || m.viewMode != view || m.View() != before {
+			t.Fatal("removed view accepted by switchView")
+		}
+	}
+}
+
+func TestSessionMutationKeysAreInactive(t *testing.T) {
+	log := pickerRexLog(t)
+	for _, view := range []int{0, 2} {
+		m := &dirModel{viewMode: view, width: 80, height: 10, rows: []row{{label: "repo", path: "/repo"}}, agents: []rex.AgentEntry{pickerAgent("a")}}
+		m.applyCurrentFilter()
+		before := m.View()
+		for _, key := range []tea.KeyType{tea.KeyCtrlR, tea.KeyCtrlX, tea.KeyCtrlX} {
+			_, cmd := m.Update(tea.KeyMsg{Type: key})
+			if cmd != nil || m.viewMode != view || m.View() != before {
+				t.Fatal("removed session action changed picker")
+			}
+		}
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Fatal("removed session controls called Rex")
+	}
+}
+
+func TestTwoViewPillsFitAndHighlightActiveView(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+	for _, active := range []int{0, 2} {
+		for _, width := range []int{2, 12, 24, 42, 44, 60, 78, 100} {
+			pills := pickerPills(active, width)
+			plain := ansi.Strip(pills)
+			if lipgloss.Width(pills) != width+2 {
+				t.Fatalf("pill width %d, want %d", lipgloss.Width(pills), width+2)
+			}
+			for _, removed := range []string{"Sessions", "Switch view", "⇥", "^a"} {
+				if strings.Contains(plain, removed) {
+					t.Fatalf("unexpected pill hint %q: %q", removed, plain)
+				}
+			}
+			if width >= 24 {
+				if strings.TrimSpace(plain) != "Repos · Agents" {
+					t.Fatalf("unexpected pills: %q", plain)
+				}
+				name := "Repos"
+				if active == 2 {
+					name = "Agents"
+				}
+				if !strings.Contains(pills, pickerInput.Render(" "+name+" ")) {
+					t.Fatalf("active view %d is not highlighted", active)
+				}
+			}
+		}
+	}
+}
+
+func TestTwoViewFooterDestinations(t *testing.T) {
+	for _, view := range []int{0, 2} {
+		for _, width := range []int{60, 120} {
+			m := &dirModel{viewMode: view, width: width, height: 10, target: "tab"}
+			lines := strings.Split(ansi.Strip(m.View()), "\n")
+			footer := lines[len(lines)-1]
+			want := "⇥ agents"
+			if view == 2 {
+				want = "⇥ repos"
+			}
+			if !strings.Contains(footer, want) || strings.Contains(strings.ToLower(m.View()), "sessions") {
+				t.Fatalf("view %d: incorrect footer %q", view, footer)
+			}
+		}
 	}
 }

@@ -261,6 +261,28 @@ function M.setup(options)
 	})
 
 	rex.action({
+		name = "raptor_agents",
+		title = "Open Agents",
+		description = "Find and jump to a running agent pane.",
+		category = "Navigate",
+		keywords = "agents pi codex claude",
+		run = function(ctx)
+			if ctx.session_id == nil then
+				error("raptor: no session context", 0)
+			end
+			if ctx.block_id then
+				local origin = rex.session.describe_block({ block_id = ctx.block_id })
+				if origin and origin.block and origin.block.label == "raptor" then
+					-- Internal forwarding only: never create a nested picker layer.
+					rex.client.queue("pane.send_key", { key = "ctrl+a" })
+					return { ui = "terminal" }
+				end
+			end
+			return show_picker(ctx, "agents")
+		end,
+	})
+
+	rex.action({
 		name = "raptor_worktree_list",
 		title = "Raptor Worktrees",
 		description = "Browse local worktrees or create one with a branch name and full path preview.",

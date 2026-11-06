@@ -14,7 +14,14 @@ func TestPickersInheritOriginTitle(t *testing.T) {
 	models := []tea.Model{&dirModel{ctx: ctx}, &wtModel{ctx: ctx}, &repoPickModel{ctx: ctx}}
 	for _, model := range models {
 		cmd := model.Init()
-		if cmd == nil || !reflect.DeepEqual(cmd(), tea.SetWindowTitle(ctx.Title)()) {
+		if cmd == nil {
+			t.Fatalf("%T has no init command", model)
+		}
+		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			msg = batch[0]()
+		}
+		if !reflect.DeepEqual(msg, tea.SetWindowTitle(ctx.Title)()) {
 			t.Fatalf("%T did not inherit the origin title", model)
 		}
 	}

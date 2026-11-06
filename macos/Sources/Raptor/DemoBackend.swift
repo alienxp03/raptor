@@ -3,13 +3,19 @@ import Foundation
 // Synthetic data only. This type never creates a Process or accesses the file system.
 actor DemoBackend: BackendClient {
     private var worktrees = [
-        PickerItem(path: "/Users/demo/Projects/example-kit", branch: "main", isMain: true),
-        PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/native-picker", branch: "feat/native-picker", isMain: false),
-        PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/fix-focus", branch: "fix/focus", isMain: false)
+        PickerItem(path: "/Users/demo/Projects/example-kit", branch: "main", isMain: true, state: "blocked", working: true, updatedAt: ISO8601DateFormatter().string(from: Date())),
+        PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/native-picker", branch: "feat/native-picker", isMain: false, state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date())),
+        PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/fix-focus", branch: "fix/focus", isMain: false, state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()))
     ]
     private var pinned: Set<String> = []
     private var contextUpdates = 0
     private var calls: [String] = []
+    private var lastParams: [String: [String: APIValue]] = [:]
+    private let agents = [
+        PickerItem(path: "agent:demo-1", label: "Native Agents view", kind: "agent", sessionID: "session:demo-1", sessionLabel: "dotfiles", app: "Pi", state: "working", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-120)), agentID: "pi-1", windowID: "window:demo-1a", windowLabel: "picker", blockID: "block:demo-left", active: true),
+        PickerItem(path: "agent:demo-2", label: "Backend API", kind: "agent", sessionID: "session:demo-1", sessionLabel: "dotfiles", app: "Codex", state: "blocked", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-20)), windowID: "window:demo-1a", windowLabel: "picker", blockID: "block:demo-right"),
+        PickerItem(path: "agent:demo-3", label: "Review tests", kind: "agent", sessionID: "session:demo-2", sessionLabel: "castty", app: "Claude", state: "idle", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)), windowID: "window:demo-2a", windowLabel: "research", blockID: "block:demo-review")
+    ]
     private var sessionEntries: [PickerItem] = [
         PickerItem(path: "session:demo-1", label: "dotfiles", kind: "session", sessionID: "session:demo-1", sessionLabel: "dotfiles", active: true),
         PickerItem(path: "window:demo-1a", label: "dotfiles shell", kind: "window", sessionID: "session:demo-1", sessionLabel: "dotfiles", active: true),
@@ -21,10 +27,13 @@ actor DemoBackend: BackendClient {
 
     func count(_ method: String) -> Int { calls.filter { $0 == method }.count }
 
+    func parameters(_ method: String) -> [String: APIValue] { lastParams[method] ?? [:] }
+
     var contextUpdateCount: Int { contextUpdates }
 
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         calls.append(method)
+        lastParams[method] = params
         try await Task.sleep(for: .milliseconds(70))
         func text(_ key: String) -> String { if case let .text(value) = params[key] { return value }; return "" }
         let targets = ["tab", "session", "here", "pane_right", "pane_below"]
@@ -34,14 +43,37 @@ actor DemoBackend: BackendClient {
         case "directories":
             let items = [repo, "/Users/demo/Projects/sample-console", "/Users/demo/Projects/demo-sandbox", "/Users/demo/Work/demo-studio", "/Users/demo/Work/sample-notes"]
                 .filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) }
-                .map { PickerItem(path: $0, isPinned: pinned.contains($0)) }
+                .map { path in
+                    PickerItem(path: path, state: path == repo ? "blocked" : "working", working: true,
+                               updatedAt: ISO8601DateFormatter().string(from: Date()), isPinned: pinned.contains(path))
+                }
             let sorted = items.sorted { ($0.isPinned ?? false) && !($1.isPinned ?? false) }
             return APIResult(items: sorted, targets: targets, target: "tab")
         case "sessions":
             let query = text("query")
-            return APIResult(items: sessionEntries.filter {
+            return APIResult(items: sessionEntries.map { entry in
+                var item = entry
+                item.state = entry.sessionID == "session:demo-1" ? "blocked" : "idle"
+                item.working = entry.sessionID == "session:demo-1"
+                item.updatedAt = ISO8601DateFormatter().string(from: Date())
+                return item
+            }.filter {
                 query.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(query) || ($0.sessionLabel ?? "").localizedCaseInsensitiveContains(query)
             }, targets: [], target: "tab")
+        case "agents":
+            let query = text("query")
+            let ordered = agents.sorted { lhs, rhs in
+                let groups = AgentGroup.allCases
+                let left = groups.firstIndex(of: lhs.agentGroup)!, right = groups.firstIndex(of: rhs.agentGroup)!
+                if left != right { return left < right }
+                return (lhs.updatedDate ?? .distantPast) > (rhs.updatedDate ?? .distantPast)
+            }
+            return APIResult(items: ordered.filter { item in
+                query.isEmpty || [item.label, item.app, item.state, item.sessionLabel, item.windowLabel]
+                    .compactMap { $0 }.contains { $0.localizedCaseInsensitiveContains(query) }
+            })
+        case "agents.jump":
+            return APIResult()
         case "sessions.jump":
             return APIResult()
         case "sessions.close":
@@ -63,7 +95,7 @@ actor DemoBackend: BackendClient {
             return APIResult(items: worktrees.filter {
                 text("query").isEmpty || $0.path.localizedCaseInsensitiveContains(text("query")) || ($0.branch ?? "").localizedCaseInsensitiveContains(text("query"))
             }, targets: targets, target: "tab", repo: repo, destinationRoot: "/Users/demo/Projects/example-kit-worktrees", needsRepo: false,
-            branches: branches, baseBranch: "main")
+            branches: branches, baseBranch: "main", suggestedBranch: "amber-falcon")
         case "worktrees.branches":
             return APIResult(branches: branches.filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) })
         case "worktrees.preview":
@@ -72,7 +104,8 @@ actor DemoBackend: BackendClient {
                              validationError: branch.isEmpty ? "Enter a branch name." : nil)
         case "worktrees.create":
             let path = "/Users/demo/Projects/example-kit-worktrees/" + text("branch").replacingOccurrences(of: "/", with: "-")
-            worktrees.append(PickerItem(path: path, branch: text("branch"), isMain: false))
+            worktrees.append(PickerItem(path: path, branch: text("branch"), isMain: false, state: "idle", working: false,
+                                       updatedAt: ISO8601DateFormatter().string(from: Date())))
             return APIResult(path: path)
         case "worktrees.remove":
             worktrees.removeAll { $0.path == text("path") && $0.isMain != true }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"time"
 
 	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
@@ -25,9 +26,29 @@ const MaxRequestSize = 1024 * 1024
 type Handler struct {
 	ctx rex.Ctx
 	cfg config.Config
+
+	activityAgents []rex.AgentEntry
+	activityAt     time.Time
 }
 
 func New(ctx rex.Ctx, cfg config.Config) *Handler { return &Handler{ctx: ctx, cfg: cfg} }
+
+const activitySnapshotTTL = 2 * time.Second
+
+// Serve dispatches requests serially. Keep one successful snapshot across view
+// and context changes. Failures are not cached; the next request can retry.
+// Fresh agent requests also refresh activity, but never reuse origin Active flags.
+func (h *Handler) activitySnapshot(fresh bool) ([]rex.AgentEntry, error) {
+	if !fresh && !h.activityAt.IsZero() && time.Since(h.activityAt) < activitySnapshotTTL {
+		return h.activityAgents, nil
+	}
+	entries, err := rex.AgentEntries(h.ctx.Session)
+	if err != nil {
+		return nil, err
+	}
+	h.activityAgents, h.activityAt = entries, time.Now()
+	return entries, nil
+}
 
 type request struct {
 	ID     *int64          `json:"id"`
@@ -128,6 +149,7 @@ type treeResult struct {
 	Items           []treeItem `json:"items"`
 	Branches        []string   `json:"branches"`
 	BaseBranch      string     `json:"base_branch"`
+	SuggestedBranch string     `json:"suggested_branch,omitempty"`
 	Targets         []string   `json:"targets"`
 	Target          string     `json:"target"`
 }
@@ -149,6 +171,12 @@ type pinsResult struct {
 	Pinned bool `json:"pinned"`
 }
 
+type agentsResult struct {
+	Items   []rex.AgentEntry `json:"items"`
+	Targets []string         `json:"targets"`
+	Target  string           `json:"target"`
+}
+
 type sessionsResult struct {
 	Items   []rex.SessionEntry `json:"items"`
 	Targets []string           `json:"targets"`
@@ -158,16 +186,16 @@ type sessionsResult struct {
 // decodeSessionAction validates the shared {kind, session_id, window_id?}
 // envelope of the tab/session mutations.
 func decodeSessionAction(params json.RawMessage) (struct {
-	Kind       string `json:"kind"`
-	SessionID  string `json:"session_id"`
-	WindowID   string `json:"window_id"`
-	Label      string `json:"label"`
+	Kind      string `json:"kind"`
+	SessionID string `json:"session_id"`
+	WindowID  string `json:"window_id"`
+	Label     string `json:"label"`
 }, rex.SessionEntry, error) {
 	var p struct {
-		Kind       string `json:"kind"`
-		SessionID  string `json:"session_id"`
-		WindowID   string `json:"window_id"`
-		Label      string `json:"label"`
+		Kind      string `json:"kind"`
+		SessionID string `json:"session_id"`
+		WindowID  string `json:"window_id"`
+		Label     string `json:"label"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return p, rex.SessionEntry{}, err
@@ -223,6 +251,35 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return pinsResult{Pinned: pinned}, nil
+	case "agents":
+		var p struct {
+			Query string `json:"query"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		entries, err := h.activitySnapshot(true)
+		if err != nil {
+			return nil, err
+		}
+		result := agentsResult{Items: []rex.AgentEntry{}, Targets: []string{}, Target: h.cfg.Enter}
+		for _, i := range catalog.FilterAgents(entries, p.Query) {
+			result.Items = append(result.Items, entries[i])
+		}
+		return result, nil
+	case "agents.jump":
+		var p struct {
+			SessionID string `json:"session_id"`
+			WindowID  string `json:"window_id"`
+			BlockID   string `json:"block_id"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		if err := rex.JumpAgent(rex.AgentEntry{SessionID: p.SessionID, WindowID: p.WindowID, BlockID: p.BlockID}, h.ctx.Client); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
 	case "sessions":
 		var p struct {
 			Query string `json:"query"`
@@ -233,6 +290,9 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		entries, err := rex.SessionEntries(h.ctx.Session)
 		if err != nil {
 			return nil, err
+		}
+		if agents, err := h.activitySnapshot(false); err == nil {
+			rex.ApplySessionActivity(entries, agents)
 		}
 		result := sessionsResult{Items: []rex.SessionEntry{}, Targets: []string{}, Target: h.cfg.Enter}
 		for _, i := range catalog.FilterSessions(entries, p.Query) {
@@ -291,6 +351,9 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		items := catalog.Directories(p.ReposOnly)
+		if agents, err := h.activitySnapshot(false); err == nil {
+			catalog.ApplyDirectoryActivity(items, agents)
+		}
 		result := directoryResult{Items: []catalog.Directory{}, Targets: h.targets(), Target: h.cfg.Enter}
 		for _, i := range catalog.FilterDirectories(items, p.Query) {
 			result.Items = append(result.Items, items[i])
@@ -315,6 +378,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 			result.DestinationRoot = info.Root
 			result.Branches = append(result.Branches, info.Branches...)
 			result.BaseBranch = info.BaseBranch
+			result.SuggestedBranch = info.SuggestedBranch
 			for _, i := range catalog.FilterWorktrees(info.Items, p.Query) {
 				w := info.Items[i]
 				result.Items = append(result.Items, treeItem{w.Path, w.Branch, w.IsMain})

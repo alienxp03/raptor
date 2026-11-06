@@ -76,20 +76,17 @@ func pickerDirectory(path string, width int, selected bool) string {
 	return pickerRow(style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3, 0))), width, selected)
 }
 
-// pickerPills renders the view switcher under the search field. active is
-// 0 (repos) or 1 (sessions) — same order as the native panel.
+// pickerPills renders the view switcher under the search field.
+// active is 0 (repos) or 2 (agents); the old sessions index is reserved.
 func pickerPills(active int, width int) string {
 	pills := []struct {
 		name string
-		hint string
-	}{{"Repos", ""}, {"Sessions", ""}}
+		view int
+	}{{"Repos", 0}, {"Agents", 2}}
 	parts := make([]string, 0, len(pills))
-	for i, pill := range pills {
+	for _, pill := range pills {
 		name := pill.name
-		if pill.hint != "" && width >= 44 {
-			name += " " + pill.hint
-		}
-		if i == active {
+		if pill.view == active {
 			// The active pill stays quiet; amber belongs to the selected row only.
 			parts = append(parts, pickerInput.Render(" "+name+" "))
 		} else {
@@ -97,14 +94,15 @@ func pickerPills(active int, width int) string {
 		}
 	}
 	content := strings.Join(parts, pickerRail.Render("·"))
-	if width >= 44 {
-		content += pickerMuted.Render("   ⇥ Switch view")
-	}
 	return pickerLine(content, width)
 }
 
 // pickerDirectoryRow adds the alt-number and pin columns to a directory row.
 func pickerDirectoryRow(path string, pinned bool, position, width int, selected bool) string {
+	return pickerDirectoryRowActivity(path, pinned, position, width, selected, "")
+}
+
+func pickerDirectoryRowActivity(path string, pinned bool, position, width int, selected bool, indicator string) string {
 	style := pickerText
 	if selected {
 		style = pickerSelected.Bold(true)
@@ -125,11 +123,15 @@ func pickerDirectoryRow(path string, pinned bool, position, width int, selected 
 			prefix += pickerAccent.Render("★ ")
 		}
 	}
-	return pickerRow(prefix+style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3-lipgloss.Width(prefix), 0))), width, selected)
+	return pickerRow(prefix+style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3-lipgloss.Width(prefix)-lipgloss.Width(indicator), 0)))+indicator, width, selected)
 }
 
 // pickerSessionRow indents tabs below their selectable parent session.
 func pickerSessionRow(entry rex.SessionEntry, position, width int, selected bool) string {
+	return pickerSessionRowActivity(entry, position, width, selected, activityIndicator(entry.State, entry.Working, 0))
+}
+
+func pickerSessionRowActivity(entry rex.SessionEntry, position, width int, selected bool, indicator string) string {
 	style := pickerText
 	if selected {
 		style = pickerSelected.Bold(true)
@@ -158,12 +160,12 @@ func pickerSessionRow(entry rex.SessionEntry, position, width int, selected bool
 		detail = "Session"
 		style = style.Bold(true)
 	}
-	nameWidth := maxInt(width-3-lipgloss.Width(prefix), 1)
+	nameWidth := maxInt(width-3-lipgloss.Width(prefix)-lipgloss.Width(indicator), 1)
 	if width >= 36 && detail != "" {
 		nameWidth = maxInt(nameWidth-lipgloss.Width(detail)-2, 1)
 	}
 	name := ansi.Truncate(entry.Label, nameWidth, "…")
-	content := prefix + style.Render(name)
+	content := prefix + style.Render(name) + indicator
 	if width >= 36 && detail != "" {
 		gap := strings.Repeat(" ", maxInt(nameWidth-lipgloss.Width(name)+2, 2))
 		pathWidth := maxInt(width-2-lipgloss.Width(prefix)-nameWidth-3, 0)

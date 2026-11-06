@@ -26,10 +26,6 @@ func TestSessionRowsShowHierarchy(t *testing.T) {
 			}
 		}
 	}
-	pills := ansi.Strip(pickerPills(1, 78))
-	if !strings.Contains(pills, "Sessions") || !strings.Contains(pills, "⇥ Switch view") || strings.Contains(pills, "Tabs") {
-		t.Fatalf("incorrect view labels: %q", pills)
-	}
 }
 
 func TestPickerPaintRestoresBackground(t *testing.T) {

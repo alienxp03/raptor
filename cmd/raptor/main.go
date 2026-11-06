@@ -35,7 +35,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|launcher|wt|task|api|direct|last-session|last-pane|panel|service> [command flags]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|agents|launcher|wt|task|api|direct|last-session|last-pane|panel|service> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -58,6 +58,9 @@ func main() {
 	case "dirs":
 		picker.ApplyTheme()
 		os.Exit(picker.RunDirs(ctx, cfg))
+	case "agents":
+		picker.ApplyTheme()
+		os.Exit(picker.RunAgents(ctx, cfg))
 	case "launcher":
 		picker.ApplyTheme()
 		os.Exit(picker.RunLauncher(ctx, cfg))
@@ -97,7 +100,7 @@ func main() {
 	case "panel":
 		// Open (or toggle) the resident native panel over IPC.
 		rest := flag.NewFlagSet("panel", flag.ExitOnError)
-		mode := rest.String("mode", "dirs", "picker mode: dirs, wt or wt-create")
+		mode := rest.String("mode", "dirs", "picker mode: dirs, agents, wt or wt-create")
 		repo := rest.String("repo", "", "repository for worktree modes")
 		_ = rest.Parse(fs.Args()[1:])
 		req := panel.Request{
