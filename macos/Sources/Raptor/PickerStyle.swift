@@ -7,7 +7,7 @@ import SwiftUI
 enum PickerStyle {
     static let width: CGFloat = 640
     static let topInset: CGFloat = 72
-    static let radius: CGFloat = 12
+    static let radius: CGFloat = 16
     static let bodyFontSize: CGFloat = 13
     static let rowFontSize: CGFloat = 13
     static let titleFontSize: CGFloat = 14
@@ -18,18 +18,23 @@ enum PickerStyle {
     static let createHeight: CGFloat = 240
     static let searchHeight: CGFloat = 40
     static let searchFieldHeight: CGFloat = 30
+    static let pillsHeight: CGFloat = 34
     static let createHeaderHeight: CGFloat = searchHeight
     static let footerHeight: CGFloat = 34
-    static let rowHeight: CGFloat = 28
+    static let rowHeight: CGFloat = 32
     static let worktreeRowHeight: CGFloat = 28
     static let selectedPathHeight: CGFloat = 32
 
     // Colors forward to PickerPalette, which the Go backend refreshes with
     // the active Rex theme per invocation.
     static var selection: Color { PickerPalette.selection }
-    static var selectionText: Color { PickerPalette.selectionText }
+    static var selectionText: Color { .white }
     static var background: Color { PickerPalette.background }
     static var fieldBackground: Color { PickerPalette.fieldBackground }
+    static var foreground: Color { PickerPalette.foreground }
+    static var secondaryText: Color { foreground.opacity(0.55) }
+    static var glassTint: NSColor { NSColor(background).withAlphaComponent(0.35) }
+    static var hairline: NSColor { NSColor(foreground).withAlphaComponent(0.15) }
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {
         CGRect(x: area.midX - width / 2, y: area.maxY - topInset - height,
@@ -49,14 +54,15 @@ enum PickerStyle {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
             return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 32)
         }
-        let rowHeight = model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight
+        let rowHeight = model.page == .worktrees && model.view == .repos ? Self.worktreeRowHeight : Self.rowHeight
         // Reserve the list footprint before the first backend response arrives.
         let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count, 2), 8)
         let rows = CGFloat(rowCount)
         let status: CGFloat = model.error == nil && model.notice == nil ? 0 : 32
-        let detail = model.page == .worktrees ? selectedPathHeight : 0
-        let wrappedRow = model.page == .worktrees && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
-        let content = searchHeight + rows * rowHeight + wrappedRow + 8 + detail + footerHeight + status
+        let pills: CGFloat = model.showsPills ? pillsHeight : 0
+        let detail = model.page == .worktrees && model.view == .repos ? selectedPathHeight : 0
+        let wrappedRow = model.page == .worktrees && model.view == .repos && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
+        let content = searchHeight + pills + rows * rowHeight + wrappedRow + 8 + detail + footerHeight + status
         let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
         return min(content, max(available, 180))
     }
@@ -77,6 +83,9 @@ extension CGRect {
 
 private struct RexPanelBackground: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
+        // Popover surfaces only. The main panel's glass material lives in the
+        // window (RaptorApp.makeContent) — PickerView itself stays transparent
+        // so the system glass shows through.
         content
             .background(PickerStyle.background)
             .clipShape(RoundedRectangle(cornerRadius: PickerStyle.radius))

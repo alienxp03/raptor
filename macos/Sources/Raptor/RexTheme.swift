@@ -23,6 +23,7 @@ struct ThemePayload: Codable, Sendable {
 @MainActor
 enum PickerPalette {
     static var isDark = true
+    static var foreground = Color(red: 0.84, green: 0.79, blue: 0.72)
     static var selection = Color(red: 0.722, green: 0.510, blue: 0.259)
     static var selectionText = Color(red: 0.153, green: 0.141, blue: 0.133)
     static var background = Color(red: 0.153, green: 0.141, blue: 0.133)
@@ -31,6 +32,7 @@ enum PickerPalette {
 
     static func useFallback(dark: Bool) {
         isDark = dark
+        foreground = dark ? Color(red: 0.84, green: 0.79, blue: 0.72) : Color(red: 0.1, green: 0.1, blue: 0.1)
         if dark {
             selection = Color(red: 0.722, green: 0.510, blue: 0.259)
             selectionText = Color(red: 0.153, green: 0.141, blue: 0.133)
@@ -50,6 +52,7 @@ enum PickerPalette {
         guard let background = payload.background.flatMap(hexColor) else { return }
         isDark = payload.isDark ?? (hexLuma(background) < 0.5)
         self.background = background
+        foreground = payload.foreground.flatMap(hexColor) ?? (isDark ? Color(red: 0.84, green: 0.79, blue: 0.72) : Color(red: 0.1, green: 0.1, blue: 0.1))
         selection = payload.selection.flatMap(hexColor) ?? selectionFallback
         selectionText = payload.selectionForeground.flatMap(hexColor)
             ?? contrastText(for: selection)

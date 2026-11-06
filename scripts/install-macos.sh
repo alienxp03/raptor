@@ -40,6 +40,11 @@ if [[ $app_only == false ]]; then
   PREFIX_BIN=$(cd "$PREFIX/bin" && pwd -P)
 fi
 target="$APP_DESTINATION/Raptor.app"
+# The resident panel host runs the app binary from the target path; stop it
+# before replacing anything. Best effort: an absent service must not block.
+if [[ -x $target/Contents/MacOS/raptor-cli ]]; then
+	"$target/Contents/MacOS/raptor-cli" service stop >/dev/null 2>&1 || true
+fi
 require_stopped_app "$target"
 [[ ! -L $target ]] || fail "Refusing to replace app symlink: $target"
 if [[ $app_only == false ]]; then
@@ -73,6 +78,14 @@ if [[ $source_app != "$target" ]]; then
   /usr/bin/ditto "$work/Raptor.app" "$target"
   verify_app "$target"
   restore=false
+fi
+# Install and start the resident panel service. Optional: without it the
+# picker falls back to launching the app through Launch Services.
+if "$target/Contents/MacOS/raptor-cli" service install --app "$target" >/dev/null 2>&1 && \
+	"$target/Contents/MacOS/raptor-cli" service start >/dev/null 2>&1; then
+	printf 'Installed resident panel service: %s\n' "$("$target/Contents/MacOS/raptor-cli" service status)"
+else
+	printf 'Panel service not installed; the picker will launch the app on demand\n'
 fi
 if [[ $app_only == true ]]; then
   printf 'Installed app: %s\n' "$target"

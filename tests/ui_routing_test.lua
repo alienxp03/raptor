@@ -1,11 +1,12 @@
 -- Native app routing must never replace the mobile terminal picker.
 local real_open = io.open
 local function check(case)
-	local actions, executions, layers = {}, {}, {}
+	local actions, executions, layers, native_results = {}, {}, {}, {}
 	local title_calls = 0
 	local picker_open = false
 	local queued = {}
 	local app = "/demo/Application Support/Raptor.app"
+	local bin = os.getenv("HOME") .. "/.local/bin/raptor"
 	io.open = function(path)
 		if case.installed and path == app .. "/Contents/Info.plist" then
 			return { close = function() end }
@@ -61,10 +62,20 @@ local function check(case)
 			set_block_label = function() end,
 			focus_block = function() end,
 		},
+		native_ok = function(args)
+			if args[2] == "panel" then
+				-- The resident host needs its app; a stale install cannot serve.
+				if case.panel_failure then return false end
+				return (case.host_running or case.installed) and not case.launch_failure
+			end
+			return case.installed and not case.launch_failure
+		end,
 		exec = function(args, opts)
 			assert(opts.timeout == 5)
 			executions[#executions + 1] = args
-			return { ok = not case.launch_failure }
+			local ok = rex.native_ok(args)
+			native_results[#executions] = ok
+			return { ok = ok }
 		end,
 	}
 	dofile("init.lua").setup({ app = app, ui = case.ui or "auto" })
@@ -84,17 +95,28 @@ local function check(case)
 		assert(result.ui == case.expected, case.name .. ": incorrect UI")
 		if result.ui == "native" then
 			local command = executions[#executions]
-			assert(command[1] == "/usr/bin/open" and command[2] == "-g" and command[3] == "-a" and command[4] == app)
-			assert(
-				command[5]
-					== "raptor://picker?mode="
-						.. mode
-						.. "&session=session%3Ademo%26safe&block=block%3Ademo%20space&client=demo-client"
-			)
-			assert(
-				#command == 5 and title_calls == 0,
-				"native launch must reuse the app and skip terminal-title lookups"
-			)
+			if case.panel_failure then
+				assert(
+					command[1] == "/usr/bin/open" and command[2] == "-g" and command[3] == "-a" and command[4] == app,
+					"panel failure must fall back to Launch Services"
+				)
+				assert(
+					command[5]
+						== "raptor://picker?mode="
+							.. mode
+							.. "&session=session%3Ademo%26safe&block=block%3Ademo%20space&client=demo-client"
+				)
+				assert(#command == 5)
+			else
+				-- Fast path: resident panel host over IPC.
+				assert(command[1] == bin and command[2] == "panel" and command[3] == "open", "native open must try IPC first")
+				assert(command[4] == "--mode" and command[5] == mode)
+				assert(command[6] == "-session" and command[7] == ctx.session_id)
+				assert(command[8] == "-block" and command[9] == ctx.block_id)
+				assert(command[10] == "-client" and command[11] == ctx.client_id)
+				assert(#command == 11, "native IPC must skip title lookups and repo flags")
+			end
+			assert(title_calls == 0, "native launch must skip terminal-title lookups")
 		else
 			local layer = layers[#layers]
 			local command = layer.layout.options.command
@@ -117,13 +139,17 @@ local function check(case)
 	actions.raptor_worktree_new(ctx)
 	assert(#layers == layer_count, "Ctrl+N inside a picker must not nest layers")
 	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+n")
-	if case.ui ~= "gui" and (case.platform ~= "macos" or case.kind == "cli" or case.ui == "terminal" or not case.installed or case.transport == "tls") then
-		assert(#executions == 0, case.name .. ": native process unexpectedly started")
+	if case.ui ~= "gui" and (case.platform ~= "macos" or case.kind == "cli" or case.ui == "terminal" or (not case.installed and not case.host_running) or case.transport == "tls") then
+		for _, ok in ipairs(native_results) do
+			assert(not ok, case.name .. ": native process unexpectedly started")
+		end
 	end
 end
 
 for _, case in ipairs({
 	{ name = "Mac native", platform = "macos", installed = true, expected = "native" },
+	{ name = "Mac native panel failure falls back to Launch Services", platform = "macos", installed = true, panel_failure = true, expected = "native" },
+	{ name = "resident host without app bundle", platform = "macos", host_running = true, expected = "native" },
 	{ name = "Mac-hosted CLI is not a viewing app", platform = "macos", kind = "cli", installed = true, expected = "terminal" },
 	{ name = "remote Mac", platform = "macos", transport = "tls", installed = true, expected = "terminal" },
 	{ name = "iPhone", platform = "ios", installed = true, expected = "terminal" },
@@ -141,4 +167,4 @@ for _, case in ipairs({
 	check(case)
 end
 io.open = real_open
-print("UI routing: passed (Mac native, mobile terminal, missing/failed app fallback)")
+print("UI routing: passed (resident IPC, Launch Services fallback, mobile terminal, missing/failed app fallback)")

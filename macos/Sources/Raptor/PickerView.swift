@@ -10,13 +10,13 @@ struct PickerView: View {
         VStack(spacing: 0) {
             header
             if model.page == .create { createForm } else { results }
-            if model.page == .worktrees { selectedWorktreePath }
+            if model.page == .worktrees && model.view == .repos { selectedWorktreePath }
             status
             footer
         }
         .font(.system(size: PickerStyle.bodyFontSize))
+        .foregroundStyle(PickerStyle.foreground)
         .frame(width: PickerStyle.width, height: PickerStyle.height(for: model))
-        .pickerGlass()
         .tint(PickerStyle.selection)
         // Color.primary and system controls follow the Rex theme, not the app's own appearance.
         .preferredColorScheme(PickerPalette.isDark ? .dark : .light)
@@ -34,15 +34,42 @@ struct PickerView: View {
             field = page == .create ? .branch : .search
         }
         .alert("Remove worktree?", isPresented: Binding(
-            get: { model.removalCandidate != nil },
+            get: { model.removalCandidate != nil && model.view == .repos },
             set: { if !$0 { model.removalCandidate = nil } }
-        ), presenting: model.removalCandidate) { candidate in
+        ), presenting: model.view == .repos ? model.removalCandidate : nil) { candidate in
             Button("Cancel", role: .cancel) { model.removalCandidate = nil }
                 .keyboardShortcut(.defaultAction)
             Button("Remove", role: .destructive) { model.confirmRemove(candidate) }
                 .accessibilityIdentifier("confirm-remove")
         } message: { candidate in
             Text("Remove \(displayPath(candidate.path))?\nGit checks for unsaved changes. The branch is kept.")
+        }
+        .alert("Close tab?", isPresented: Binding(
+            get: { model.removalCandidate != nil && model.view == .tabs },
+            set: { if !$0 { model.removalCandidate = nil } }
+        ), presenting: model.view == .tabs ? model.removalCandidate : nil) { candidate in
+            Button("Cancel", role: .cancel) { model.removalCandidate = nil }
+                .keyboardShortcut(.defaultAction)
+            Button("Close", role: .destructive) { model.confirmCloseEntry() }
+                .accessibilityIdentifier("confirm-close-entry")
+        } message: { candidate in
+            Text("Close \(candidate.label ?? candidate.path)?\(candidate.kind == "session" ? " Every tab in it closes." : " Every pane in it closes.")")
+        }
+        .alert("Rename", isPresented: Binding(
+            get: { model.renameCandidate != nil },
+            set: { if !$0 { model.cancelRename() } }
+        ), presenting: model.renameCandidate) { candidate in
+            TextField("Name", text: Binding(
+                get: { model.renameLabel ?? "" },
+                set: { model.renameLabel = $0 }
+            ))
+                .accessibilityIdentifier("rename-field")
+            Button("Cancel", role: .cancel) { model.cancelRename() }
+                .keyboardShortcut(.defaultAction)
+            Button("Rename") { model.commitRename() }
+                .accessibilityIdentifier("confirm-rename")
+        } message: { candidate in
+            Text("Rename \(candidate.label ?? candidate.path).")
         }
     }
 
@@ -61,8 +88,9 @@ struct PickerView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12))
-                        .foregroundStyle(Color.primary.opacity(0.5))
-                    TextField(searchPrompt, text: $model.query)
+                        .foregroundStyle(PickerStyle.foreground.opacity(0.5))
+                    TextField(searchPrompt, text: $model.query,
+                              prompt: Text(searchPrompt).foregroundColor(PickerStyle.foreground.opacity(0.45)))
                         .textFieldStyle(.plain)
                         .font(.system(size: PickerStyle.rowFontSize))
                         .focused($field, equals: .search)
@@ -85,6 +113,7 @@ struct PickerView: View {
     }
 
     private var searchPrompt: String {
+        if model.view == .tabs { return "Search tabs and sessions…" }
         switch model.page {
         case .repositories: return "Search repositories…"
         case .worktrees: return "Search worktrees…"
@@ -92,18 +121,52 @@ struct PickerView: View {
         }
     }
 
+    private var viewPills: some View {
+        HStack(spacing: 6) {
+            pill("Repos", active: model.view == .repos, icon: "folder", hint: nil)
+                .accessibilityIdentifier("pill-repos")
+                .onTapGesture { if model.view != .repos { model.switchView() } }
+            pill("Tabs", active: model.view == .tabs, icon: "square.stack.3d.up", hint: "⇥")
+                .accessibilityIdentifier("pill-tabs")
+                .onTapGesture { if model.view != .tabs { model.switchView() } }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, PickerStyle.listInset)
+        .padding(.bottom, 8)
+        .frame(height: PickerStyle.pillsHeight)
+        .accessibilityIdentifier("view-pills")
+    }
+
+    private func pill(_ title: String, active: Bool, icon: String, hint: String?) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            Text(title).font(.system(size: 12, weight: active ? .semibold : .regular))
+            if let hint {
+                Text(hint).font(.system(size: 10)).foregroundStyle(PickerStyle.foreground.opacity(active ? 0.7 : 0.45))
+            }
+        }
+        .foregroundStyle(active ? PickerStyle.foreground : PickerStyle.foreground.opacity(0.55))
+        .padding(.horizontal, 10)
+        .frame(height: 22)
+        .background(active ? PickerStyle.foreground.opacity(0.12) : PickerStyle.foreground.opacity(0.05), in: Capsule())
+        .contentShape(Capsule())
+    }
+
     private var results: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(model.items) { item in row(item).id(item.id) }
+                    if model.showsPills { viewPills }
+                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                        row(item, position: index + 1).id(item.id)
+                    }
                 }
                 .padding(.horizontal, PickerStyle.listInset).padding(.vertical, 4)
             }
             .overlay {
                 if model.items.isEmpty {
                     Text(model.loading ? "Loading…" : (model.error == nil ? emptyMessage : "No results"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PickerStyle.secondaryText)
                 }
             }
             .onChange(of: model.selectedID) { _, id in
@@ -114,10 +177,40 @@ struct PickerView: View {
         .accessibilityIdentifier("picker-results")
     }
 
-    private func row(_ item: PickerItem) -> some View {
+    private func row(_ item: PickerItem, position: Int = 0) -> some View {
         let selected = model.selectedID == item.id
-        return HStack(spacing: 10) {
-            if let branch = item.branch {
+        let isTabs = item.isSessionEntry
+        return HoverRow(selected: selected, enabled: !isTabs) {
+            if position >= 1, position <= 9, !isTabs {
+                Text("⌘\(position)")
+                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.45))
+                    .accessibilityHidden(true)
+            }
+            if item.isPinned == true {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.selection)
+                    .accessibilityLabel("Pinned")
+            }
+            if isTabs {
+                Image(systemName: item.kind == "session" ? "tray.full" : "rectangle.split.toprow")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground.opacity(0.55))
+                    .accessibilityHidden(true)
+                Text(item.label ?? item.path)
+                    .lineLimit(1).truncationMode(.tail)
+                if item.active == true {
+                    Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
+                        .frame(width: 6, height: 6)
+                        .accessibilityLabel("Active")
+                }
+                Spacer(minLength: 8)
+                Text(item.kind == "session" ? "Session" : (item.sessionLabel ?? ""))
+                    .font(.system(size: 11))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.5))
+                    .lineLimit(1).truncationMode(.tail)
+            } else if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
                     .lineLimit(selected ? 2 : 1).truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
@@ -125,7 +218,7 @@ struct PickerView: View {
                 Text(displayPath(item.path))
                     .lineLimit(1).truncationMode(.middle)
             }
-            if selected {
+            if selected && !isTabs {
                 Spacer(minLength: 8)
                 Image(systemName: "checkmark")
                     .font(.system(size: 12, weight: .semibold))
@@ -133,12 +226,12 @@ struct PickerView: View {
             }
         }
         .font(.system(size: PickerStyle.rowFontSize, weight: selected ? .medium : .regular))
-        .foregroundStyle(selected ? PickerStyle.selectionText : Color.primary)
+        .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PickerStyle.rowInset)
         .frame(height: model.page == .worktrees ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight)
         .background {
-            if selected { RoundedRectangle(cornerRadius: 6).fill(PickerStyle.selection) }
+            if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selection) }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -163,7 +256,7 @@ struct PickerView: View {
         Group {
             if let selected = model.selected {
                 Text(displayPath(selected.path))
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(.system(size: 12)).foregroundStyle(PickerStyle.secondaryText)
                     .textSelection(.enabled)
                     .lineLimit(2).truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -184,8 +277,8 @@ struct PickerView: View {
                     .disableAutocorrection(true)
                     .textFieldStyle(.plain).padding(.horizontal, 9)
                     .frame(height: PickerStyle.controlHeight)
-                    .background(field == .branch ? PickerStyle.fieldBackground : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .branch ? PickerStyle.selection : Color.primary.opacity(0.1)))
+                    .background(field == .branch ? PickerStyle.fieldBackground : PickerStyle.foreground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .branch ? PickerStyle.selection : PickerStyle.foreground.opacity(0.1)))
                     .focused($field, equals: .branch)
                     .task { await Task.yield(); field = .branch }
                     .onSubmit { presentBasePicker() }
@@ -197,14 +290,14 @@ struct PickerView: View {
                 Button { presentBasePicker() } label: {
                     HStack {
                         Text(model.base.isEmpty ? "Choose a local branch…" : model.base)
-                            .foregroundStyle(model.base.isEmpty ? Color.primary.opacity(0.45) : Color.primary)
+                            .foregroundStyle(model.base.isEmpty ? PickerStyle.foreground.opacity(0.45) : PickerStyle.foreground)
                         Spacer()
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.primary.opacity(0.5))
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(PickerStyle.foreground.opacity(0.5))
                     }
                     .padding(.horizontal, 9)
                     .frame(height: PickerStyle.controlHeight)
-                    .background(field == .base ? PickerStyle.fieldBackground : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .base ? PickerStyle.selection : Color.primary.opacity(0.1)))
+                    .background(field == .base ? PickerStyle.fieldBackground : PickerStyle.foreground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .base ? PickerStyle.selection : PickerStyle.foreground.opacity(0.1)))
                 }
                 .buttonStyle(.plain).focusable().focused($field, equals: .base)
                 .onKeyPress(.return) { presentBasePicker(); return .handled }
@@ -234,14 +327,14 @@ struct PickerView: View {
     }
 
     private func formLabel(_ title: String) -> some View {
-        Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
+        Text(title).font(.system(size: 12)).foregroundStyle(PickerStyle.secondaryText)
             .frame(width: 90, alignment: .leading)
     }
 
     private func pathRow(_ title: String, value: String, path: String?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             formLabel(title)
-            Text(value).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 12)).foregroundStyle(PickerStyle.secondaryText)
                 .textSelection(.enabled).lineLimit(1).truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .help(path ?? value)
@@ -266,7 +359,7 @@ struct PickerView: View {
         Button { model.create() } label: {
             HStack(spacing: 10) {
                 Text(createActionLabel).fontWeight(.semibold)
-                Text("⌘↵").foregroundStyle(.secondary)
+                Text("⌘↵").foregroundStyle(PickerStyle.secondaryText)
             }
             .padding(.horizontal, 12)
             .frame(height: PickerStyle.controlHeight)
@@ -310,29 +403,49 @@ struct PickerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 4)
         } else if let notice = model.notice {
-            Text(notice).foregroundStyle(.secondary).accessibilityIdentifier("picker-notice")
+            Text(notice).foregroundStyle(PickerStyle.secondaryText).accessibilityIdentifier("picker-notice")
                 .font(.system(size: 11)).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 4)
         }
     }
 
-    private var isListPage: Bool { model.page == .directories || model.page == .worktrees }
+    private var isListPage: Bool { model.view == .tabs || model.page == .directories || model.page == .worktrees }
+
+    private var tabActions: some View {
+        HStack(spacing: 12) {
+            Button("↵ Switch") { model.choose() }.disabled(!model.canOpen)
+                .accessibilityIdentifier("open-selected")
+            Button("⌘R Rename") { model.beginRename() }
+                .disabled(model.busy || model.loading || model.selected?.isSessionEntry != true)
+                .accessibilityIdentifier("rename-entry")
+            Button("⌃X Close") { model.requestCloseEntry() }
+                .disabled(model.busy || model.loading || model.selected?.isSessionEntry != true)
+                .accessibilityIdentifier("close-entry")
+        }
+        .font(.system(size: 10))
+        .fixedSize()
+        .accessibilityIdentifier("tab-actions")
+    }
 
     private var footer: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
                 if model.splitMode {
                     Text("Split ⌃P   j↓  l→").accessibilityIdentifier("keyboard-hint")
+                } else if model.view == .tabs {
+                    Text("Tabs & Sessions").foregroundStyle(PickerStyle.secondaryText)
                 } else if model.page == .repositories {
-                    Text("Choose repository").foregroundStyle(.secondary)
+                    Text("Choose repository").foregroundStyle(PickerStyle.secondaryText)
                 } else if model.page == .create {
                     Text("Tab fields · ⌃O target").accessibilityIdentifier("keyboard-hint")
                 } else {
                     openTargetControl
                 }
                 Spacer(minLength: 0)
-                if isListPage && !model.splitMode { listActions }
+                if model.view == .tabs && !model.splitMode {
+                    tabActions
+                } else if isListPage && !model.splitMode { listActions }
                 if model.page == .create { createSubmitButton }
                 if model.page == .repositories {
                     Button("Choose ↵") { model.choose() }
@@ -342,7 +455,7 @@ struct PickerView: View {
             }
             .frame(height: PickerStyle.footerHeight)
         }
-        .font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.65))
+        .font(.system(size: 11)).foregroundStyle(PickerStyle.foreground.opacity(0.65))
         .lineLimit(1)
         .buttonStyle(.plain)
         .padding(.horizontal, PickerStyle.horizontalInset)
@@ -376,7 +489,7 @@ struct PickerView: View {
     private var openTargetControl: some View {
         HStack(spacing: model.page == .create ? 10 : 6) {
             if model.page == .create { formLabel("Open in") }
-            else { Text("Open in:").font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.75)) }
+            else { Text("Open in:").font(.system(size: 11)).foregroundStyle(PickerStyle.foreground.opacity(0.75)) }
             Button {
                 guard !model.targetPickerPresented else { return }
                 model.targetPickerPresented = true
@@ -385,12 +498,12 @@ struct PickerView: View {
                     Text(PickerModel.targetLabel(model.target))
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                 }
-                .font(.system(size: PickerStyle.bodyFontSize, weight: .semibold))
-                .foregroundStyle(Color.primary)
+                .font(.system(size: model.page == .create ? PickerStyle.bodyFontSize : 11, weight: .medium))
+                .foregroundStyle(PickerStyle.foreground.opacity(0.85))
                 .padding(.horizontal, 8)
-                .frame(height: PickerStyle.controlHeight)
-                .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(field == .target ? PickerStyle.selection : PickerPalette.stroke))
+                .frame(height: model.page == .create ? PickerStyle.controlHeight : 22)
+                .background(PickerStyle.foreground.opacity(0.06), in: Capsule())
+                .overlay(Capsule().strokeBorder(field == .target ? PickerStyle.selection : Color.clear))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -411,7 +524,7 @@ struct PickerView: View {
                 })
             }
             if model.page != .create {
-                Text("⌃O").font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.65))
+                Text("⌃O").font(.system(size: 10)).foregroundStyle(PickerStyle.foreground.opacity(0.65))
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -427,10 +540,30 @@ struct PickerView: View {
     }
 
     private var emptyMessage: String {
+        if model.view == .tabs { return "No matching tabs" }
         switch model.page {
         case .worktrees: return "No matching worktrees"
         case .repositories: return "No matching repositories"
         default: return "No matching directories"
         }
+    }
+}
+
+// Rows brighten under the cursor without stealing the selection.
+private struct HoverRow<Content: View>: View {
+    let selected: Bool
+    let enabled: Bool
+    @ViewBuilder let content: () -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 10) { content() }
+            .background {
+                if hovering, !selected, enabled {
+                    RoundedRectangle(cornerRadius: 9).fill(PickerStyle.foreground.opacity(0.05))
+                }
+            }
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.1), value: hovering)
     }
 }

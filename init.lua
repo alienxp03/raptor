@@ -176,6 +176,24 @@ function M.setup(options)
 		ctx = resolve_context(ctx)
 		local platform, local_client = client_platform(ctx)
 		if mode ~= "launcher" and (cfg.ui == "gui" or (cfg.ui == "auto" and platform == "macos" and local_client)) then
+			-- Fast path: the resident panel host answers over a local socket.
+			-- No process spawn, no app activation, no flicker. Failure falls
+			-- back to Launch Services, which starts the host when installed.
+			local panel_args = { cfg.bin, "panel", "open", "--mode", mode }
+			for _, pair in ipairs({
+				{ "-session", ctx.session_id },
+				{ "-block", ctx.block_id },
+				{ "-client", ctx.client_id },
+			}) do
+				if pair[2] ~= nil and pair[2] ~= "" then
+					table.insert(panel_args, pair[1])
+					table.insert(panel_args, pair[2])
+				end
+			end
+			local panel_result = rex.exec(panel_args, { timeout = 5 })
+			if panel_result ~= nil and panel_result.ok then
+				return { ui = "native" }
+			end
 			local apps = cfg.app ~= "" and { cfg.app }
 				or { os.getenv("HOME") .. "/Applications/Raptor.app", "/Applications/Raptor.app" }
 			for _, app in ipairs(apps) do
