@@ -7,7 +7,7 @@ build:
 	go build -o $(BIN) ./cmd/raptor
 
 ifeq ($(shell uname -s),Darwin)
-install: install-app
+install: install-app install-cli
 else
 install: install-cli
 endif
@@ -20,7 +20,7 @@ app:
 	./scripts/build-macos.sh
 
 install-app: app
-	PREFIX="$(PREFIX)" ./scripts/install-macos.sh
+	PREFIX="$(PREFIX)" ./scripts/install-macos.sh --app-only
 
 package:
 	./scripts/package-macos.sh

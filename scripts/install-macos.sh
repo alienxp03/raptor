@@ -5,14 +5,20 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/macos-common.sh"
 
 if [[ ${1:-} == --help || ${1:-} == -h ]]; then
   # shellcheck disable=SC2016 # Help shows variable names, not current values.
-  printf '%s\n' 'Usage: scripts/install-macos.sh [PATH/TO/Raptor.app]' \
+  printf '%s\n' 'Usage: scripts/install-macos.sh [--app-only] [PATH/TO/Raptor.app]' \
     'Install an already-built, signed app and its bundled CLI and Rex plugin.' \
+    '--app-only installs only the app, including its internal backend; no standalone CLI or plugin.' \
     'Defaults: DIST_DIR/Raptor.app, APP_DESTINATION=$HOME/Applications,' \
     'PREFIX=$HOME/.local, REX_PLUGIN_DIR=$HOME/.config/rex/raptor.' \
     'Customized plugin files and symlinks are kept; unchanged installer-owned copies upgrade.' \
     'No user init.lua edits or key bindings.' \
     'No sudo, build, app launch, or publishing. Use make install-cli for terminal-only installs.'
   exit 0
+fi
+app_only=false
+if [[ ${1:-} == --app-only ]]; then
+  app_only=true
+  shift
 fi
 [[ $# -le 1 ]] || fail 'Expected at most one app path; see --help.'
 macos_only
@@ -27,13 +33,18 @@ verify_app "$source_app"
 APP_DESTINATION=${APP_DESTINATION:-"$HOME/Applications"}
 PREFIX=${PREFIX:-"$HOME/.local"}
 REX_PLUGIN_DIR=${REX_PLUGIN_DIR:-"$HOME/.config/rex/raptor"}
-mkdir -p "$APP_DESTINATION" "$PREFIX/bin"
+mkdir -p "$APP_DESTINATION"
 APP_DESTINATION=$(cd "$APP_DESTINATION" && pwd -P)
-PREFIX_BIN=$(cd "$PREFIX/bin" && pwd -P)
+if [[ $app_only == false ]]; then
+  mkdir -p "$PREFIX/bin"
+  PREFIX_BIN=$(cd "$PREFIX/bin" && pwd -P)
+fi
 target="$APP_DESTINATION/Raptor.app"
 require_stopped_app "$target"
 [[ ! -L $target ]] || fail "Refusing to replace app symlink: $target"
-[[ ! -L $PREFIX_BIN/raptor && ! -d $PREFIX_BIN/raptor ]] || fail "Refusing to replace CLI symlink/directory: $PREFIX_BIN/raptor"
+if [[ $app_only == false ]]; then
+  [[ ! -L $PREFIX_BIN/raptor && ! -d $PREFIX_BIN/raptor ]] || fail "Refusing to replace CLI symlink/directory: $PREFIX_BIN/raptor"
+fi
 if [[ -e $target ]]; then
   [[ -d $target ]] || fail "App target is not a directory: $target"
   [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$target/Contents/Info.plist") == com.alienxp03.raptor ]] || fail 'Refusing to replace an unrelated app.'
@@ -62,6 +73,10 @@ if [[ $source_app != "$target" ]]; then
   /usr/bin/ditto "$work/Raptor.app" "$target"
   verify_app "$target"
   restore=false
+fi
+if [[ $app_only == true ]]; then
+  printf 'Installed app: %s\n' "$target"
+  exit 0
 fi
 install -m 0755 "$target/Contents/MacOS/raptor-cli" "$PREFIX_BIN/raptor"
 # Upgrade only installer-owned, unmodified plugin files. Never write through

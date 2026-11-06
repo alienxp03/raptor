@@ -83,7 +83,7 @@ cd ~/.config/rex/raptor
 make install
 ```
 
-On Mac, `make install` builds and installs `~/Applications/Raptor.app` and `~/.local/bin/raptor`. On other systems it installs the CLI only. For a terminal-only or remote-server install on Mac, use `make install-cli`.
+On Mac, `make install` builds and installs both `~/Applications/Raptor.app` and `~/.local/bin/raptor`. Use `make install-app` for the app only (including its internal backend), or `make install-cli` for the standalone CLI only. These commands leave the Rex plugin unchanged. On other systems, `make install` installs the CLI only.
 
 Add setup and your own key bindings to `~/.config/rex/init.lua`:
 
@@ -270,7 +270,8 @@ Raptor needs Rex, Git, and zoxide. Go builds both interfaces' backend. The Mac U
 ```sh
 make              # Build ./raptor (terminal CLI)
 make install      # Mac app + CLI on macOS; CLI elsewhere
-make install-cli  # Terminal CLI only
+make install-app  # Mac app only, including its internal backend
+make install-cli  # Standalone CLI only
 make test         # Go and Lua checks
 make test-macos   # Swift 6 model/transport checks and UI type-check
 ```
