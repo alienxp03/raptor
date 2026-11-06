@@ -128,6 +128,10 @@ private actor CachedListBackend: BackendClient {
 @main
 struct NativeChecks {
     @MainActor static func main() async throws {
+        precondition(PickerStyle.panelAnimationBehavior(reduceMotion: false) == .default,
+                     "Panel presentation must use resh's default AppKit animation")
+        precondition(PickerStyle.panelAnimationBehavior(reduceMotion: true) == .none,
+                     "Reduced Motion must disable panel presentation animation")
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/demo", "--session", "S", "--block", "B", "--client", "C", "--title", "A title"])
         precondition(options.backendArguments == ["--session", "S", "--block", "B", "--client", "C", "--title", "A title", "api"])
         do {

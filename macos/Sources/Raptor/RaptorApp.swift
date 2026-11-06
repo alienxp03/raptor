@@ -141,8 +141,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func showResidentPanel() {
         guard let panel else { return }
+        panel.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         NSApp.unhide(nil)
-        // Show at full alpha with no entrance animation.
+        // AppKit supplies resh's panel fade; no custom delay or alpha animation.
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
     }
@@ -234,8 +235,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         picker.isOpaque = false
         picker.backgroundColor = .clear
         picker.hasShadow = true
-        // Opening and closing must not wait for AppKit's panel fade.
-        picker.animationBehavior = .none
+        // Match resh's system panel animation, unless Reduced Motion is enabled.
+        picker.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         picker.level = .floating
         picker.hidesOnDeactivate = false
         picker.isFloatingPanel = true
@@ -322,6 +323,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func bringForward(_ picker: NSPanel) {
+        picker.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
         picker.makeKeyAndOrderFront(nil)

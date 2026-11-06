@@ -39,6 +39,10 @@ enum PickerStyle {
     static var glassTint: NSColor { NSColor(background).withAlphaComponent(0.35) }
     static var hairline: NSColor { NSColor(foreground).withAlphaComponent(0.15) }
 
+    static func panelAnimationBehavior(reduceMotion: Bool) -> NSWindow.AnimationBehavior {
+        reduceMotion ? .none : .default
+    }
+
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {
         CGRect(x: area.midX - width / 2, y: area.maxY - topInset - height,
                width: width, height: height)
