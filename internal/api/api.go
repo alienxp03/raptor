@@ -221,7 +221,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 	// validation for the selected method.
 	switch method {
 	case "theme":
-		return picker.ThemeJSON(), nil
+		return map[string]any{"theme": picker.ThemeJSON()}, nil
 	case "context":
 		// The resident backend is shared across opens; every open sends its
 		// origin context here instead of spawning a new process.

@@ -4,7 +4,15 @@ import SwiftUI
 // Theme palette delivered by the Go backend's `theme` method. Go resolves
 // the active Rex theme from the Rex app bundle and preferences; Swift only
 // paints. Fields are optional so partial payloads degrade gracefully.
-struct ThemePayload: Codable, Sendable {
+struct InterfacePalettePayload: Codable, Equatable, Sendable {
+    var background: String?
+    var foreground: String?
+    var selection: String?
+    var selectionForeground: String?
+    var surface: String?
+}
+
+struct ThemePayload: Codable, Equatable, Sendable {
     var name: String?
     var isDark: Bool?
     var background: String?
@@ -15,10 +23,12 @@ struct ThemePayload: Codable, Sendable {
     var surface: String?
     var accent: String?
     var ansi: [String]?
+    var interfaceStyle: String?
+    var ui: InterfacePalettePayload?
 }
 
 // The palette both picker views paint with. Starts as the Rex-sampled dark
-// fallback; the backend replaces it with the active Rex theme per invocation.
+// fallback; the backend refreshes it with the active Rex theme while visible.
 // All access rides the main actor, like the views and model that read it.
 @MainActor
 enum PickerPalette {
@@ -29,9 +39,13 @@ enum PickerPalette {
     static var background = Color(red: 0.153, green: 0.141, blue: 0.133)
     static var fieldBackground = Color(red: 0.243, green: 0.227, blue: 0.224)
     static var stroke = Color.white.opacity(0.07)
+    static var selectionOpacity = 1.0
+    static var usesThemeTint = true
 
     static func useFallback(dark: Bool) {
         isDark = dark
+        selectionOpacity = 1
+        usesThemeTint = true
         foreground = dark ? Color(red: 0.84, green: 0.79, blue: 0.72) : Color(red: 0.1, green: 0.1, blue: 0.1)
         if dark {
             selection = Color(red: 0.722, green: 0.510, blue: 0.259)
@@ -48,16 +62,32 @@ enum PickerPalette {
         }
     }
 
-    static func apply(_ payload: ThemePayload) {
-        guard let background = payload.background.flatMap(hexColor) else { return }
+    @discardableResult static func apply(_ payload: ThemePayload) -> Bool {
+        guard let background = (payload.ui?.background ?? payload.background).flatMap(hexColor) else { return false }
         isDark = payload.isDark ?? (hexLuma(background) < 0.5)
         self.background = background
-        foreground = payload.foreground.flatMap(hexColor) ?? (isDark ? Color(red: 0.84, green: 0.79, blue: 0.72) : Color(red: 0.1, green: 0.1, blue: 0.1))
-        selection = payload.selection.flatMap(hexColor) ?? selectionFallback
-        selectionText = payload.selectionForeground.flatMap(hexColor)
+        let nativeChrome = payload.ui != nil && payload.interfaceStyle != "useTheme"
+        foreground = nativeChrome ? nativeLabelColor(dark: isDark)
+            : (payload.ui?.foreground ?? payload.foreground).flatMap(hexColor)
+                ?? (isDark ? Color(red: 0.84, green: 0.79, blue: 0.72) : Color(red: 0.1, green: 0.1, blue: 0.1))
+        selection = (payload.ui?.selection ?? payload.selection).flatMap(hexColor) ?? selectionFallback
+        selectionText = (payload.ui?.selectionForeground ?? payload.selectionForeground).flatMap(hexColor)
             ?? contrastText(for: selection)
-        fieldBackground = payload.surface.flatMap(hexColor) ?? fieldFallback(for: background)
+        selectionOpacity = payload.ui == nil ? 1 : 0.75
+        usesThemeTint = payload.ui == nil || ["blendTheme", "useTheme"].contains(payload.interfaceStyle ?? "modern")
+        fieldBackground = nativeChrome ? (isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
+            : (payload.ui?.surface ?? payload.surface).flatMap(hexColor) ?? fieldFallback(for: background)
         stroke = isDark ? Color.white.opacity(0.07) : Color.black.opacity(0.12)
+        return true
+    }
+
+    /// Rex's glass styles retain system chrome labels, not terminal text colors.
+    private static func nativeLabelColor(dark: Bool) -> Color {
+        var label = NSColor.labelColor
+        NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+            label = NSColor.labelColor.usingColorSpace(.sRGB) ?? label
+        }
+        return Color(nsColor: label)
     }
 
     private static var selectionFallback: Color {

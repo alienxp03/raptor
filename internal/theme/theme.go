@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"howett.net/plist"
 )
@@ -43,16 +42,27 @@ func (c Color) Hex() string {
 // Theme is the resolved Rex palette in sRGB. Hex strings feed lipgloss and
 // the native-app protocol; ANSI holds the terminal palette, indices 0-15.
 type Theme struct {
-	Name                string   `json:"name"`
-	IsDark              bool     `json:"isDark"`
-	Background          string   `json:"background"`
-	Foreground          string   `json:"foreground"`
-	Cursor              string   `json:"cursor"`
-	Selection           string   `json:"selection"`
-	SelectionForeground string   `json:"selectionForeground"`
-	Surface             string   `json:"surface"`
-	Accent              string   `json:"accent"`
-	ANSI                []string `json:"ansi"`
+	Name                string     `json:"name"`
+	IsDark              bool       `json:"isDark"`
+	Background          string     `json:"background"`
+	Foreground          string     `json:"foreground"`
+	Cursor              string     `json:"cursor"`
+	Selection           string     `json:"selection"`
+	SelectionForeground string     `json:"selectionForeground"`
+	Surface             string     `json:"surface"`
+	Accent              string     `json:"accent"`
+	ANSI                []string   `json:"ansi"`
+	InterfaceStyle      string     `json:"interfaceStyle,omitempty"`
+	UI                  *UIPalette `json:"ui,omitempty"`
+}
+
+// UIPalette holds native UI roles, separate from the terminal palette.
+type UIPalette struct {
+	Background          string `json:"background"`
+	Foreground          string `json:"foreground"`
+	Selection           string `json:"selection"`
+	SelectionForeground string `json:"selectionForeground"`
+	Surface             string `json:"surface"`
 }
 
 // Options make resolution testable. Zero fields use the real machine state.
@@ -66,28 +76,10 @@ type Options struct {
 	SystemIsDark func() bool
 }
 
-var (
-	mu     sync.Mutex
-	cached *Theme
-)
-
-// Resolve returns the active Rex theme, or ErrUnavailable. Results are
-// cached per process; each picker run is a fresh process.
+// Resolve returns the active Rex theme, or ErrUnavailable. Each call reads
+// current preferences, system appearance, and the selected theme catalog so
+// resident callers see theme changes.
 func Resolve(opts Options) (*Theme, error) {
-	mu.Lock()
-	defer mu.Unlock()
-	if cached != nil {
-		return cached, nil
-	}
-	t, err := resolve(opts)
-	if err != nil {
-		return nil, err
-	}
-	cached = t
-	return t, nil
-}
-
-func resolve(opts Options) (*Theme, error) {
 	prefs, err := readPrefs(opts)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
@@ -103,9 +95,9 @@ func resolve(opts Options) (*Theme, error) {
 	if appearance != "system" && appearance != "light" && appearance != "dark" {
 		return nil, fmt.Errorf("%w: unsupported appearance %q", ErrUnavailable, appearance)
 	}
-	// Tinted interface styles redraw UI chrome from the wallpaper, so the
-	// theme file no longer describes what is on screen.
-	if style == "blendTheme" || style == "useTheme" {
+	switch style {
+	case "modern", "classic", "blendTheme", "useTheme":
+	default:
 		return nil, fmt.Errorf("%w: interface style %q", ErrUnavailable, style)
 	}
 	dark := appearance == "dark" || (appearance == "system" && systemIsDark(opts))
@@ -119,13 +111,19 @@ func resolve(opts Options) (*Theme, error) {
 	}
 
 	if custom := parseCustomThemes(prefs["Workspace.customThemes"], id); custom != nil {
+		custom.InterfaceStyle = style
 		return custom, nil
 	}
 	data, err := builtinThemes(opts)
 	if err != nil {
 		return nil, err
 	}
-	return builtinTheme(data, id, dark)
+	theme, err := builtinTheme(data, id, dark)
+	if err != nil {
+		return nil, err
+	}
+	theme.InterfaceStyle = style
+	return theme, nil
 }
 
 func systemIsDark(opts Options) bool {
@@ -325,9 +323,26 @@ func builtinTheme(entries []map[string]any, id string, dark bool) (*Theme, error
 		if name == "" {
 			name = id
 		}
-		return &Theme{Name: name, IsDark: dark, Background: background,
+		theme := &Theme{Name: name, IsDark: dark, Background: background,
 			Foreground: foreground, Cursor: cursor, Selection: selection,
-			SelectionForeground: selectionForeground, Surface: surface, Accent: accent, ANSI: ansi}, nil
+			SelectionForeground: selectionForeground, Surface: surface, Accent: accent, ANSI: ansi}
+		// Older catalogs have terminal roles only. Do not invent UI selection.
+		if c := p3Color(semantic["selection"]); c != nil {
+			uiColor := func(key, fallback string) string {
+				if color := p3Color(semantic[key]); color != nil {
+					return color.Hex()
+				}
+				return fallback
+			}
+			theme.UI = &UIPalette{
+				Background:          uiColor("surfaceRaised", theme.Surface),
+				Foreground:          uiColor("content", theme.Foreground),
+				Selection:           c.Hex(),
+				SelectionForeground: uiColor("selectionForeground", theme.Background),
+				Surface:             uiColor("controlOnOverlay", theme.Surface),
+			}
+		}
+		return theme, nil
 	}
 	return nil, fmt.Errorf("%w: theme %q not found", ErrUnavailable, id)
 }

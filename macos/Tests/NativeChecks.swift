@@ -1,4 +1,6 @@
 import Foundation
+import AppKit
+import SwiftUI
 
 // Standalone headless checks. Compile with Backend, DemoBackend and PickerModel,
 // not RaptorApp. No NSApplication, panel, Rex call or live file operation.
@@ -128,6 +130,10 @@ private actor CachedListBackend: BackendClient {
 @main
 struct NativeChecks {
     @MainActor static func main() async throws {
+        if CommandLine.arguments.contains("--theme-integration") {
+            try await themeIntegrationChecks()
+            return
+        }
         precondition(PickerStyle.panelAnimationBehavior(reduceMotion: false) == .default,
                      "Panel presentation must use resh's default AppKit animation")
         precondition(PickerStyle.panelAnimationBehavior(reduceMotion: true) == .none,
@@ -245,6 +251,8 @@ struct NativeChecks {
         try await groupedActivityChecks()
         try await cachedListChecks()
         try await warmReopenChecks()
+        try nativeThemeRoleChecks()
+        try await themeRefreshChecks()
         try await dismissalChecks()
         let directoryCreate = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
         directoryCreate.start()
@@ -1094,6 +1102,150 @@ struct NativeChecks {
         print("PASS: non-demo jump/dispatch closes without sticky busy, resident replacement reopens, pending Escape/dismiss preserves create/pin, real recovery reconfigure retains error/path/origin without recreation, explicit discard gates stale actions")
     }
 
+    @MainActor private static func nativeThemeRoleChecks() throws {
+        let ui = InterfacePalettePayload(background: "#303030", foreground: "#ddbbcc",
+                                         selection: "#aaccaa", selectionForeground: "#102030",
+                                         surface: "#505050")
+        for dark in [true, false] {
+            for style in ["modern", "classic", "blendTheme", "useTheme"] {
+                let payload = ThemePayload(isDark: dark, background: "#112233", foreground: "#aabbaa",
+                                           selection: "#223322", selectionForeground: "#ddeedd",
+                                           interfaceStyle: style, ui: ui)
+                precondition(PickerPalette.apply(payload))
+                precondition(NSColor(PickerStyle.background) == NSColor(hexColor("#303030")!) &&
+                             NSColor(PickerStyle.selection) == NSColor(hexColor("#aaccaa")!) &&
+                             NSColor(PickerStyle.selectionText) == NSColor(hexColor("#102030")!) &&
+                             PickerPalette.selectionOpacity == 0.75,
+                             "Native roles must not reuse terminal canvas, selection or selected text")
+                let label = NSColor(PickerStyle.foreground).usingColorSpace(.sRGB)!
+                if style == "useTheme" {
+                    precondition(NSColor(PickerStyle.foreground) == NSColor(hexColor("#ddbbcc")!),
+                                 "Full-theme chrome must use UI content, not terminal foreground")
+                } else {
+                    precondition(abs(label.redComponent - label.greenComponent) < 0.01 &&
+                                 abs(label.greenComponent - label.blueComponent) < 0.01 &&
+                                 (dark ? label.redComponent > 0.8 : label.redComponent < 0.2),
+                                 "Native labels must follow Rex appearance, not system or terminal colors")
+                }
+                let tinted = style == "blendTheme" || style == "useTheme"
+                precondition(PickerPalette.usesThemeTint == tinted)
+                if #available(macOS 26.0, *) {
+                    let glass = NSGlassEffectView(frame: .zero)
+                    glass.wantsLayer = true
+                    PickerStyle.applyPanelTheme(to: glass)
+                    precondition(glass.tintColor == (tinted ? PickerStyle.glassTint : nil),
+                                 "Only Rex's theme-tinted styles may color the glass")
+                }
+            }
+        }
+        PickerPalette.useFallback(dark: true)
+        print("PASS: native UI versus terminal roles, light/dark system labels, tinted/full-theme styles and translucent selection")
+    }
+
+    @MainActor private static func themeRefreshChecks() async throws {
+        let backend = CachedListBackend()
+        await backend.hold("theme")
+        let options = try LaunchOptions(arguments: ["--demo"])
+        let model = PickerModel(options: options, backend: backend)
+        let rows = APIResult(items: [PickerItem(path: "/a"), PickerItem(path: "/b")],
+                             targets: ["tab", "session"], target: "tab")
+        let dark = ThemePayload(name: "Forest", isDark: true, background: "#102030",
+                                foreground: "#eeeeee", selection: "#aaccee",
+                                selectionForeground: "#203040", surface: "#223344")
+        let light = ThemePayload(name: "Light", isDark: false, background: "#f0e0d0",
+                                 foreground: "#203040", selection: "#556677",
+                                 selectionForeground: "#ffeedd", surface: "#ddccbb")
+        model.start()
+        try await pending("theme", backend)
+        try await pending("directories", backend)
+        await backend.reply("directories", rows)
+        try await wait { !model.refreshing }
+        precondition(model.canOpen && !model.themeLoaded,
+                     "A slow theme lookup must not block loaded rows")
+        let first = model.refreshTheme()
+        await backend.reply("theme", APIResult(theme: dark))
+        await first?.value
+        precondition(model.themeLoaded && model.themeRevision == 1 && PickerPalette.isDark)
+        precondition(NSColor(PickerStyle.selectionText) == NSColor(hexColor("#203040")!),
+                     "Selected text must use Rex's selected-theme color, not hardcoded white")
+        let material = NSView()
+        material.wantsLayer = true
+        PickerStyle.applyPanelTheme(to: material)
+        precondition(material.appearance?.name == .darkAqua &&
+                     material.layer?.backgroundColor == NSColor(PickerPalette.background).cgColor,
+                     "Asynchronous theme loading must repaint the native material")
+
+        model.query = "keep"
+        try await pending("directories", backend)
+        await backend.reply("directories", rows)
+        try await wait { !model.refreshing }
+        model.selectedID = "/b"; model.scrollID = "/a"; model.target = "session"
+        let refresh = model.refreshTheme()
+        model.refreshTheme()
+        try await pending("theme", backend)
+        let themeCalls = await backend.count("theme")
+        precondition(themeCalls == 2 && model.canOpen && !model.busy,
+                     "Theme refresh must coalesce requests without gating cached Open")
+        await backend.reply("theme", APIResult(theme: light))
+        await refresh?.value
+        precondition(model.themeRevision == 2 && !PickerPalette.isDark)
+        precondition(model.query == "keep" && model.selectedID == "/b" && model.scrollID == "/a" &&
+                     model.target == "session" && model.items == rows.items,
+                     "Theme changes must preserve query, rows, selection, scroll and target")
+        PickerStyle.applyPanelTheme(to: material)
+        precondition(material.appearance?.name == .aqua &&
+                     material.layer?.backgroundColor == NSColor(PickerPalette.background).cgColor &&
+                     material.layer?.borderColor == PickerStyle.hairline.cgColor,
+                     "Native surface, border and appearance must follow a changed Rex theme")
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView(frame: .zero)
+            glass.wantsLayer = true
+            glass.tintColor = .red
+            PickerStyle.applyPanelTheme(to: glass)
+            precondition(glass.tintColor == PickerStyle.glassTint && glass.appearance?.name == .aqua,
+                         "Glass must replace the previous tint with the loaded Rex theme")
+        }
+        let effect = NSVisualEffectView(frame: .zero)
+        effect.wantsLayer = true
+        PickerStyle.applyPanelTheme(to: effect)
+        precondition(effect.layer?.backgroundColor == PickerStyle.glassTint.cgColor &&
+                     effect.appearance?.name == .aqua,
+                     "Pre-glass macOS material must also follow the Rex theme")
+
+        let unchanged = model.refreshTheme()
+        try await pending("theme", backend)
+        await backend.reply("theme", APIResult(theme: light))
+        await unchanged?.value
+        precondition(model.themeRevision == 2, "An unchanged theme must not repaint")
+        let failed = model.refreshTheme()
+        try await pending("theme", backend)
+        await backend.fail("theme")
+        await failed?.value
+        precondition(model.themeRevision == 2 && model.error == nil,
+                     "A failed refresh must retain the palette without disrupting the picker")
+        let invalid = model.refreshTheme()
+        try await pending("theme", backend)
+        await backend.reply("theme", APIResult(theme: ThemePayload(background: "invalid")))
+        await invalid?.value
+        precondition(model.themeRevision == 2 && !PickerPalette.isDark,
+                     "Malformed colors must not replace the last valid palette")
+        let retry = model.refreshTheme()
+        try await pending("theme", backend)
+        await backend.reply("theme", APIResult(theme: dark))
+        await retry?.value
+        precondition(model.themeRevision == 3 && PickerPalette.isDark,
+                     "Theme lookup must remain retryable after an error or invalid payload")
+        let late = model.refreshTheme()
+        try await pending("theme", backend)
+        model.close()
+        await backend.reply("theme", APIResult(theme: light))
+        await late?.value
+        precondition(model.themeRevision == 3 && PickerPalette.isDark && model.refreshTheme() == nil,
+                     "Closed models must reject late themes and new refreshes")
+        PickerPalette.useFallback(dark: true)
+        print("PASS: asynchronous Rex theme refresh, request coalescing, cached Open, stable picker state, selected text, material repaint, unchanged/error/invalid responses, retry and close")
+    }
+
     @MainActor private static func warmReopenChecks() async throws {
         let options = try LaunchOptions(arguments: ["--demo", "--session", "S", "--block", "B", "--client", "C", "--title", "T"])
         let repos = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0) }, targets: ["tab", "session"], target: "tab")
@@ -1369,6 +1521,37 @@ struct NativeChecks {
             try await Task.sleep(for: .milliseconds(20))
         }
         preconditionFailure("Timed out waiting for model")
+    }
+
+    @MainActor private static func themeIntegrationChecks() async throws {
+        let options = try LaunchOptions(arguments: [])
+        let backend = ProcessBackend(options: options)
+        let result = try await backend.request("theme", params: [:])
+        precondition(result.theme?.name == "Wire Forest" && result.theme?.background == "#102030" &&
+                     result.theme?.ui?.selection == "#bfbfbf",
+                     "Real Go NDJSON must decode result.theme, not silently drop a flat palette")
+        let model = PickerModel(options: options, backend: backend)
+        await model.refreshTheme()?.value
+        precondition(model.themeRevision == 1 && model.themeLoaded && PickerPalette.isDark,
+                     "The real backend must update the native model's palette")
+        precondition(NSColor(PickerStyle.background) == NSColor(hexColor("#333333")!) &&
+                     NSColor(PickerStyle.selection) == NSColor(hexColor("#bfbfbf")!) &&
+                     NSColor(PickerStyle.selectionText) == NSColor(hexColor("#1a191a")!) &&
+                     PickerPalette.selectionOpacity == 0.75,
+                     "Native selection must use UI tokens, not terminal selection colors")
+        let label = NSColor(PickerStyle.foreground).usingColorSpace(.sRGB)!
+        precondition(abs(label.redComponent - label.greenComponent) < 0.01 &&
+                     abs(label.greenComponent - label.blueComponent) < 0.01,
+                     "Glass chrome must keep native neutral labels, not green terminal text")
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView(frame: .zero)
+            glass.wantsLayer = true
+            PickerStyle.applyPanelTheme(to: glass)
+            precondition(glass.tintColor == NSColor(hexColor("#333333")!).withAlphaComponent(0.35),
+                         "Real backend colors must reach the panel material")
+        }
+        model.close()
+        print("PASS: real Go backend → NDJSON → Swift decoding → model → selected text and native panel tint")
     }
 
     private static func transportChecks() async throws {

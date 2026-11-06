@@ -29,15 +29,29 @@ enum PickerStyle {
     static let selectedPathHeight: CGFloat = 32
 
     // Colors forward to PickerPalette, which the Go backend refreshes with
-    // the active Rex theme per invocation.
+    // the active Rex theme while the panel is visible.
     static var selection: Color { PickerPalette.selection }
-    static var selectionText: Color { .white }
+    static var selectionBackground: Color { selection.opacity(PickerPalette.selectionOpacity) }
+    static var selectionText: Color { PickerPalette.selectionText }
     static var background: Color { PickerPalette.background }
     static var fieldBackground: Color { PickerPalette.fieldBackground }
     static var foreground: Color { PickerPalette.foreground }
     static var secondaryText: Color { foreground.opacity(0.55) }
     static var glassTint: NSColor { NSColor(background).withAlphaComponent(0.35) }
     static var hairline: NSColor { NSColor(foreground).withAlphaComponent(0.15) }
+
+    /// Repaint the material as well as SwiftUI after an asynchronous theme load.
+    static func applyPanelTheme(to material: NSView) {
+        material.appearance = NSAppearance(named: PickerPalette.isDark ? .darkAqua : .aqua)
+        material.layer?.borderColor = hairline.cgColor
+        if #available(macOS 26.0, *), let glass = material as? NSGlassEffectView {
+            glass.tintColor = PickerPalette.usesThemeTint ? glassTint : nil
+        } else if material is NSVisualEffectView {
+            material.layer?.backgroundColor = PickerPalette.usesThemeTint ? glassTint.cgColor : nil
+        } else {
+            material.layer?.backgroundColor = NSColor(background).cgColor
+        }
+    }
 
     static func panelAnimationBehavior(reduceMotion: Bool) -> NSWindow.AnimationBehavior {
         reduceMotion ? .none : .default

@@ -57,6 +57,8 @@ final class PickerModel: ObservableObject {
     @Published var basePickerPresented = false
     @Published var targetPickerPresented = false
     @Published var themeLoaded = false
+    @Published private(set) var themeRevision = 0
+    private var activeTheme: ThemePayload?
     var onClose: (() -> Void)?
     var onDismiss: (() -> Void)?
     var onFocusSearch: (() -> Void)?
@@ -214,15 +216,27 @@ final class PickerModel: ObservableObject {
     // the current palette stays; RaptorApplication seeds it from the system
     // appearance before any picker opens.
     private func loadTheme() {
-        guard !themeLoaded, themeTask == nil else { return }
-        themeTask = Task { [weak self] in
+        guard !themeLoaded else { return }
+        refreshTheme()
+    }
+
+    /// Global appearance refresh never gates cached rows or resets picker state.
+    @discardableResult func refreshTheme() -> Task<Void, Never>? {
+        guard !closed else { return nil }
+        if let themeTask { return themeTask }
+        let task = Task { [weak self] in
             let result = try? await self?.backend.request("theme", params: [:])
-            guard let self, !self.closed, !Task.isCancelled else { return }
-            if let payload = result?.theme {
-                PickerPalette.apply(payload)
+            guard let self else { return }
+            defer { self.themeTask = nil }
+            guard !self.closed, !Task.isCancelled else { return }
+            if let payload = result?.theme, payload != self.activeTheme, PickerPalette.apply(payload) {
+                self.activeTheme = payload
+                self.themeRevision += 1
             }
-            self.themeLoaded = true
+            if !self.themeLoaded { self.themeLoaded = true }
         }
+        themeTask = task
+        return task
     }
     var showsPills: Bool { page != .create && page != .repositories }
 

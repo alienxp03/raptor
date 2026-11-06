@@ -229,7 +229,7 @@ struct PickerView: View {
         .padding(.horizontal, PickerStyle.rowInset)
         .frame(height: isAgent ? PickerStyle.agentRowHeight : (model.page == .worktrees && model.view == .repos ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight))
         .background {
-            if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selection) }
+            if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground) }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {

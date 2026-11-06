@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -97,19 +98,13 @@ const basePrefs = `<?xml version="1.0" encoding="UTF-8"?>
 <key>Workspace.lightThemeID</key><string>test-dawn</string>
 </dict></plist>`
 
-func resolveOpts(t *testing.T, opts Options) (*Theme, error) {
-	t.Helper()
-	// Resolve caches per process; tests need fresh state each call.
-	mu.Lock()
-	cached = nil
-	mu.Unlock()
-	return Resolve(opts)
-}
-
 func TestResolveDarkViaSystemAppearance(t *testing.T) {
-	th, err := resolveOpts(t, fixture(t, basePrefs, ""))
+	th, err := Resolve(fixture(t, basePrefs, ""))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if th.InterfaceStyle != "modern" {
+		t.Fatalf("want default modern style, got %q", th.InterfaceStyle)
 	}
 	if th.Name != "Test Dusk" || !th.IsDark {
 		t.Fatalf("unexpected theme: %+v", th)
@@ -131,7 +126,7 @@ func TestResolveDarkViaSystemAppearance(t *testing.T) {
 func TestResolveSelectsLightWhenSystemLight(t *testing.T) {
 	opts := fixture(t, basePrefs, "")
 	opts.SystemIsDark = func() bool { return false }
-	th, err := resolveOpts(t, opts)
+	th, err := Resolve(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +142,7 @@ func TestResolveSelectsLightWhenSystemLight(t *testing.T) {
 func TestResolveAppearanceOverridesSystem(t *testing.T) {
 	prefs := strings.Replace(basePrefs, "<dict>",
 		"<dict><key>Workspace.appearance</key><string>light</string>", 1)
-	th, err := resolveOpts(t, fixture(t, prefs, ""))
+	th, err := Resolve(fixture(t, prefs, ""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,17 +151,113 @@ func TestResolveAppearanceOverridesSystem(t *testing.T) {
 	}
 }
 
-func TestResolveRejectsTintedStyles(t *testing.T) {
-	prefs := strings.Replace(basePrefs, "<dict>",
-		"<dict><key>Workspace.interfaceStyle</key><string>useTheme</string>", 1)
-	if _, err := resolveOpts(t, fixture(t, prefs, "")); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("want ErrUnavailable, got %v", err)
+func TestResolveInterfaceStyles(t *testing.T) {
+	for _, style := range []string{"modern", "classic", "blendTheme", "useTheme", "unknown"} {
+		t.Run(style, func(t *testing.T) {
+			prefs := strings.Replace(basePrefs, "<dict>",
+				"<dict><key>Workspace.appearance</key><string>dark</string>"+
+					"<key>Workspace.interfaceStyle</key><string>"+style+"</string>", 1)
+			th, err := Resolve(fixture(t, prefs, ""))
+			if style == "unknown" {
+				if !errors.Is(err, ErrUnavailable) {
+					t.Fatalf("want ErrUnavailable, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if th.InterfaceStyle != style {
+				t.Fatalf("want style %q, got %q", style, th.InterfaceStyle)
+			}
+			if th.Name != "Test Dusk" || !th.IsDark || th.Background != "#171412" || th.Surface != "#272422" {
+				t.Fatalf("unexpected theme for %s: %+v", style, th)
+			}
+		})
+	}
+}
+
+func TestResolveRefreshesPreferences(t *testing.T) {
+	opts := fixture(t, basePrefs, "")
+	prefs := basePrefs
+	opts.DefaultsOutput = func() ([]byte, error) { return []byte(prefs), nil }
+	for _, id := range []string{"test-dusk", "test-dawn", "no-such-theme", "test-dusk"} {
+		prefs = strings.Replace(basePrefs, "test-dusk", id, 1)
+		th, err := Resolve(opts)
+		if id == "no-such-theme" {
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("want ErrUnavailable, got %v", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "Test Dusk"
+		if id == "test-dawn" {
+			want = "Test Dawn"
+		}
+		if th.Name != want {
+			t.Fatalf("want %s, got %+v", want, th)
+		}
+	}
+	prefs = strings.Replace(basePrefs, "<dict>",
+		"<dict><key>Workspace.interfaceStyle</key><string>unknown</string>", 1)
+	if _, err := Resolve(opts); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("want ErrUnavailable after style change, got %v", err)
+	}
+}
+
+func TestResolveRefreshesSystemAppearance(t *testing.T) {
+	opts := fixture(t, basePrefs, "")
+	dark := true
+	opts.SystemIsDark = func() bool { return dark }
+	for _, value := range []bool{true, false, true} {
+		dark = value
+		th, err := Resolve(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "Test Dawn"
+		if dark {
+			want = "Test Dusk"
+		}
+		if th.Name != want || th.IsDark != dark {
+			t.Fatalf("want %s, got %+v", want, th)
+		}
+	}
+}
+
+func TestResolveRefreshesThemeCatalog(t *testing.T) {
+	opts := fixture(t, basePrefs, "")
+	for _, value := range []string{"0.08834", "0.98834", "0.08834"} {
+		catalog := strings.Replace(fixtureThemes, "0.08834", value, 1)
+		if err := os.WriteFile(filepath.Join(opts.RexApp, tokensRelPath), []byte(catalog), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		th, err := Resolve(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "#171412"
+		if value == "0.98834" {
+			want = p3ToSRGB(Color{R: 0.98834, G: 0.0788, B: 0.0714}).Hex()
+		}
+		if th.Background != want {
+			t.Fatalf("want background %s, got %s", want, th.Background)
+		}
+	}
+	if err := os.Remove(filepath.Join(opts.RexApp, tokensRelPath)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resolve(opts); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("want ErrUnavailable after catalog removal, got %v", err)
 	}
 }
 
 func TestResolveMissingTheme(t *testing.T) {
 	prefs := strings.Replace(basePrefs, "test-dusk", "no-such-theme", 1)
-	if _, err := resolveOpts(t, fixture(t, prefs, "")); !errors.Is(err, ErrUnavailable) {
+	if _, err := Resolve(fixture(t, prefs, "")); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("want ErrUnavailable, got %v", err)
 	}
 }
@@ -191,7 +282,19 @@ func TestResolveCustomTheme(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	th, err := resolveOpts(t, fixture(t, basePrefs, customLabel(custom)))
+	for _, style := range []string{"modern", "classic", "blendTheme", "useTheme"} {
+		prefs := strings.Replace(basePrefs, "<dict>",
+			"<dict><key>Workspace.interfaceStyle</key><string>"+style+"</string>", 1)
+		th, err := Resolve(fixture(t, prefs, customLabel(custom)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if th.InterfaceStyle != style || th.UI != nil {
+			t.Fatalf("custom style/UI mismatch for %s: %+v", style, th)
+		}
+		assertNoUIJSON(t, th)
+	}
+	th, err := Resolve(fixture(t, basePrefs, customLabel(custom)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +306,116 @@ func TestResolveCustomTheme(t *testing.T) {
 	}
 	if th.Surface == th.Background {
 		t.Fatalf("surface should derive from background mix: %s", th.Surface)
+	}
+}
+
+func assertNoUIJSON(t *testing.T, th *Theme) {
+	t.Helper()
+	data, err := json.Marshal(th)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if th.UI != nil || fields["ui"] != nil {
+		t.Fatalf("unexpected UI palette: %s", data)
+	}
+}
+
+func TestResolveLegacyOmitsUI(t *testing.T) {
+	for _, dark := range []bool{true, false} {
+		opts := fixture(t, basePrefs, "")
+		opts.SystemIsDark = func() bool { return dark }
+		th, err := Resolve(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNoUIJSON(t, th)
+	}
+}
+
+func TestResolveUIPalette(t *testing.T) {
+	for _, missing := range []string{"", "surfaceRaised", "content", "selectionForeground", "controlOnOverlay"} {
+		t.Run("missing_"+missing, func(t *testing.T) {
+			var entries []map[string]any
+			if err := json.Unmarshal([]byte(fixtureThemes), &entries); err != nil {
+				t.Fatal(err)
+			}
+			semantic := entries[0]["semantic"].(map[string]any)
+			color := func(r, g, b float64) map[string]any {
+				return map[string]any{"red": r, "green": g, "blue": b, "colorSpace": "display-p3"}
+			}
+			semantic["content"] = color(0.7, 0.72, 0.69)
+			semantic["selectionForeground"] = color(0.1, 0.13, 0.09)
+			semantic["controlOnOverlay"] = color(0.2, 0.23, 0.19)
+			delete(semantic, missing)
+			opts := fixture(t, basePrefs, "")
+			resolveCatalog := func() *Theme {
+				t.Helper()
+				data, err := json.Marshal(entries)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(opts.RexApp, tokensRelPath), data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				th, err := Resolve(opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return th
+			}
+			terminal := resolveCatalog()
+			assertNoUIJSON(t, terminal)
+			semantic["selection"] = color(0.72, 0.8, 0.67)
+			th := resolveCatalog()
+			want := UIPalette{
+				Background:          terminal.Surface,
+				Foreground:          terminal.Foreground,
+				Selection:           p3ToSRGB(Color{R: 0.72, G: 0.8, B: 0.67}).Hex(),
+				SelectionForeground: terminal.Background,
+				Surface:             terminal.Surface,
+			}
+			if missing != "content" {
+				want.Foreground = p3ToSRGB(Color{R: 0.7, G: 0.72, B: 0.69}).Hex()
+			}
+			if missing != "selectionForeground" {
+				want.SelectionForeground = p3ToSRGB(Color{R: 0.1, G: 0.13, B: 0.09}).Hex()
+			}
+			if missing != "controlOnOverlay" {
+				want.Surface = p3ToSRGB(Color{R: 0.2, G: 0.23, B: 0.19}).Hex()
+			}
+			if th.UI == nil || *th.UI != want {
+				t.Fatalf("want UI %+v, got %+v", want, th.UI)
+			}
+			if th.UI.Selection == th.Selection || th.UI.SelectionForeground == th.SelectionForeground || th.UI.Background == th.Background {
+				t.Fatalf("UI and terminal roles must differ: %+v UI %+v", th, th.UI)
+			}
+			data, err := json.Marshal(th)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload struct {
+				InterfaceStyle string            `json:"interfaceStyle"`
+				UI             map[string]string `json:"ui"`
+			}
+			if err := json.Unmarshal(data, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.InterfaceStyle != "modern" || !reflect.DeepEqual(payload.UI, map[string]string{
+				"background": want.Background, "foreground": want.Foreground,
+				"selection": want.Selection, "selectionForeground": want.SelectionForeground,
+				"surface": want.Surface,
+			}) {
+				t.Fatalf("unexpected JSON roles: %s", data)
+			}
+			th.UI = nil
+			if !reflect.DeepEqual(th, terminal) {
+				t.Fatalf("UI tokens changed terminal palette: got %+v, want %+v", th, terminal)
+			}
+		})
 	}
 }
 

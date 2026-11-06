@@ -15,6 +15,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var model: PickerModel?
     private var keyboardMonitor: Any?
     private var sizeSubscription: AnyCancellable?
+    private var themeTimer: Timer?
     private var reopenTask: DispatchWorkItem?
     private var ready = false
     private var pendingOptions: LaunchOptions?
@@ -146,9 +147,29 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // AppKit supplies resh's panel fade; no custom delay or alpha animation.
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
+        startThemeRefresh()
+    }
+
+    private func startThemeRefresh() {
+        model?.refreshTheme()
+        guard themeTimer == nil else { return }
+        themeTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard self.panel?.isVisible == true else { self.stopThemeRefresh(); return }
+                self.model?.refreshTheme()
+            }
+        }
+        themeTimer?.tolerance = 0.2
+    }
+
+    private func stopThemeRefresh() {
+        themeTimer?.invalidate()
+        themeTimer = nil
     }
 
     private func dismissResidentPanel() {
+        stopThemeRefresh()
         panel?.orderOut(nil)
     }
 
@@ -282,7 +303,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         material.layer?.cornerRadius = PickerStyle.radius
         material.layer?.masksToBounds = true
         material.layer?.borderWidth = 1
-        material.layer?.borderColor = PickerStyle.hairline.cgColor
+        PickerStyle.applyPanelTheme(to: material)
         return material
     }
 
@@ -327,6 +348,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
         picker.makeKeyAndOrderFront(nil)
+        startThemeRefresh()
     }
 
     private func bindDismissal(_ next: PickerModel) {
@@ -345,6 +367,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             dismissResidentPanel()
             return
         }
+        stopThemeRefresh()
         sizeSubscription?.cancel()
         model?.onClose = nil
         model?.close()
@@ -358,6 +381,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func resizePanel() {
         guard let panel, let model else { return }
         panel.title = model.heading
+        if let material = panel.contentView { PickerStyle.applyPanelTheme(to: material) }
         let height = PickerStyle.height(for: model)
         guard abs(panel.frame.height - height) > 0.5 else { return }
         // resh resizes with no motion: setFrame(animate: false), top edge pinned.
@@ -379,6 +403,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         reopenTask?.cancel()
+        stopThemeRefresh()
         sizeSubscription?.cancel()
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor) }
         model?.onClose = nil
