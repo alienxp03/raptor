@@ -100,9 +100,9 @@ The plugin uses the native app for local macOS clients and the terminal picker f
 
 ### Instant Pi worktree
 
-`raptor_task_new` skips the form: generate a single-word branch such as
-`otter` from a bundled 473-word list (cryptographically shuffled; collisions try
-another word, never a suffix), create its worktree from the origin repository's committed
+`raptor_task_new` skips the form: generate a two-word branch such as
+`otter-falcon` by pairing two words from a bundled 473-word list (cryptographically
+shuffled; collisions try another pair, never a suffix), create its worktree from the origin repository's committed
 HEAD, open and select a new tab, and run fresh `pi` with no initial prompt.
 Uncommitted changes stay in the original worktree. This action is independent of
 `ui`: Mac and iOS use the same backend flow, without opening either picker.

@@ -34,8 +34,15 @@ func TestTaskFromCurrentHEADKeepsDirtyFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(" "+strings.Join(strings.Fields(taskWordList), " ")+" ", " "+tree.Branch+" ") {
+			parts := strings.Split(tree.Branch, "-")
+			if len(parts) != 2 {
 				t.Fatal(tree.Branch)
+			}
+			known := " " + strings.Join(strings.Fields(taskWordList), " ") + " "
+			for _, part := range parts {
+				if !strings.Contains(known, " "+part+" ") {
+					t.Fatalf("branch %q not built from the word list", tree.Branch)
+				}
 			}
 			got, _ := GitOut(tree.Path, "rev-parse", "HEAD")
 			if got != head {
@@ -107,6 +114,38 @@ func TestTaskWordsAreUniqueSingleWordsAndShufflePreservesThem(t *testing.T) {
 	}
 	if len(seen) != 0 {
 		t.Fatal("shuffle lost words")
+	}
+}
+
+func TestTaskNamesAreTwoWordPairsWithoutRepeats(t *testing.T) {
+	pairs := taskNamePairs([]string{"amber", "birch", "cedar", "dune", "elm", "frost"})
+	want := []string{"amber-dune", "birch-elm", "cedar-frost"}
+	if len(pairs) != len(want) {
+		t.Fatalf("pairs = %v", pairs)
+	}
+	seen := map[string]bool{}
+	for i, pair := range pairs {
+		if pair != want[i] {
+			t.Fatalf("pair %d = %s, want %s", i, pair, want[i])
+		}
+		parts := strings.Split(pair, "-")
+		if len(parts) != 2 {
+			t.Fatalf("not two words: %q", pair)
+		}
+		for _, part := range parts {
+			if seen[part] {
+				t.Fatalf("word reused across pairs: %q", part)
+			}
+			seen[part] = true
+		}
+	}
+	shuffled, err := shuffledTaskWords()
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := taskNamePairs(shuffled)
+	if len(generated) != len(shuffled)/2 {
+		t.Fatalf("pair count = %d, want %d", len(generated), len(shuffled)/2)
 	}
 }
 

@@ -20,15 +20,25 @@ import (
 var taskWordList string
 
 func CreateTask(repo string, cfg config.Config) (Worktree, error) {
-	names, err := shuffledTaskWords()
+	words, err := shuffledTaskWords()
 	if err != nil {
 		return Worktree{}, err
 	}
-	return createTask(repo, cfg, names)
+	return createTask(repo, cfg, taskNamePairs(words))
 }
 
-// Shuffle once so collisions always try another word, never a suffix or a
-// repeated candidate. Every word is considered before declaring exhaustion.
+// Shuffle once so collisions always try another pair, never a suffix or a
+// repeated candidate. Each name joins a word from each half of the shuffled
+// list, so every word is used at most once and every pair is considered
+// before declaring exhaustion.
+func taskNamePairs(words []string) []string {
+	half := len(words) / 2
+	pairs := make([]string, half)
+	for i := range pairs {
+		pairs[i] = words[i] + "-" + words[i+half]
+	}
+	return pairs
+}
 func shuffledTaskWords() ([]string, error) {
 	names := strings.Fields(taskWordList)
 	for i := len(names) - 1; i > 0; i-- {
@@ -78,5 +88,5 @@ func createTask(repo string, cfg config.Config, names []string) (Worktree, error
 		}
 		return Worktree{Path: path, Branch: branch}, nil
 	}
-	return Worktree{}, fmt.Errorf("all %d single-word branch names are taken by existing branches or destinations", len(names))
+	return Worktree{}, fmt.Errorf("all %d two-word branch names are taken by existing branches or destinations", len(names))
 }
