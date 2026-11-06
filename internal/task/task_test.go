@@ -58,9 +58,12 @@ func TestTaskCreatesTabWithFreshEmptyPi(t *testing.T) {
 	}
 	data, _ := os.ReadFile(log)
 	calls := string(data)
-	want := "window\nnew\n-s\norigin-session\n" + result.Branch + "\n-c\n" + result.Path + "\n--keep-open\n--json\n--\n"
+	want := "window\nnew\n-s\norigin-session\n" + result.Branch + "\n-c\n" + result.Path + "\n--json\n--\n"
 	if !strings.Contains(calls, want) {
 		t.Fatalf("wrong tab command:\n%s", calls)
+	}
+	if strings.Contains(calls, "--keep-open\n") {
+		t.Fatal("Pi tab must close after Pi exits")
 	}
 	after := strings.SplitN(calls, "--\n", 2)[1]
 	piCall := strings.SplitN(after, "CALL\n", 2)[0]

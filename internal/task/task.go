@@ -62,7 +62,7 @@ func Start(ctx rex.Ctx, cfg config.Config, explicitRepo, resumePath string) (Res
 	result.Path, result.Branch = tree.Path, tree.Branch
 	// Rex quotes command arguments and uses the user's login environment. Pass
 	// only the executable: no initial prompt, --resume, --fork, or shared session.
-	out, err := rex.Run("window", "new", "-s", ctx.Session, tree.Branch, "-c", tree.Path, "--keep-open", "--json", "--", pi)
+	out, err := rex.Run("window", "new", "-s", ctx.Session, tree.Branch, "-c", tree.Path, "--json", "--", pi)
 	if err != nil {
 		return result, fmt.Errorf("worktree preserved at %s (%s); could not open Pi tab: %w; retry with task --resume PATH", tree.Path, tree.Branch, err)
 	}
