@@ -9,6 +9,7 @@ struct PickerView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if model.showsPills { viewPills }
             if model.page == .create { createForm } else { results }
             if model.page == .worktrees && model.view == .repos { selectedWorktreePath }
             status
@@ -113,7 +114,7 @@ struct PickerView: View {
     }
 
     private var searchPrompt: String {
-        if model.view == .tabs { return "Search tabs and sessions…" }
+        if model.view == .tabs { return "Search sessions and tabs…" }
         switch model.page {
         case .repositories: return "Search repositories…"
         case .worktrees: return "Search worktrees…"
@@ -126,10 +127,13 @@ struct PickerView: View {
             pill("Repos", active: model.view == .repos, icon: "folder", hint: nil)
                 .accessibilityIdentifier("pill-repos")
                 .onTapGesture { if model.view != .repos { model.switchView() } }
-            pill("Tabs", active: model.view == .tabs, icon: "square.stack.3d.up", hint: "⇥")
+            pill("Sessions", active: model.view == .tabs, icon: "square.stack.3d.up", hint: nil)
                 .accessibilityIdentifier("pill-tabs")
                 .onTapGesture { if model.view != .tabs { model.switchView() } }
             Spacer(minLength: 0)
+            Text("⇥ Switch view")
+                .font(.system(size: 10))
+                .foregroundStyle(PickerStyle.secondaryText)
         }
         .padding(.horizontal, PickerStyle.listInset)
         .padding(.bottom, 8)
@@ -153,24 +157,20 @@ struct PickerView: View {
     }
 
     private var results: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    if model.showsPills { viewPills }
-                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                        row(item, position: index + 1).id(item.id)
-                    }
-                }
-                .padding(.horizontal, PickerStyle.listInset).padding(.vertical, 4)
-            }
-            .overlay {
-                if model.items.isEmpty {
-                    Text(model.loading ? "Loading…" : (model.error == nil ? emptyMessage : "No results"))
-                        .foregroundStyle(PickerStyle.secondaryText)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                    row(item, position: index + 1).id(item.id)
                 }
             }
-            .onChange(of: model.selectedID) { _, id in
-                if let id { proxy.scrollTo(id) }
+            .scrollTargetLayout()
+            .padding(.horizontal, PickerStyle.listInset).padding(.vertical, 4)
+        }
+        .scrollPosition(id: $model.scrollID)
+        .overlay {
+            if model.items.isEmpty {
+                Text(model.loading ? "Loading…" : (model.error == nil ? emptyMessage : "No results"))
+                    .foregroundStyle(PickerStyle.secondaryText)
             }
         }
         .frame(maxHeight: .infinity)
@@ -194,22 +194,21 @@ struct PickerView: View {
                     .accessibilityLabel("Pinned")
             }
             if isTabs {
-                Image(systemName: item.kind == "session" ? "tray.full" : "rectangle.split.toprow")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground.opacity(0.55))
-                    .accessibilityHidden(true)
                 Text(item.label ?? item.path)
+                    .fontWeight(item.kind == "session" ? .semibold : .regular)
                     .lineLimit(1).truncationMode(.tail)
+                    .padding(.leading, item.kind == "session" ? 0 : 8)
                 if item.active == true {
                     Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
                         .frame(width: 6, height: 6)
                         .accessibilityLabel("Active")
                 }
                 Spacer(minLength: 8)
-                Text(item.kind == "session" ? "Session" : (item.sessionLabel ?? ""))
-                    .font(.system(size: 11))
-                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.5))
-                    .lineLimit(1).truncationMode(.tail)
+                if item.kind == "session" {
+                    Text("Session")
+                        .font(.system(size: 11))
+                        .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.5))
+                }
             } else if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
                     .lineLimit(selected ? 2 : 1).truncationMode(.tail)
@@ -434,7 +433,7 @@ struct PickerView: View {
                 if model.splitMode {
                     Text("Split ⌃P   j↓  l→").accessibilityIdentifier("keyboard-hint")
                 } else if model.view == .tabs {
-                    Text("Tabs & Sessions").foregroundStyle(PickerStyle.secondaryText)
+                    Text("Sessions").foregroundStyle(PickerStyle.secondaryText)
                 } else if model.page == .repositories {
                     Text("Choose repository").foregroundStyle(PickerStyle.secondaryText)
                 } else if model.page == .create {
@@ -540,7 +539,7 @@ struct PickerView: View {
     }
 
     private var emptyMessage: String {
-        if model.view == .tabs { return "No matching tabs" }
+        if model.view == .tabs { return "No matching sessions or tabs" }
         switch model.page {
         case .worktrees: return "No matching worktrees"
         case .repositories: return "No matching repositories"

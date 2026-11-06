@@ -98,6 +98,30 @@ private actor SlowDirectoryBackend: BackendClient {
     }
 }
 
+// Explicit replies simulate pipe calls that finish even after task cancellation.
+private actor CachedListBackend: BackendClient {
+    private var pending: [String: [CheckedContinuation<APIResult, Error>]] = [:]
+    private var calls: [String] = []
+    private var held: Set<String> = []
+    func hold(_ method: String) { held.insert(method) }
+    nonisolated func close() {}
+    func count(_ method: String) -> Int { calls.filter { $0 == method }.count }
+    func waiting(_ method: String) -> Bool { !(pending[method] ?? []).isEmpty }
+    func reply(_ method: String, _ result: APIResult) {
+        pending[method]!.removeFirst().resume(returning: result)
+    }
+    func fail(_ method: String) {
+        pending[method]!.removeFirst().resume(throwing: APIError.message("Refresh failed"))
+    }
+    func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
+        calls.append(method)
+        if ["directories", "sessions", "worktrees.list"].contains(method) || held.contains(method) {
+            return try await withCheckedThrowingContinuation { pending[method, default: []].append($0) }
+        }
+        return APIResult()
+    }
+}
+
 @main
 struct NativeChecks {
     @MainActor static func main() async throws {
@@ -206,6 +230,7 @@ struct NativeChecks {
 
         try await directCreateChecks()
         try await residentChecks()
+        try await cachedListChecks()
         let directoryCreate = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
         directoryCreate.start()
         try await wait { !directoryCreate.loading }
@@ -369,6 +394,203 @@ struct NativeChecks {
         precondition(resident.page == .directories)
         resident.close()
         print("PASS: tabs and sessions view, numbered jump, close confirmation, rename, pins, resident reconfigure")
+    }
+
+    @MainActor private static func cachedListChecks() async throws {
+        let backend = CachedListBackend()
+        let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        let repos = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0) }, targets: ["tab", "session"], target: "tab")
+        let sessions = APIResult(items: ["S1", "S2", "S3"].map { PickerItem(path: $0, kind: "session") })
+        model.start()
+        try await pending("directories", backend)
+        await backend.reply("directories", repos)
+        try await wait { !model.refreshing }
+        model.selectedID = "/b"; model.scrollID = "/c"; model.target = "session"
+        model.switchView()
+        precondition(model.loading && model.items.isEmpty && model.selectedID == nil && model.scrollID == nil,
+                     "An uncached view must clear the other view before its request starts")
+        try await pending("sessions", backend)
+        await backend.reply("sessions", sessions)
+        try await wait { !model.refreshing }
+        model.selectedID = "S2"; model.scrollID = "S3"
+        model.switchView()
+        precondition(!model.loading && model.refreshing && model.canOpen && model.selectedID == "/b" && model.scrollID == "/c" && model.target == "session",
+                     "Cached repos must restore selection, scroll and target before refreshing, with Open enabled")
+        try await pending("directories", backend)
+        model.switchView()
+        precondition(!model.loading && model.canOpen && model.selectedID == "S2" && model.scrollID == "S3")
+        try await pending("sessions", backend)
+        await backend.reply("directories", APIResult(items: [PickerItem(path: "/obsolete")]))
+        await backend.reply("sessions", APIResult(items: [PickerItem(path: "S1", kind: "session")]))
+        try await wait { !model.refreshing }
+        precondition(model.selectedID == "S1" && model.scrollID == nil,
+                     "Refresh must repair selection and scroll when their rows disappear")
+        model.switchView()
+        precondition(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c",
+                     "A cancelled reply must not overwrite the inactive cache")
+        try await pending("directories", backend)
+        await backend.fail("directories")
+        try await wait { !model.refreshing }
+        precondition(model.canOpen && model.items == repos.items && model.error != nil,
+                     "A failed background refresh must keep cached rows usable")
+
+        model.query = "filtered"
+        precondition(model.loading && model.items.isEmpty, "Uncached queries must not expose stale rows")
+        try await pending("directories", backend)
+        await backend.reply("directories", repos)
+        try await wait { !model.refreshing }
+        model.selectedID = "/c"; model.scrollID = "/b"
+        model.switchView()
+        try await pending("sessions", backend)
+        model.switchView()
+        precondition(model.query == "filtered" && model.selectedID == "/c" && model.scrollID == "/b" && model.canOpen,
+                     "Each view must retain its own query and list position")
+        try await pending("directories", backend)
+        model.openNumbered(2)
+        try await wait { !model.busy }
+        let cachedDispatches = await backend.count("dispatch")
+        precondition(cachedDispatches == 1, "Cached numbered Open must not wait for refresh")
+        // Dispatch invalidates both lists: a new session may now exist.
+        await backend.reply("sessions", sessions)
+        await backend.reply("directories", repos)
+        model.switchView()
+        precondition(model.loading && model.items.isEmpty)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", sessions)
+        try await wait { !model.refreshing }
+        model.beginRename(); model.renameLabel = "renamed"; model.commitRename()
+        try await wait { !model.busy }
+        precondition(model.loading && model.items.isEmpty, "Mutation refresh must not reuse pre-mutation rows")
+        try await pending("sessions", backend)
+        await backend.fail("sessions")
+        try await wait { !model.refreshing }
+        model.switchView()
+        precondition(model.loading && model.items.isEmpty, "Mutation must invalidate the other view too")
+        try await pending("directories", backend)
+
+        // Reconfigure while an old-origin reply is pending. No old rows can
+        // appear either during the context request or on a subsequent switch.
+        await model.reconfigure(try LaunchOptions(arguments: ["--demo", "--session", "new-origin", "--mode", "wt", "--repo", "/new-repo"]))
+        precondition(model.items.isEmpty && model.scrollID == nil && model.loading && !model.canOpen)
+        await backend.reply("directories", repos)
+        try await pending("worktrees.list", backend)
+        let worktrees = APIResult(items: [PickerItem(path: "/new-repo/main", branch: "main")], targets: ["tab"], target: "tab", repo: "/new-repo", branches: ["main"], baseBranch: "main")
+        await backend.reply("worktrees.list", worktrees)
+        try await wait { !model.refreshing }
+        model.switchView()
+        precondition(model.loading && model.items.isEmpty, "New origin must not reuse old session rows")
+        try await pending("sessions", backend)
+        await backend.reply("sessions", sessions)
+        try await wait { !model.refreshing }
+        precondition(model.repo == "/new-repo" && model.base == "main",
+                     "Session replies on the worktree page must not replace repository metadata")
+        model.switchView()
+        precondition(model.items == worktrees.items && model.canOpen)
+        try await pending("worktrees.list", backend)
+        model.beginCreate()
+        await backend.reply("worktrees.list", APIResult(items: [PickerItem(path: "/late")], repo: "/wrong"))
+        try await Task.sleep(for: .milliseconds(30))
+        precondition(model.page == .create && model.repo == "/new-repo", "Late background list must not change Create metadata")
+        model.close()
+
+        // The first open may overtake startup's directory warmup. Its reply
+        // must not leak into a worktree open or restart the model afterwards.
+        let warmBackend = CachedListBackend()
+        let warm = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: warmBackend)
+        warm.start()
+        try await pending("directories", warmBackend)
+        await warmBackend.hold("context")
+        let firstContext = warm.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/first", "--session", "first"]))
+        let firstOpen = Task { await warm.completeReconfigure(firstContext) }
+        try await pending("context", warmBackend)
+        await warmBackend.reply("directories", repos)
+        warm.start()
+        try await Task.sleep(for: .milliseconds(30))
+        precondition(warm.items.isEmpty && warm.page == .worktrees && warm.repo == "/first" && !warm.contextReady,
+                     "A late startup reply or repeated start must not overwrite the first open")
+        await warmBackend.reply("context", APIResult())
+        await firstOpen.value
+        try await pending("worktrees.list", warmBackend)
+        await warmBackend.reply("worktrees.list", APIResult(items: [PickerItem(path: "/first/main")], targets: ["tab"], target: "tab", repo: "/first"))
+        try await wait { !warm.refreshing }
+        precondition(warm.contextReady && warm.canOpen && warm.repo == "/first")
+        warm.close()
+
+        let mutationBackend = CachedListBackend()
+        let mutation = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: mutationBackend)
+        mutation.start()
+        try await pending("directories", mutationBackend)
+        await mutationBackend.reply("directories", repos)
+        try await wait { !mutation.refreshing }
+        await mutationBackend.hold("pins.toggle")
+        mutation.togglePin()
+        try await pending("pins.toggle", mutationBackend)
+        await mutationBackend.hold("context")
+        let context = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "changed"]))
+        precondition(mutation.items == repos.items && !mutation.loading && !mutation.busy && !mutation.contextReady && !mutation.canOpen,
+                     "Prepare must synchronously show global directories, but gate all actions")
+        precondition(mutation.targets.isEmpty && mutation.target.isEmpty && mutation.repo == nil && mutation.branches.isEmpty,
+                     "Cached directories must not restore old-origin targets or repository state")
+        mutation.openNumbered(2); mutation.choose(); mutation.togglePin()
+        mutation.showWorktrees(); mutation.beginCreate(); mutation.switchView()
+        mutation.beginRename(); mutation.requestCloseEntry(); mutation.confirmCloseEntry(); mutation.commitRename()
+        mutation.askRemove(); mutation.confirmRemove(PickerItem(path: "/old", isMain: false))
+        mutation.create(); mutation.openCreated(); mutation.cycleTarget(backward: false); mutation.toggleSplit()
+        precondition(mutation.page == .directories && mutation.view == .repos && mutation.repo == nil && !mutation.busy && mutation.removalCandidate == nil && mutation.renameCandidate == nil,
+                     "Actions must not change navigation or candidates before context is ready")
+        let reopen = Task { await mutation.completeReconfigure(context) }
+        try await pending("context", mutationBackend)
+        mutation.start() // Startup warmup cannot reset or query a pending open.
+        let callsWhileBlocked = await mutationBackend.count("directories")
+        let dispatchesWhileBlocked = await mutationBackend.count("dispatch")
+        let pinsWhileBlocked = await mutationBackend.count("pins.toggle")
+        precondition(callsWhileBlocked == 1 && dispatchesWhileBlocked == 0 && pinsWhileBlocked == 1,
+                     "Blocked actions and late start must not send requests using the old context")
+        await mutationBackend.reply("pins.toggle", APIResult())
+        await mutationBackend.reply("context", APIResult())
+        await reopen.value
+        try await pending("directories", mutationBackend)
+        await mutationBackend.reply("directories", APIResult(items: [PickerItem(path: "/new-origin")], targets: ["tab"], target: "tab"))
+        try await wait { !mutation.refreshing }
+        let directoryCalls = await mutationBackend.count("directories")
+        precondition(directoryCalls == 2 && mutation.selectedID == "/new-origin" && mutation.error == nil,
+                     "Old mutation completion must not refresh or modify a new context")
+        let failedContext = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "failed"]))
+        let failedOpen = Task { await mutation.completeReconfigure(failedContext) }
+        try await pending("context", mutationBackend)
+        await mutationBackend.fail("context")
+        await failedOpen.value
+        precondition(!mutation.contextReady && !mutation.canOpen && !mutation.canCreate && !mutation.canSubmitForm && mutation.error != nil && !mutation.refreshing,
+                     "Context failure must be explicit and must never enable stale-backend actions")
+        mutation.openNumbered(1); mutation.togglePin(); mutation.beginCreate(); mutation.switchView()
+        precondition(!mutation.busy && mutation.page == .directories && mutation.view == .repos)
+        let worktreeContext = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/different", "--session", "third"]))
+        precondition(mutation.items.isEmpty && mutation.loading && mutation.repo == "/different" && mutation.branches.isEmpty && mutation.base.isEmpty,
+                     "A worktree open must never show cached directories or old contextual metadata")
+        let directoryContext = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "fourth"]))
+        await mutation.completeReconfigure(worktreeContext)
+        precondition(mutation.items.first?.path == "/new-origin" && !mutation.contextReady,
+                     "A superseded completion must not send context or enable actions")
+        let recovered = Task { await mutation.completeReconfigure(directoryContext) }
+        try await pending("context", mutationBackend)
+        await mutationBackend.reply("context", APIResult())
+        await recovered.value
+        try await pending("directories", mutationBackend)
+        precondition(mutation.contextReady && mutation.target.isEmpty && !mutation.canOpen,
+                     "Targets must come from the refreshed origin, not the global directory cache")
+        await mutationBackend.reply("directories", repos)
+        try await wait { !mutation.refreshing }
+        precondition(mutation.canOpen, "A successful retry and list refresh must restore actions")
+        mutation.close()
+        print("PASS: instant cached switching, per-view query/selection/scroll, cached Open, cancelled replies, refresh failure, mutation invalidation, origin/repo/page isolation, synchronous directory reopen, blocked context action gates, context failure/retry, startup warmup race")
+    }
+
+    @MainActor private static func pending(_ method: String, _ backend: CachedListBackend) async throws {
+        for _ in 0..<150 {
+            if await backend.waiting(method) { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        preconditionFailure("Timed out waiting for \(method)")
     }
 
     @MainActor private static func directCreateChecks() async throws {

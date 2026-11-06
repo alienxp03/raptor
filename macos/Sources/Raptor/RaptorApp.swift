@@ -70,11 +70,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         panelHost = host
         do { try host.start() } catch { report(error) }
-        // Warm the backend child and directory catalog after launch settles.
-        Task { [weak next] in
-            try? await Task.sleep(for: .milliseconds(1200))
-            next?.start()
-        }
+        // Queue backend and global directory warmup now. All pipe I/O is off
+        // the main actor; no delayed start can reset the first open.
+        next.start()
     }
 
     private func handlePanelOpen(_ request: PanelRequest) -> PanelReply {
@@ -102,20 +100,19 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // the resident flow never leaves the picker wedged.
             attach(PickerModel(options: options, backend: ProcessBackend(options: options)))
         }
-        Task { [weak self, weak model] in
-            guard let self, let model else { return }
-            await model.reconfigure(options)
-            let anchor = self.invocationAnchor()
-            if let panel = self.panel {
-                if let host = self.panelPickerHost {
-                    host.rootView = PickerView(model: model)
-                }
-                panel.title = model.heading
-                if let (area, screen) = anchor {
-                    panel.setFrame(PickerStyle.panelFrame(in: area, height: PickerStyle.height(for: model)).clamped(to: screen.visibleFrame), display: false)
-                }
+        guard let model else { return }
+        let context = model.prepareReconfigure(options)
+        let anchor = invocationAnchor()
+        if let panel {
+            panel.title = model.heading
+            if let (area, screen) = anchor {
+                panel.setFrame(PickerStyle.panelFrame(in: area, height: PickerStyle.height(for: model)).clamped(to: screen.visibleFrame), display: false)
             }
-            self.showResidentPanel()
+        }
+        // Keep the hosting root for the same model. Show before any backend await.
+        showResidentPanel()
+        Task { [weak model] in
+            await model?.completeReconfigure(context)
         }
     }
 
@@ -135,7 +132,6 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sizeSubscription = next.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.resizePanel() }
         }
-        next.start()
     }
 
     private func showResidentPanel() {

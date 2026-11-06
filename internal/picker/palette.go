@@ -77,12 +77,12 @@ func pickerDirectory(path string, width int, selected bool) string {
 }
 
 // pickerPills renders the view switcher under the search field. active is
-// 0 (repos) or 1 (tabs & sessions) — same order as the native panel.
+// 0 (repos) or 1 (sessions) — same order as the native panel.
 func pickerPills(active int, width int) string {
 	pills := []struct {
 		name string
 		hint string
-	}{{"Repos", ""}, {"Tabs", "⇥"}}
+	}{{"Repos", ""}, {"Sessions", ""}}
 	parts := make([]string, 0, len(pills))
 	for i, pill := range pills {
 		name := pill.name
@@ -97,6 +97,9 @@ func pickerPills(active int, width int) string {
 		}
 	}
 	content := strings.Join(parts, pickerRail.Render("·"))
+	if width >= 44 {
+		content += pickerMuted.Render("   ⇥ Switch view")
+	}
 	return pickerLine(content, width)
 }
 
@@ -125,8 +128,7 @@ func pickerDirectoryRow(path string, pinned bool, position, width int, selected 
 	return pickerRow(prefix+style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3-lipgloss.Width(prefix), 0))), width, selected)
 }
 
-// pickerSessionRow renders one tab or session entry with its right-aligned
-// context ("session" or the owning session's name) and an active marker.
+// pickerSessionRow indents tabs below their selectable parent session.
 func pickerSessionRow(entry rex.SessionEntry, position, width int, selected bool) string {
 	style := pickerText
 	if selected {
@@ -141,6 +143,9 @@ func pickerSessionRow(entry rex.SessionEntry, position, width int, selected bool
 			prefix = pickerRail.Render(label)
 		}
 	}
+	if entry.Kind != "session" {
+		prefix += " "
+	}
 	if entry.Active {
 		if selected {
 			prefix += style.Render("● ")
@@ -148,17 +153,18 @@ func pickerSessionRow(entry rex.SessionEntry, position, width int, selected bool
 			prefix += pickerAccent.Render("● ")
 		}
 	}
-	detail := entry.SessionLabel
+	detail := ""
 	if entry.Kind == "session" {
-		detail = "session"
+		detail = "Session"
+		style = style.Bold(true)
 	}
 	nameWidth := maxInt(width-3-lipgloss.Width(prefix), 1)
-	if width >= 36 {
-		nameWidth = maxInt(width/2-2-lipgloss.Width(prefix), 1)
+	if width >= 36 && detail != "" {
+		nameWidth = maxInt(nameWidth-lipgloss.Width(detail)-2, 1)
 	}
 	name := ansi.Truncate(entry.Label, nameWidth, "…")
 	content := prefix + style.Render(name)
-	if width >= 36 {
+	if width >= 36 && detail != "" {
 		gap := strings.Repeat(" ", maxInt(nameWidth-lipgloss.Width(name)+2, 2))
 		pathWidth := maxInt(width-2-lipgloss.Width(prefix)-nameWidth-3, 0)
 		detailStyle := pickerMuted

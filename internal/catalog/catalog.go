@@ -66,13 +66,34 @@ func ApplyPins(items []Directory) []Directory {
 	return items
 }
 
-// FilterSessions fuzzy-matches tabs and sessions by name and session.
+// FilterSessions fuzzy-matches each row's label, retaining parent sessions for
+// matching tabs. Results keep sidebar order, not fuzzy score order. A matching
+// session does not include tabs whose own labels do not match.
 func FilterSessions(entries []rex.SessionEntry, query string) []int {
 	texts := make([]string, len(entries))
+	parents := make(map[string]int)
 	for i, entry := range entries {
-		texts[i] = entry.Label + " " + entry.SessionLabel
+		texts[i] = entry.Label
+		if entry.Kind == "session" {
+			parents[entry.SessionID] = i
+		}
 	}
-	return match(texts, query)
+	keep := make([]bool, len(entries))
+	for _, i := range match(texts, query) {
+		keep[i] = true
+		if entries[i].Kind == "window" {
+			if parent, ok := parents[entries[i].SessionID]; ok {
+				keep[parent] = true
+			}
+		}
+	}
+	indices := make([]int, 0, len(entries))
+	for i := range entries {
+		if keep[i] {
+			indices = append(indices, i)
+		}
+	}
+	return indices
 }
 
 func FilterWorktrees(items []worktree.Worktree, query string) []int {

@@ -39,34 +39,57 @@ type row struct {
 }
 
 type dirModel struct {
-	cfg        config.Config
-	ctx        rex.Ctx
-	viewMode   int // 0 = repos, 1 = tabs & sessions
-	rows       []row // full set
-	view       []int // indices into rows after filtering (repos view)
-	tabs       []rex.SessionEntry
-	tabsView   []int // indices into tabs after filtering
-	pinned     map[string]bool
-	filter     string
-	sel        int
-	target     string
-	splitMode  bool
-	launcher   bool
-	actionMenu bool
-	actionSel  int
-	actions    []launcherAction
-	tabsLoaded bool
-	renaming   bool
-	renameBuf  string
-	closeArm   string // entry id armed for a second ctrl+x
-	err        string
-	width      int
-	height     int
+	cfg          config.Config
+	ctx          rex.Ctx
+	viewMode     int   // 0 = repos, 1 = tabs & sessions
+	rows         []row // full set
+	view         []int // indices into rows after filtering (repos view)
+	tabs         []rex.SessionEntry
+	tabsView     []int // indices into tabs after filtering
+	pinned       map[string]bool
+	filter       string
+	sel          int
+	target       string
+	splitMode    bool
+	launcher     bool
+	actionMenu   bool
+	actionSel    int
+	actions      []launcherAction
+	tabsLoaded   bool
+	tabsLoading  bool
+	tabsRequest  uint64
+	reposLoading bool
+	reposRequest uint64
+	viewStates   [2]dirViewState
+	renameEntry  *rex.SessionEntry
+	renaming     bool
+	renameBuf    string
+	closeArm     string // entry id armed for a second ctrl+x
+	err          string
+	width        int
+	height       int
 	// result of the interaction, read after the program exits
-	picked   *row   // non-nil when a directory was chosen
+	picked   *row              // non-nil when a directory was chosen
 	jumped   *rex.SessionEntry // non-nil when a tab/session jump was chosen
-	next     string // "wt" or "wt-create" with a repo path in nextRepo
+	next     string            // "wt" or "wt-create" with a repo path in nextRepo
 	nextRepo string
+}
+
+// Scroll position is derived from sel and the current viewport height.
+type dirViewState struct {
+	filter string
+	sel    int
+}
+
+type tabsLoadedMsg struct {
+	request uint64
+	entries []rex.SessionEntry
+	err     error
+}
+
+type reposLoadedMsg struct {
+	request uint64
+	rows    []row
 }
 
 type previewMsg struct {
@@ -135,7 +158,19 @@ func runDirs(ctx rex.Ctx, cfg config.Config, launcher bool) int {
 	return 0
 }
 
-func (m *dirModel) Init() tea.Cmd { return m.ctx.TitleCommand() }
+func (m *dirModel) Init() tea.Cmd {
+	// A worktree flow can stop this program before its refresh returns.
+	// Restart pending commands when the same picker resumes.
+	commands := []tea.Cmd{m.ctx.TitleCommand()}
+	if m.tabsLoading {
+		commands = append(commands, m.loadTabs(true))
+	}
+	if m.reposLoading {
+		m.reposLoading = false
+		commands = append(commands, m.refreshRepos())
+	}
+	return tea.Batch(commands...)
+}
 func (m *dirModel) applyFilter() {
 	items := make([]catalog.Directory, len(m.rows))
 	for i, r := range m.rows {
@@ -167,15 +202,95 @@ func (m *dirModel) dirItems() []catalog.Directory {
 	return items
 }
 
-func (m *dirModel) loadTabs() {
-	entries, err := rex.SessionEntries(m.ctx.Session)
-	if err != nil {
-		m.err = err.Error()
-		entries = nil
+// Commands capture values only. All model changes happen in Update.
+func (m *dirModel) loadTabs(force bool) tea.Cmd {
+	if m.tabsLoading && !force {
+		return nil
 	}
-	m.tabs = entries
-	m.tabsLoaded = true
+	m.tabsRequest++
+	m.tabsLoading = true
+	request, session := m.tabsRequest, m.ctx.Session
+	return func() tea.Msg {
+		entries, err := rex.SessionEntries(session)
+		return tabsLoadedMsg{request: request, entries: entries, err: err}
+	}
+}
+
+func (m *dirModel) refreshRepos() tea.Cmd {
+	if m.reposLoading {
+		return nil
+	}
+	m.reposRequest++
+	m.reposLoading = true
+	request, ctx := m.reposRequest, m.ctx
+	return func() tea.Msg {
+		return reposLoadedMsg{request: request, rows: loadDirRows(ctx)}
+	}
+}
+
+// Refresh the destination view without changing the active view's state.
+// Keep the selected identity when entries change order.
+func (m *dirModel) acceptTabs(msg tabsLoadedMsg) {
+	if msg.request != m.tabsRequest || !m.tabsLoading {
+		return
+	}
+	m.tabsLoading = false
+	if msg.err != nil {
+		m.tabsLoaded = true
+		m.err = msg.err.Error()
+		return // Keep cached entries on a failed background refresh.
+	}
+	active := dirViewState{m.filter, m.sel}
+	if m.viewMode != 1 {
+		m.filter, m.sel = m.viewStates[1].filter, m.viewStates[1].sel
+	}
+	id, session := "", ""
+	if entry := m.selectedTab(); entry != nil {
+		id, session = entry.ID, entry.SessionID
+	}
+	m.tabs, m.tabsLoaded = msg.entries, true
 	m.applyTabFilter()
+	for position, index := range m.tabsView {
+		if m.tabs[index].ID == id && m.tabs[index].SessionID == session {
+			m.sel = position
+			break
+		}
+	}
+	if entry := m.selectedTab(); entry == nil || entry.ID != id || entry.SessionID != session {
+		m.closeArm = ""
+	}
+	m.viewStates[1] = dirViewState{m.filter, m.sel}
+	if m.viewMode != 1 {
+		m.filter, m.sel = active.filter, active.sel
+	}
+}
+
+func (m *dirModel) acceptRepos(msg reposLoadedMsg) {
+	if msg.request != m.reposRequest || !m.reposLoading {
+		return
+	}
+	m.reposLoading = false
+	active := dirViewState{m.filter, m.sel}
+	if m.viewMode != 0 {
+		m.filter, m.sel = m.viewStates[0].filter, m.viewStates[0].sel
+	}
+	path := ""
+	if r := m.selected(); r != nil {
+		path = r.path
+	}
+	m.rows = msg.rows
+	m.loadPins()
+	m.applyFilter()
+	for position, index := range m.view {
+		if m.rows[index].path == path {
+			m.sel = position
+			break
+		}
+	}
+	m.viewStates[0] = dirViewState{m.filter, m.sel}
+	if m.viewMode != 0 {
+		m.filter, m.sel = active.filter, active.sel
+	}
 }
 
 func (m *dirModel) applyTabFilter() {
@@ -197,9 +312,13 @@ func (m *dirModel) applyCurrentFilter() {
 }
 
 func (m *dirModel) selectedEntry() *rex.SessionEntry {
-	if m.viewMode != 1 || len(m.tabsView) == 0 {
+	if m.viewMode != 1 {
 		return nil
 	}
+	return m.selectedTab()
+}
+
+func (m *dirModel) selectedTab() *rex.SessionEntry {
 	if m.sel >= len(m.tabsView) || m.sel < 0 {
 		return nil
 	}
@@ -221,6 +340,12 @@ func (m *dirModel) selected() *row {
 
 func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tabsLoadedMsg:
+		m.acceptTabs(msg)
+		return m, nil
+	case reposLoadedMsg:
+		m.acceptRepos(msg)
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
@@ -335,8 +460,7 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "tab", "shift+tab":
-			m.switchToTabs()
-			return m, nil
+			return m, m.switchToTabs()
 		case "enter":
 			r := m.selected()
 			if m.launcher {
@@ -374,26 +498,29 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *dirModel) switchToTabs() {
+func (m *dirModel) switchToTabs() tea.Cmd {
+	m.viewStates[0] = dirViewState{m.filter, m.sel}
 	m.viewMode = 1
-	m.sel = 0
+	m.filter, m.sel = m.viewStates[1].filter, m.viewStates[1].sel
 	m.splitMode = false
 	m.closeArm = ""
-	if !m.tabsLoaded {
-		m.loadTabs()
-	} else {
-		m.applyTabFilter()
-	}
+	m.applyTabFilter()
+	return m.loadTabs(false)
 }
 
-func (m *dirModel) switchToRepos() {
+func (m *dirModel) switchToRepos() tea.Cmd {
+	m.viewStates[1] = dirViewState{m.filter, m.sel}
 	m.viewMode = 0
-	m.sel = 0
+	m.filter, m.sel = m.viewStates[0].filter, m.viewStates[0].sel
 	m.closeArm = ""
 	m.applyFilter()
+	return m.refreshRepos()
 }
 
 func (m *dirModel) updateTabs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() != "ctrl+x" {
+		m.closeArm = ""
+	}
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -403,8 +530,7 @@ func (m *dirModel) updateTabs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.applyTabFilter()
 			return m, nil
 		}
-		m.switchToRepos()
-		return m, nil
+		return m, m.switchToRepos()
 	case "backspace":
 		if m.filter != "" {
 			r := []rune(m.filter)
@@ -427,8 +553,7 @@ func (m *dirModel) updateTabs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "tab", "shift+tab":
-		m.switchToRepos()
-		return m, nil
+		return m, m.switchToRepos()
 	case "enter":
 		if entry := m.selectedEntry(); entry != nil {
 			jumped := *entry
@@ -439,7 +564,10 @@ func (m *dirModel) updateTabs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+r":
 		if entry := m.selectedEntry(); entry != nil {
 			m.renaming = true
+			copy := *entry
+			m.renameEntry = &copy
 			m.renameBuf = entry.Label
+			m.closeArm = ""
 		}
 		return m, nil
 	case "ctrl+x":
@@ -465,8 +593,7 @@ func (m *dirModel) updateTabs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.err = err.Error()
 		}
-		m.loadTabs()
-		return m, nil
+		return m, m.loadTabs(true)
 	case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
 		number := int(msg.String()[len(msg.String())-1] - '0')
 		if number >= 1 && number <= len(m.tabsView) {
@@ -492,9 +619,10 @@ func (m *dirModel) updateRename(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.renaming = false
+		m.renameEntry = nil
 		return m, nil
 	case "enter":
-		entry := m.selectedEntry()
+		entry := m.renameEntry
 		if entry == nil {
 			m.renaming = false
 			return m, nil
@@ -506,11 +634,11 @@ func (m *dirModel) updateRename(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			err = rex.SetWindowLabel(entry.SessionID, entry.ID, m.renameBuf)
 		}
 		m.renaming = false
+		m.renameEntry = nil
 		if err != nil {
 			m.err = err.Error()
 		}
-		m.loadTabs()
-		return m, nil
+		return m, m.loadTabs(true)
 	case "backspace":
 		if r := []rune(m.renameBuf); len(r) > 0 {
 			m.renameBuf = string(r[:len(r)-1])
@@ -574,9 +702,9 @@ func (m *dirModel) View() string {
 		left = target
 	}
 	splitHint := pickerText.Render("^p") + pickerMuted.Render(" split")
-	right := splitHint + "  " + pickerText.Render("^n") + pickerMuted.Render(" new worktree") + "  " + pickerText.Render("^g") + pickerMuted.Render(" pin") + "  " + pickerText.Render("⇥") + pickerMuted.Render(" tabs")
+	right := splitHint + "  " + pickerText.Render("^n") + pickerMuted.Render(" new worktree") + "  " + pickerText.Render("^g") + pickerMuted.Render(" pin") + "  " + pickerText.Render("⇥") + pickerMuted.Render(" sessions")
 	if width-lipgloss.Width(left)-lipgloss.Width(right) < 2 {
-		right = splitHint + "  " + pickerText.Render("⇥") + pickerMuted.Render(" tabs")
+		right = splitHint + "  " + pickerText.Render("⇥") + pickerMuted.Render(" sessions")
 	}
 	footer := pickerFooter(left, right, left, width)
 	if m.launcher {
@@ -596,7 +724,7 @@ func (m *dirModel) View() string {
 func (m *dirModel) viewTabs() string {
 	width := m.width - 2
 	blank := pickerLine("", width)
-	lines := []string{pickerSearch(m.filter, width, "tabs")}
+	lines := []string{pickerSearch(m.filter, width, "sessions")}
 	if m.height >= 8 {
 		lines = append(lines, pickerPills(1, width))
 	}
@@ -610,9 +738,9 @@ func (m *dirModel) viewTabs() string {
 			message := ""
 			if n == 0 {
 				if !m.tabsLoaded {
-					message = " Loading tabs…"
+					message = " Loading sessions…"
 				} else {
-					message = " No matching tabs"
+					message = " No matching sessions or tabs"
 				}
 				lines = append(lines, pickerLine(pickerMuted.Render(message), width))
 			} else {
@@ -639,7 +767,7 @@ func (m *dirModel) viewTabs() string {
 
 func (m *dirModel) viewRename() string {
 	width := m.width - 2
-	entry := m.selectedEntry()
+	entry := m.renameEntry
 	scope := "tab"
 	if entry != nil && entry.Kind == "session" {
 		scope = "session"

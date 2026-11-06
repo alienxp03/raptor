@@ -3,12 +3,14 @@ package rex
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 )
 
-// SessionEntry describes one jump target for the Tabs & Sessions view.
+// SessionEntry describes one selectable row in the Sessions view.
 // Kind "session" jumps to a session; kind "window" jumps to one of its tabs.
-// Path mirrors ID so native clients can reuse their item decode shape.
+// SessionID links each tab to its parent session row. Path mirrors ID so native
+// clients can reuse their item decode shape.
 type SessionEntry struct {
 	Kind         string `json:"kind"` // "session" | "window"
 	ID           string `json:"id"`
@@ -30,6 +32,9 @@ type apiWindow struct {
 	Active   bool
 }
 
+// sessionWindowWorkers limits concurrent Rex processes per session listing.
+const sessionWindowWorkers = 4
+
 // SessionEntries lists sessions and their windows in sidebar order: each
 // session is followed by its tabs. A window is active when it is the
 // session's active window; a session is active when it is the origin session.
@@ -44,18 +49,35 @@ func SessionEntries(originSession string) ([]SessionEntry, error) {
 	if err := json.Unmarshal([]byte(out), &data); err != nil {
 		return nil, fmt.Errorf("could not parse the session list: %w", err)
 	}
+	// Fetch into separate slots, then assemble rows in sidebar order. Failed
+	// sessions keep their session row but have no window rows.
+	windowsBySession := make([][]apiWindow, len(data.Sessions))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	for range min(sessionWindowWorkers, len(data.Sessions)) {
+		workers.Go(func() {
+			for i := range jobs {
+				windows, err := sessionWindows(data.Sessions[i].SessionID)
+				if err == nil {
+					windowsBySession[i] = windows
+				}
+			}
+		})
+	}
+	for i := range data.Sessions {
+		jobs <- i
+	}
+	close(jobs)
+	workers.Wait()
+
 	entries := make([]SessionEntry, 0, len(data.Sessions)*2)
-	for _, session := range data.Sessions {
+	for i, session := range data.Sessions {
 		entries = append(entries, SessionEntry{
 			Kind: "session", ID: session.SessionID, Path: session.SessionID, SessionID: session.SessionID,
 			Label: session.Label, SessionLabel: session.Label,
 			Active: session.SessionID == originSession,
 		})
-		windows, err := sessionWindows(session.SessionID)
-		if err != nil {
-			continue // A dead session must not hide the others.
-		}
-		for _, window := range windows {
+		for _, window := range windowsBySession[i] {
 			entries = append(entries, SessionEntry{
 				Kind: "window", ID: window.WindowID, Path: window.WindowID, SessionID: session.SessionID,
 				Label: window.Label, SessionLabel: session.Label, Active: window.Active,

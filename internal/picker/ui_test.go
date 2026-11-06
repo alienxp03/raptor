@@ -104,7 +104,7 @@ func TestCompactPalette(t *testing.T) {
 		rowLine := 2
 		if size[1] >= 8 {
 			rowLine = 3
-			if !strings.Contains(ansi.Strip(lines[1]), "Repos") || !strings.Contains(ansi.Strip(lines[1]), "Tabs") {
+			if !strings.Contains(ansi.Strip(lines[1]), "Repos") || !strings.Contains(ansi.Strip(lines[1]), "Sessions") {
 				t.Fatal("missing view pills row")
 			}
 		}

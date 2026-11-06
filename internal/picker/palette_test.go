@@ -10,7 +10,27 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/rex"
 )
+
+func TestSessionRowsShowHierarchy(t *testing.T) {
+	for _, width := range []int{24, 44, 78} {
+		for _, selected := range []bool{false, true} {
+			parent := ansi.Strip(pickerSessionRow(rex.SessionEntry{Kind: "session", Label: "personal"}, 1, width, selected))
+			child := ansi.Strip(pickerSessionRow(rex.SessionEntry{Kind: "tab", Label: "dotfiles", SessionLabel: "personal"}, 2, width, selected))
+			if strings.Contains(child, "personal") || strings.Index(child, "dotfiles") <= strings.Index(parent, "personal") {
+				t.Fatalf("tabs must be indented without repeated session labels: %q / %q", parent, child)
+			}
+			if lipgloss.Width(parent) != width+2 || lipgloss.Width(child) != width+2 {
+				t.Fatalf("session row overflow: %q / %q", parent, child)
+			}
+		}
+	}
+	pills := ansi.Strip(pickerPills(1, 78))
+	if !strings.Contains(pills, "Sessions") || !strings.Contains(pills, "⇥ Switch view") || strings.Contains(pills, "Tabs") {
+		t.Fatalf("incorrect view labels: %q", pills)
+	}
+}
 
 func TestPickerPaintRestoresBackground(t *testing.T) {
 	previous := lipgloss.ColorProfile()
