@@ -28,6 +28,11 @@ backend start + `NSApp.activate(ignoringOtherApps:)` focus yank = the Rex flicke
 
 ## Resolved in discussion (round 2)
 
+- Panel surface: **liquid glass like resh** — `NSGlassEffectView` (.regular, 16pt corners, warm-dark
+  tint @0.35, hairline border) on macOS 26+, `NSVisualEffectView` (.popover/behindWindow) fallback,
+  solid surface when Reduce Transparency is on. SwiftUI content stays transparent; popovers keep
+  their own chrome. Same recipe as resh's `apply(theme:)`.
+
 - Tabs view: **list tabs AND sessions**; Enter jumps to the selection, plus manage actions
   (close/rename) on secondary shortcuts (resh Sessions-view style).
 - Pins: **pin repos/dirs** in the launcher (⌘⇧P like resh); pinned float to top; persisted in
@@ -55,9 +60,13 @@ backend start + `NSApp.activate(ignoringOtherApps:)` focus yank = the Rex flicke
 
 ## Follow-ups (user feedback after first live run)
 
-- **Smoothness gap vs resh** — DONE: 0.18 s fade + top-anchored scale-in on open, 0.12 s fade-out
-  on dismiss (reopen cancels the fade), 0.14 s animated height morphs on result changes, row hover
-  states. Terminal unchanged (no animation there).
+- **Smoothness gap vs resh** — DONE, after a long detour: the real answer is that resh animates
+  **nothing itself** — its panel keeps `NSWindowAnimationBehavior.default`, and AppKit's built-in
+  convention for panels is a quick system fade on order in/out. That system fade is the appear
+  animation the user sees. Raptor used to set `.none` plus custom spring/fade motion, which read as
+  sliding in from one side. Final state: no custom motion anywhere (PanelSpring deleted), panel at
+  `.default` so the same system fade plays, instant `orderFront`/`orderOut`/`setFrame` otherwise.
+  Terminal unchanged (no animation there).
 - rex CLI method availability for close/rename varies by Rex version → feature-detect and hide
   actions gracefully.
 - launchd env PATH must include zoxide/fd if we ever add them (not now); keep PATH filter explicit.

@@ -133,7 +133,7 @@ struct NativeChecks {
         precondition(PickerModel.targetLabel("here") == "cd here")
         let launcher = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: SlowDirectoryBackend())
         let initialListHeight = PickerStyle.height(for: launcher)
-        precondition(launcher.loading && initialListHeight == 364,
+        precondition(launcher.loading && initialListHeight == 372,
                      "Launcher must reserve eight compact rows plus the pills row before its first render")
         launcher.start()
         precondition(PickerStyle.height(for: launcher) == initialListHeight && !launcher.canOpen)
@@ -149,7 +149,7 @@ struct NativeChecks {
         precondition(model.page == .worktrees && model.items.count == 3)
         precondition(model.destinationRoot == "/Users/demo/Projects/example-kit-worktrees",
                      "Default destination must come from shared backend before branch input")
-        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 224,
+        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 232,
                      "The picker must use a wider layout with compact, content-fitted height")
         precondition(PickerStyle.rowHeight == 32 && PickerStyle.worktreeRowHeight == 28,
                      "Directory and worktree rows must keep Rex spacing")
@@ -193,7 +193,7 @@ struct NativeChecks {
         compactList.items = (0..<8).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
         let eightRowHeight = PickerStyle.height(for: compactList)
         compactList.items = (0..<30).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
-        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 364,
+        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 372,
                      "Lists must stop growing after eight compact rows")
         let longBranch = PickerItem(path: "/demo/long", branch: "feat/" + String(repeating: "long-name-", count: 15))
         precondition(PickerStyle.branchLines(for: longBranch) == 2,
@@ -238,7 +238,7 @@ struct NativeChecks {
         try await wait { !stale.loading }
         try await Task.sleep(for: .milliseconds(350))
         precondition(stale.items.first?.path == "/demo/new", "Stale query replaced current results")
-        precondition(PickerStyle.height(for: stale) == 172, "Filtered results must shrink the panel")
+        precondition(PickerStyle.height(for: stale) == 180, "Filtered results must shrink the panel")
         stale.choose(); stale.choose()
         try await wait { !stale.busy }
         let dispatches = await scripted.count("dispatch")
@@ -313,7 +313,7 @@ struct NativeChecks {
         precondition(tabs.view == .tabs && tabs.items.count == 5 && tabs.items.first?.kind == "session",
                      "Tabs view must list sessions and windows")
         precondition(tabs.items.contains { $0.kind == "window" && $0.active == true }, "Active windows must be marked")
-        precondition(PickerStyle.height(for: tabs) == 268, "Tabs view must use the same compact row height")
+        precondition(PickerStyle.height(for: tabs) == 276, "Tabs view must use the same compact row height")
         tabs.openNumbered(2)
         try await wait { !tabs.busy }
         let jumpCount = await tabsBackend.count("sessions.jump")

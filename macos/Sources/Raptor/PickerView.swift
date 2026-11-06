@@ -15,8 +15,8 @@ struct PickerView: View {
             footer
         }
         .font(.system(size: PickerStyle.bodyFontSize))
+        .foregroundStyle(PickerStyle.foreground)
         .frame(width: PickerStyle.width, height: PickerStyle.height(for: model))
-        .pickerGlass()
         .tint(PickerStyle.selection)
         .id(ObjectIdentifier(model))
         .task(id: ObjectIdentifier(model)) {
@@ -86,8 +86,9 @@ struct PickerView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12))
-                        .foregroundStyle(Color.primary.opacity(0.5))
-                    TextField(searchPrompt, text: $model.query)
+                        .foregroundStyle(PickerStyle.foreground.opacity(0.5))
+                    TextField(searchPrompt, text: $model.query,
+                              prompt: Text(searchPrompt).foregroundColor(PickerStyle.foreground.opacity(0.45)))
                         .textFieldStyle(.plain)
                         .font(.system(size: PickerStyle.rowFontSize))
                         .focused($field, equals: .search)
@@ -129,6 +130,7 @@ struct PickerView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, PickerStyle.listInset)
+        .padding(.bottom, 8)
         .frame(height: PickerStyle.pillsHeight)
         .accessibilityIdentifier("view-pills")
     }
@@ -138,13 +140,13 @@ struct PickerView: View {
             Image(systemName: icon).font(.system(size: 10, weight: .semibold))
             Text(title).font(.system(size: 12, weight: active ? .semibold : .regular))
             if let hint {
-                Text(hint).font(.system(size: 10)).foregroundStyle(Color.primary.opacity(active ? 0.7 : 0.45))
+                Text(hint).font(.system(size: 10)).foregroundStyle(PickerStyle.foreground.opacity(active ? 0.7 : 0.45))
             }
         }
-        .foregroundStyle(active ? Color.primary : Color.primary.opacity(0.55))
+        .foregroundStyle(active ? PickerStyle.foreground : PickerStyle.foreground.opacity(0.55))
         .padding(.horizontal, 10)
         .frame(height: 22)
-        .background(active ? Color.primary.opacity(0.12) : Color.primary.opacity(0.05), in: Capsule())
+        .background(active ? PickerStyle.foreground.opacity(0.12) : PickerStyle.foreground.opacity(0.05), in: Capsule())
         .contentShape(Capsule())
     }
 
@@ -162,7 +164,7 @@ struct PickerView: View {
             .overlay {
                 if model.items.isEmpty {
                     Text(model.loading ? "Loading…" : (model.error == nil ? emptyMessage : "No results"))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PickerStyle.secondaryText)
                 }
             }
             .onChange(of: model.selectedID) { _, id in
@@ -180,7 +182,7 @@ struct PickerView: View {
             if position >= 1, position <= 9, !isTabs {
                 Text("⌘\(position)")
                     .font(.system(size: 10, weight: .medium).monospacedDigit())
-                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.8) : Color.primary.opacity(0.45))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.45))
                     .accessibilityHidden(true)
             }
             if item.isPinned == true {
@@ -192,7 +194,7 @@ struct PickerView: View {
             if isTabs {
                 Image(systemName: item.kind == "session" ? "tray.full" : "rectangle.split.toprow")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(selected ? PickerStyle.selectionText : Color.primary.opacity(0.55))
+                    .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground.opacity(0.55))
                     .accessibilityHidden(true)
                 Text(item.label ?? item.path)
                     .lineLimit(1).truncationMode(.tail)
@@ -204,7 +206,7 @@ struct PickerView: View {
                 Spacer(minLength: 8)
                 Text(item.kind == "session" ? "Session" : (item.sessionLabel ?? ""))
                     .font(.system(size: 11))
-                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.75) : Color.primary.opacity(0.5))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.5))
                     .lineLimit(1).truncationMode(.tail)
             } else if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
@@ -222,7 +224,7 @@ struct PickerView: View {
             }
         }
         .font(.system(size: PickerStyle.rowFontSize, weight: selected ? .medium : .regular))
-        .foregroundStyle(selected ? PickerStyle.selectionText : Color.primary)
+        .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PickerStyle.rowInset)
         .frame(height: model.page == .worktrees ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight)
@@ -252,7 +254,7 @@ struct PickerView: View {
         Group {
             if let selected = model.selected {
                 Text(displayPath(selected.path))
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(.system(size: 12)).foregroundStyle(PickerStyle.secondaryText)
                     .textSelection(.enabled)
                     .lineLimit(2).truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -273,8 +275,8 @@ struct PickerView: View {
                     .disableAutocorrection(true)
                     .textFieldStyle(.plain).padding(.horizontal, 9)
                     .frame(height: PickerStyle.controlHeight)
-                    .background(field == .branch ? PickerStyle.fieldBackground : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .branch ? PickerStyle.selection : Color.primary.opacity(0.1)))
+                    .background(field == .branch ? PickerStyle.fieldBackground : PickerStyle.foreground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .branch ? PickerStyle.selection : PickerStyle.foreground.opacity(0.1)))
                     .focused($field, equals: .branch)
                     .task { await Task.yield(); field = .branch }
                     .onSubmit { presentBasePicker() }
@@ -286,14 +288,14 @@ struct PickerView: View {
                 Button { presentBasePicker() } label: {
                     HStack {
                         Text(model.base.isEmpty ? "Choose a local branch…" : model.base)
-                            .foregroundStyle(model.base.isEmpty ? Color.primary.opacity(0.45) : Color.primary)
+                            .foregroundStyle(model.base.isEmpty ? PickerStyle.foreground.opacity(0.45) : PickerStyle.foreground)
                         Spacer()
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.primary.opacity(0.5))
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(PickerStyle.foreground.opacity(0.5))
                     }
                     .padding(.horizontal, 9)
                     .frame(height: PickerStyle.controlHeight)
-                    .background(field == .base ? PickerStyle.fieldBackground : Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .base ? PickerStyle.selection : Color.primary.opacity(0.1)))
+                    .background(field == .base ? PickerStyle.fieldBackground : PickerStyle.foreground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .base ? PickerStyle.selection : PickerStyle.foreground.opacity(0.1)))
                 }
                 .buttonStyle(.plain).focusable().focused($field, equals: .base)
                 .onKeyPress(.return) { presentBasePicker(); return .handled }
@@ -323,14 +325,14 @@ struct PickerView: View {
     }
 
     private func formLabel(_ title: String) -> some View {
-        Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
+        Text(title).font(.system(size: 12)).foregroundStyle(PickerStyle.secondaryText)
             .frame(width: 90, alignment: .leading)
     }
 
     private func pathRow(_ title: String, value: String, path: String?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             formLabel(title)
-            Text(value).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 12)).foregroundStyle(PickerStyle.secondaryText)
                 .textSelection(.enabled).lineLimit(1).truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .help(path ?? value)
@@ -355,7 +357,7 @@ struct PickerView: View {
         Button { model.create() } label: {
             HStack(spacing: 10) {
                 Text(createActionLabel).fontWeight(.semibold)
-                Text("⌘↵").foregroundStyle(.secondary)
+                Text("⌘↵").foregroundStyle(PickerStyle.secondaryText)
             }
             .padding(.horizontal, 12)
             .frame(height: PickerStyle.controlHeight)
@@ -399,7 +401,7 @@ struct PickerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 4)
         } else if let notice = model.notice {
-            Text(notice).foregroundStyle(.secondary).accessibilityIdentifier("picker-notice")
+            Text(notice).foregroundStyle(PickerStyle.secondaryText).accessibilityIdentifier("picker-notice")
                 .font(.system(size: 11)).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 4)
@@ -430,9 +432,9 @@ struct PickerView: View {
                 if model.splitMode {
                     Text("Split ⌃P   j↓  l→").accessibilityIdentifier("keyboard-hint")
                 } else if model.view == .tabs {
-                    Text("Tabs & Sessions").foregroundStyle(.secondary)
+                    Text("Tabs & Sessions").foregroundStyle(PickerStyle.secondaryText)
                 } else if model.page == .repositories {
-                    Text("Choose repository").foregroundStyle(.secondary)
+                    Text("Choose repository").foregroundStyle(PickerStyle.secondaryText)
                 } else if model.page == .create {
                     Text("Tab fields · ⌃O target").accessibilityIdentifier("keyboard-hint")
                 } else {
@@ -451,7 +453,7 @@ struct PickerView: View {
             }
             .frame(height: PickerStyle.footerHeight)
         }
-        .font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.65))
+        .font(.system(size: 11)).foregroundStyle(PickerStyle.foreground.opacity(0.65))
         .lineLimit(1)
         .buttonStyle(.plain)
         .padding(.horizontal, PickerStyle.horizontalInset)
@@ -485,7 +487,7 @@ struct PickerView: View {
     private var openTargetControl: some View {
         HStack(spacing: model.page == .create ? 10 : 6) {
             if model.page == .create { formLabel("Open in") }
-            else { Text("Open in:").font(.system(size: 11)).foregroundStyle(Color.primary.opacity(0.75)) }
+            else { Text("Open in:").font(.system(size: 11)).foregroundStyle(PickerStyle.foreground.opacity(0.75)) }
             Button {
                 guard !model.targetPickerPresented else { return }
                 model.targetPickerPresented = true
@@ -494,12 +496,12 @@ struct PickerView: View {
                     Text(PickerModel.targetLabel(model.target))
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                 }
-                .font(.system(size: PickerStyle.bodyFontSize, weight: .semibold))
-                .foregroundStyle(Color.primary)
+                .font(.system(size: model.page == .create ? PickerStyle.bodyFontSize : 11, weight: .medium))
+                .foregroundStyle(PickerStyle.foreground.opacity(0.85))
                 .padding(.horizontal, 8)
-                .frame(height: PickerStyle.controlHeight)
-                .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(field == .target ? PickerStyle.selection : Color.white.opacity(0.12)))
+                .frame(height: model.page == .create ? PickerStyle.controlHeight : 22)
+                .background(PickerStyle.foreground.opacity(0.06), in: Capsule())
+                .overlay(Capsule().strokeBorder(field == .target ? PickerStyle.selection : Color.clear))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -520,7 +522,7 @@ struct PickerView: View {
                 })
             }
             if model.page != .create {
-                Text("⌃O").font(.system(size: 10)).foregroundStyle(Color.primary.opacity(0.65))
+                Text("⌃O").font(.system(size: 10)).foregroundStyle(PickerStyle.foreground.opacity(0.65))
             }
         }
         .fixedSize(horizontal: true, vertical: false)
@@ -556,7 +558,7 @@ private struct HoverRow<Content: View>: View {
         HStack(spacing: 10) { content() }
             .background {
                 if hovering, !selected, enabled {
-                    RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.05))
+                    RoundedRectangle(cornerRadius: 9).fill(PickerStyle.foreground.opacity(0.05))
                 }
             }
             .onHover { hovering = $0 }

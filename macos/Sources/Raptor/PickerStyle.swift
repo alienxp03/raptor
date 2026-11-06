@@ -6,7 +6,7 @@ import SwiftUI
 enum PickerStyle {
     static let width: CGFloat = 640
     static let topInset: CGFloat = 72
-    static let radius: CGFloat = 12
+    static let radius: CGFloat = 16
     static let bodyFontSize: CGFloat = 13
     static let rowFontSize: CGFloat = 13
     static let titleFontSize: CGFloat = 14
@@ -17,16 +17,26 @@ enum PickerStyle {
     static let createHeight: CGFloat = 240
     static let searchHeight: CGFloat = 40
     static let searchFieldHeight: CGFloat = 30
-    static let pillsHeight: CGFloat = 26
+    static let pillsHeight: CGFloat = 34
     static let createHeaderHeight: CGFloat = searchHeight
     static let footerHeight: CGFloat = 34
     static let rowHeight: CGFloat = 32
     static let worktreeRowHeight: CGFloat = 28
     static let selectedPathHeight: CGFloat = 32
     static let selection = Color(red: 0.722, green: 0.510, blue: 0.259)
-    static let selectionText = Color(red: 0.153, green: 0.141, blue: 0.133)
-    static let background = Color(red: 0.106, green: 0.098, blue: 0.092)
+    // Warm foreground like resh; selected rows use white, never dark ink.
+    static let foreground = Color(red: 0.84, green: 0.79, blue: 0.72)
+    static let secondaryText = foreground.opacity(0.55)
+    static let selectionText = Color.white
+    private static let backgroundRGB = (red: CGFloat(0.106), green: CGFloat(0.098), blue: CGFloat(0.092))
+    static let background = Color(red: backgroundRGB.red, green: backgroundRGB.green, blue: backgroundRGB.blue)
     static let fieldBackground = Color(red: 0.196, green: 0.182, blue: 0.176)
+    /// Warm dark tint over the system glass, matching resh's blendTheme tint
+    /// strength (panel background at 35% alpha) so text stays readable on
+    /// bright desktops while the glass still shows through.
+    static let glassTint = NSColor(red: backgroundRGB.red, green: backgroundRGB.green,
+        blue: backgroundRGB.blue, alpha: 0.35)
+    static let hairline = NSColor.white.withAlphaComponent(0.15)
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {
         CGRect(x: area.midX - width / 2, y: area.maxY - topInset - height,
@@ -75,6 +85,9 @@ extension CGRect {
 
 private struct RexPanelBackground: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
+        // Popover surfaces only. The main panel's glass material lives in the
+        // window (RaptorApp.makeContent) — PickerView itself stays transparent
+        // so the system glass shows through.
         content
             .background(PickerStyle.background)
             .clipShape(RoundedRectangle(cornerRadius: PickerStyle.radius))

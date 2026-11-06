@@ -65,6 +65,7 @@ struct BranchPickerPopover: View {
             }
         }
         .font(.system(size: PickerStyle.bodyFontSize))
+        .foregroundStyle(PickerStyle.foreground)
         .frame(width: 360, height: popoverHeight)
         .pickerGlass()
         .tint(PickerStyle.selection)
@@ -102,10 +103,10 @@ struct BranchPickerPopover: View {
                             ProgressView().controlSize(.small)
                             Text("Loading local branches…")
                         }
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(PickerStyle.secondaryText)
                     } else if visibleError == nil {
                         Text(query.isEmpty ? "No local branches" : "No matching local branches")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(PickerStyle.secondaryText)
                     }
                 }
             }
@@ -133,7 +134,7 @@ struct BranchPickerPopover: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .font(.system(size: PickerStyle.rowFontSize, weight: isSelected ? .medium : .regular))
-                .foregroundStyle(isSelected ? PickerStyle.selectionText : Color.primary)
+                .foregroundStyle(isSelected ? PickerStyle.selectionText : PickerStyle.foreground)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, PickerStyle.rowInset)
                 .frame(height: PickerStyle.rowHeight)

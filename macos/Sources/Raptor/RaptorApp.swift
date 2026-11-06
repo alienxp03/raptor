@@ -23,10 +23,6 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // and never activates the app.
     private var resident = false
     private var panelHost: PanelHost?
-    private var dismissGeneration = 0
-    private var openSpring: PanelSpring?
-    private var heightSpring: PanelSpring?
-    private var dismissSpring: PanelSpring?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         var arguments = Array(CommandLine.arguments.dropFirst())
@@ -111,7 +107,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             await model.reconfigure(options)
             let anchor = self.invocationAnchor()
             if let panel = self.panel {
-                (panel.contentView as? NSHostingView<PickerView>)?.rootView = PickerView(model: model)
+                if let host = self.panelPickerHost {
+                    host.rootView = PickerView(model: model)
+                }
                 panel.title = model.heading
                 if let (area, screen) = anchor {
                     panel.setFrame(PickerStyle.panelFrame(in: area, height: PickerStyle.height(for: model)).clamped(to: screen.visibleFrame), display: false)
@@ -131,8 +129,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self, let next, self.model === next else { return }
             self.dismissPicker()
         }
-        if let panel {
-            (panel.contentView as? NSHostingView<PickerView>)?.rootView = PickerView(model: next)
+        if let host = panelPickerHost {
+            host.rootView = PickerView(model: next)
         }
         sizeSubscription = next.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.resizePanel() }
@@ -141,72 +139,16 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showResidentPanel() {
-        guard let panel, let model else { return }
+        guard let panel else { return }
         NSApp.unhide(nil)
-        dismissGeneration += 1 // Cancel any in-flight fade-out.
-        dismissSpring?.invalidate(); dismissSpring = nil
-        heightSpring?.invalidate(); heightSpring = nil
-        let opening = !panel.isVisible
-        if opening && ProcessInfo.processInfo.environment["RAPTOR_NO_SPRING"] == nil {
-            // Physically integrated entrance: one spring on the scale, the
-            // frame re-derived every display frame from the model's live
-            // height, so results that land mid-motion are already correct.
-            let anchorMidX = panel.frame.midX
-            let anchorMaxY = panel.frame.maxY
-            openSpring?.invalidate()
-            // Order in at full alpha FIRST: ordering in at alpha 0 makes
-            // AppKit skip the screen attachment entirely.
-            panel.makeKeyAndOrderFront(nil)
-            panel.alphaValue = 0
-            let clock = CACurrentMediaTime()
-            openSpring = PanelSpring(value: 0.96, target: 1.0, config: .panel, tick: { [weak self, weak model] s in
-                guard let self, let model, let panel = self.panel else { return }
-                let height = PickerStyle.height(for: model)
-                let frame = CGRect(x: anchorMidX - PickerStyle.width * s / 2,
-                                   y: anchorMaxY - height * s,
-                                   width: PickerStyle.width * s,
-                                   height: height * s)
-                panel.setFrame(frame, display: true)
-                panel.alphaValue = min(1, CGFloat(CACurrentMediaTime() - clock) / 0.18)
-            }, settle: {
-                panel.alphaValue = 1
-            })
-        } else {
-            panel.alphaValue = 1
-            panel.makeKeyAndOrderFront(nil)
-        }
+        // Plain orderFront at full alpha; the system panel fade from
+        // animationBehavior = .default provides the entrance, same as resh.
+        panel.alphaValue = 1
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func dismissResidentPanel() {
-        guard let panel, panel.isVisible, panel.alphaValue > 0.01 else {
-            panel?.orderOut(nil)
-            return
-        }
-        dismissGeneration += 1
-        openSpring?.invalidate(); openSpring = nil
-        heightSpring?.invalidate(); heightSpring = nil
-        let generation = dismissGeneration
-        let anchorMidX = panel.frame.midX
-        let width = panel.frame.width
-        let height = panel.frame.height
-        let maxY = panel.frame.maxY
-        dismissSpring?.invalidate()
-        dismissSpring = PanelSpring(value: 1.0, target: 0.985, config: .panel, tick: { s in
-            panel.setFrame(CGRect(x: anchorMidX - width * s / 2, y: maxY - height * s,
-                                  width: width * s, height: height * s), display: true)
-        })
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.15
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().alphaValue = 0
-        }, completionHandler: {
-            // A newer open cancels this fade-out.
-            guard self.dismissGeneration == generation else { return }
-            self.dismissSpring?.invalidate()
-            self.dismissSpring = nil
-            panel.orderOut(nil)
-            panel.alphaValue = 1
-        })
+        panel?.orderOut(nil)
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -268,7 +210,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let picker: RaptorPanel
         if let panel {
             picker = panel
-            (panel.contentView as? NSHostingView<PickerView>)?.rootView = PickerView(model: next)
+            if let host = panelPickerHost {
+                host.rootView = PickerView(model: next)
+            }
         } else {
             picker = makePanel(for: next)
         }
@@ -293,14 +237,69 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         picker.isOpaque = false
         picker.backgroundColor = .clear
         picker.hasShadow = true
-        picker.animationBehavior = .none
+        // resh parity: resh leaves its panel at the NSPanel default animation
+        // behavior, and AppKit's built-in panel convention is a quick system
+        // fade when the window orders in/out — that IS resh's appear/dismiss
+        // animation. Keep .default so the system provides it; never add
+        // custom scale or slide motion on top.
+        picker.animationBehavior = .default
         picker.level = .floating
         picker.hidesOnDeactivate = false
         picker.isFloatingPanel = true
         picker.becomesKeyOnlyIfNeeded = false
         picker.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        picker.contentView = NSHostingView(rootView: PickerView(model: next))
+        picker.contentView = makeContent(for: next)
         return picker
+    }
+
+    /// resh-style liquid glass: NSGlassEffectView hosts the picker content on
+    /// macOS 26+, with an NSVisualEffectView fallback and a solid surface when
+    /// transparency is reduced. The material owns rounding and the hairline
+    /// border; the SwiftUI content stays transparent so the glass shows.
+    private func makeContent(for model: PickerModel) -> NSView {
+        let size = CGSize(width: PickerStyle.width, height: PickerStyle.height(for: model))
+        let hosting = NSHostingView(rootView: PickerView(model: model))
+        hosting.frame = NSRect(origin: .zero, size: size)
+        let material: NSView
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            let solid = NSView(frame: NSRect(origin: .zero, size: size))
+            solid.wantsLayer = true
+            solid.layer?.backgroundColor = PickerStyle.background.cgColor
+            solid.addSubview(hosting)
+            material = solid
+        } else if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView(frame: NSRect(origin: .zero, size: size))
+            glass.style = .regular
+            glass.cornerRadius = PickerStyle.radius
+            glass.tintColor = PickerStyle.glassTint
+            glass.contentView = hosting
+            material = glass
+        } else {
+            let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+            effect.material = .popover
+            effect.blendingMode = .behindWindow
+            effect.state = .active
+            hosting.autoresizingMask = [.width, .height]
+            effect.addSubview(hosting)
+            material = effect
+        }
+        material.wantsLayer = true
+        material.layer?.cornerRadius = PickerStyle.radius
+        material.layer?.masksToBounds = true
+        material.layer?.borderWidth = 1
+        material.layer?.borderColor = PickerStyle.hairline.cgColor
+        return material
+    }
+
+    private var panelPickerHost: NSHostingView<PickerView>? {
+        guard let content = panel?.contentView else { return nil }
+        if #available(macOS 26.0, *), let glass = content as? NSGlassEffectView {
+            return glass.contentView as? NSHostingView<PickerView>
+        }
+        if let effect = content as? NSVisualEffectView {
+            return effect.subviews.first as? NSHostingView<PickerView>
+        }
+        return content as? NSHostingView<PickerView>
     }
 
     private func invocationAnchor() -> (area: CGRect, screen: NSScreen)? {
@@ -355,26 +354,10 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.title = model.heading
         let height = PickerStyle.height(for: model)
         guard abs(panel.frame.height - height) > 0.5 else { return }
-        if openSpring != nil {
-            // The entrance spring re-reads the live height every frame.
-            return
-        }
-        let anchorMidX = panel.frame.midX
-        let maxY = panel.frame.maxY
-        if let spring = heightSpring {
-            spring.settle(to: height)
-            return
-        }
-        heightSpring = PanelSpring(value: panel.frame.height, target: height, config: .height,
-            tick: { [weak self] h in
-                guard let self, let panel = self.panel else { return }
-                panel.setFrame(CGRect(x: anchorMidX - PickerStyle.width / 2, y: maxY - height,
-                                      width: PickerStyle.width, height: h), display: true)
-            },
-            settle: { [weak self] in
-                self?.heightSpring?.invalidate()
-                self?.heightSpring = nil
-            })
+        // resh resizes with no motion: setFrame(animate: false), top edge pinned.
+        let frame = NSRect(x: panel.frame.minX, y: panel.frame.maxY - height,
+                           width: panel.frame.width, height: height)
+        panel.setFrame(frame, display: true)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
