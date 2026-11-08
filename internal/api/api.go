@@ -179,23 +179,35 @@ type agentsResult struct {
 
 type sessionsResult struct {
 	Items   []rex.SessionEntry `json:"items"`
+	Hosts   []hostHeader       `json:"hosts"`
 	Targets []string           `json:"targets"`
 	Target  string             `json:"target"`
 }
 
-// decodeSessionAction validates the shared {kind, session_id, window_id?}
-// envelope of the tab/session mutations.
+// hostHeader tells native clients which group headers to render, including
+// unreachable hosts so their absence is explained rather than silent.
+type hostHeader struct {
+	Label     string `json:"label"`
+	Local     bool   `json:"local,omitempty"`
+	Reachable bool   `json:"reachable"`
+	Error     string `json:"error,omitempty"`
+}
+
+// decodeSessionAction validates the shared {kind, session_id, window_id?, host?}
+// envelope of the tab/session mutations. The empty host is the local server.
 func decodeSessionAction(params json.RawMessage) (struct {
 	Kind      string `json:"kind"`
 	SessionID string `json:"session_id"`
 	WindowID  string `json:"window_id"`
 	Label     string `json:"label"`
+	Host      string `json:"host"`
 }, rex.SessionEntry, error) {
 	var p struct {
 		Kind      string `json:"kind"`
 		SessionID string `json:"session_id"`
 		WindowID  string `json:"window_id"`
 		Label     string `json:"label"`
+		Host      string `json:"host"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return p, rex.SessionEntry{}, err
@@ -209,7 +221,7 @@ func decodeSessionAction(params json.RawMessage) (struct {
 	if p.Kind == "window" && p.WindowID == "" {
 		return p, rex.SessionEntry{}, fmt.Errorf("window_id is required for a window")
 	}
-	entry := rex.SessionEntry{Kind: p.Kind, ID: p.WindowID, SessionID: p.SessionID}
+	entry := rex.SessionEntry{Kind: p.Kind, ID: p.WindowID, SessionID: p.SessionID, Host: p.Host}
 	if p.Kind == "session" {
 		entry.ID = p.SessionID
 	}
@@ -287,16 +299,30 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		entries, err := rex.SessionEntries(h.ctx.Session)
-		if err != nil {
-			return nil, err
+		result := sessionsResult{Items: []rex.SessionEntry{}, Hosts: []hostHeader{}, Targets: []string{}, Target: h.cfg.Enter}
+		localAgents, _ := h.activitySnapshot(false)
+		for _, group := range rex.SessionGroups(h.ctx.Session, localAgents) {
+			result.Hosts = append(result.Hosts, hostHeader{Label: group.Label, Local: group.Local, Reachable: group.Reachable, Error: group.Error})
+			if !group.Reachable {
+				continue
+			}
+			for _, i := range catalog.FilterSessions(group.Entries, p.Query) {
+				result.Items = append(result.Items, group.Entries[i])
+			}
 		}
-		if agents, err := h.activitySnapshot(false); err == nil {
-			rex.ApplySessionActivity(entries, agents)
-		}
-		result := sessionsResult{Items: []rex.SessionEntry{}, Targets: []string{}, Target: h.cfg.Enter}
-		for _, i := range catalog.FilterSessions(entries, p.Query) {
-			result.Items = append(result.Items, entries[i])
+		// While filtering, groups without matching rows only add noise.
+		if p.Query != "" {
+			matched := map[string]bool{}
+			for _, item := range result.Items {
+				matched[item.Host] = true
+			}
+			hosts := result.Hosts[:0]
+			for _, header := range result.Hosts {
+				if matched[header.Label] {
+					hosts = append(hosts, header)
+				}
+			}
+			result.Hosts = hosts
 		}
 		return result, nil
 	case "sessions.jump":
@@ -304,22 +330,41 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := rex.Jump(entry, h.ctx.Client); err != nil {
+		if err := rex.JumpOnHost(entry.Host, entry, h.ctx.Client); err != nil {
 			return nil, err
 		}
 		return struct{}{}, nil
+	case "sessions.create":
+		var p struct {
+			Host string `json:"host"`
+			Dir  string `json:"dir"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		if p.Dir == "" {
+			return nil, fmt.Errorf("dir is required")
+		}
+		sid, existing, err := rex.CreateSessionOn(p.Host, p.Dir)
+		if err != nil {
+			return nil, err
+		}
+		if err := rex.SelectOnHost(p.Host, sid, h.ctx.Client); err != nil {
+			return nil, fmt.Errorf("created %s on %s, but could not switch to it: %w", sid, rex.LocalHostLabelOr(p.Host), err)
+		}
+		return map[string]any{"session_id": sid, "existing": existing}, nil
 	case "sessions.close":
 		_, entry, err := decodeSessionAction(params)
 		if err != nil {
 			return nil, err
 		}
-		if entry.Kind == "session" && entry.SessionID == h.ctx.Session {
+		if entry.Kind == "session" && (entry.Host == "" || entry.Host == rex.LocalHostLabel) && entry.SessionID == h.ctx.Session {
 			return nil, fmt.Errorf("refusing to close the session this picker opened from")
 		}
 		if entry.Kind == "session" {
-			err = rex.CloseSession(entry.SessionID)
+			err = rex.CloseSession(entry.Host, entry.SessionID)
 		} else {
-			err = rex.CloseWindow(entry.SessionID, entry.ID)
+			err = rex.CloseWindow(entry.Host, entry.SessionID, entry.ID)
 		}
 		if err != nil {
 			return nil, err
@@ -334,9 +379,9 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("label is required")
 		}
 		if entry.Kind == "session" {
-			err = rex.SetSessionLabel(entry.SessionID, p.Label)
+			err = rex.SetSessionLabel(entry.Host, entry.SessionID, p.Label)
 		} else {
-			err = rex.SetWindowLabel(entry.SessionID, entry.ID, p.Label)
+			err = rex.SetWindowLabel(entry.Host, entry.SessionID, entry.ID, p.Label)
 		}
 		if err != nil {
 			return nil, err
@@ -346,11 +391,12 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		var p struct {
 			Query     string `json:"query"`
 			ReposOnly bool   `json:"repos_only"`
+			Host      string `json:"host"`
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		items := catalog.Directories(p.ReposOnly)
+		items := catalog.DirectoriesOn(p.Host, p.ReposOnly)
 		if agents, err := h.activitySnapshot(false); err == nil {
 			catalog.ApplyDirectoryActivity(items, agents)
 		}

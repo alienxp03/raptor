@@ -1,6 +1,6 @@
 # Agents
 
-Use **Repos · Agents** to switch views. Tab moves forward; Shift+Tab moves back. Escape dismisses the launcher from any of these views, even with search text entered. Ctrl+U clears the search in the terminal picker. In the Mac picker, Cmd+Shift+A selects Agents directly.
+Use **Repos · Sessions · Agents** to switch views. Tab moves forward; Shift+Tab moves back. Escape dismisses the launcher from any of these views, even with search text entered. Ctrl+U clears the search in the terminal picker. In the Mac picker, Cmd+Shift+A selects Agents directly.
 
 To open Agents directly from Rex, add this to your Rex config and reload it:
 

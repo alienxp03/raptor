@@ -76,13 +76,13 @@ func pickerDirectory(path string, width int, selected bool) string {
 	return pickerRow(style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3, 0))), width, selected)
 }
 
-// pickerPills renders the view switcher under the search field.
-// active is 0 (repos) or 2 (agents); the old sessions index is reserved.
+// pickerPills renders the view switcher under the search field:
+// 0 repos, 1 sessions, 2 agents.
 func pickerPills(active int, width int) string {
 	pills := []struct {
 		name string
 		view int
-	}{{"Repos", 0}, {"Agents", 2}}
+	}{{"Repos", 0}, {"Sessions", 1}, {"Agents", 2}}
 	parts := make([]string, 0, len(pills))
 	for _, pill := range pills {
 		name := pill.name
@@ -94,6 +94,17 @@ func pickerPills(active int, width int) string {
 		}
 	}
 	content := strings.Join(parts, pickerRail.Render("·"))
+	if lipgloss.Width(content) > width {
+		// Narrow palettes drop pill padding before truncating mid-word.
+		for i, pill := range pills {
+			style := pickerMuted
+			if pill.view == active {
+				style = pickerInput
+			}
+			parts[i] = style.Render(pill.name)
+		}
+		content = strings.Join(parts, pickerRail.Render("·"))
+	}
 	return pickerLine(content, width)
 }
 

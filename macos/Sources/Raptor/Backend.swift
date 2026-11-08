@@ -25,7 +25,7 @@ struct LaunchOptions: Sendable {
             index += 2
         }
         let mode = values["--mode"] ?? "dirs"
-        guard ["dirs", "wt", "wt-create", "agents"].contains(mode) else { throw APIError.message("Mode must be dirs, wt, wt-create or agents.") }
+        guard ["dirs", "wt", "wt-create", "agents", "sessions"].contains(mode) else { throw APIError.message("Mode must be dirs, wt, wt-create, agents or sessions.") }
         self.mode = mode
         session = values["--session"] ?? ""
         block = values["--block"] ?? ""
@@ -126,6 +126,7 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     var blockID: String? = nil
     var active: Bool? = nil
     var isPinned: Bool? = nil
+    var host: String? = nil
     var id: String { path }
     var isSessionEntry: Bool { kind == "session" || kind == "window" }
 
@@ -198,11 +199,22 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
         case sessionID = "session_id"
         case sessionLabel = "session_label"
         case isPinned = "is_pinned"
+        case host
     }
+}
+
+/// One host header from the sessions response. Rows carry `host` labels that
+/// match `label`, so the list can group sessions per machine.
+struct HostHeader: Codable, Equatable, Sendable {
+    let label: String
+    let local: Bool?
+    let reachable: Bool
+    let error: String?
 }
 
 struct APIResult: Codable, Sendable {
     var items: [PickerItem]? = nil
+    var hosts: [HostHeader]? = nil
     var targets: [String]? = nil
     var target: String? = nil
     var repo: String? = nil
@@ -215,7 +227,7 @@ struct APIResult: Codable, Sendable {
     var validationError: String? = nil
     var theme: ThemePayload? = nil
     enum CodingKeys: String, CodingKey {
-        case items, targets, target, repo, branches, path, theme
+        case items, hosts, targets, target, repo, branches, path, theme
         case destinationRoot = "destination_root"
         case suggestedBranch = "suggested_branch"
         case needsRepo = "needs_repo", baseBranch = "base_branch", validationError = "validation_error"

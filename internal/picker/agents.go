@@ -19,17 +19,20 @@ type agentsLoadedMsg struct {
 }
 
 func (m *dirModel) switchView(view int) tea.Cmd {
-	if view != 0 && view != 2 {
+	if view != 0 && view != 1 && view != 2 {
 		return nil
 	}
 	m.viewStates[m.viewMode] = dirViewState{m.filter, m.sel}
 	m.viewMode = view
 	m.filter, m.sel = m.viewStates[view].filter, m.viewStates[view].sel
 	m.splitMode = false
+	m.createSession = nil
 	m.applyCurrentFilter()
 	switch view {
 	case 2:
 		return m.loadAgents(false)
+	case 1:
+		return m.loadSessions(false)
 	default:
 		return m.refreshRepos()
 	}

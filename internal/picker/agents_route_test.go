@@ -41,7 +41,7 @@ func TestAgentsDirectStartup(t *testing.T) {
 
 func TestCtrlASelectsAgentsFromEveryView(t *testing.T) {
 	log := pickerRexLog(t)
-	for _, view := range []int{0, 2} {
+	for _, view := range []int{0, 1, 2} {
 		m := &dirModel{
 			viewMode: view, filter: "source", agentsLoaded: true,
 			agents: []rex.AgentEntry{pickerAgent("a"), pickerAgent("b")},

@@ -55,6 +55,52 @@ func Do(client, action string, kv ...string) error {
 	return err
 }
 
+// RunOn targets a host's Rex server. The empty host and the local label are
+// the local server: its sessions need no -S flag.
+func RunOn(host string, args ...string) (string, error) {
+	if host == "" || host == LocalHostLabel {
+		return Run(args...)
+	}
+	return Run(append([]string{"-S", host}, args...)...)
+}
+
+// RunOnBounded bounds a host call. Remote calls pass rex's own --timeout so a
+// down host cannot stall the sessions view: rex otherwise waits its default
+// 10s per connection. Local calls only get the process kill as a backstop.
+// The extra second covers process startup and shutdown.
+func RunOnBounded(host string, seconds int, args ...string) (string, error) {
+	timeout := time.Duration(seconds+1) * time.Second
+	if host == "" || host == LocalHostLabel {
+		r, err := runCmd("", timeout, "rex", args...)
+		if err != nil {
+			return r.Stdout, err
+		}
+		if r.Code != 0 {
+			return r.Stdout, fmt.Errorf("rex %s: %s", strings.Join(args, " "), strings.TrimSpace(r.Stderr))
+		}
+		return r.Stdout, nil
+	}
+	full := append([]string{"-S", host, "--timeout", fmt.Sprintf("%ds", seconds)}, args...)
+	r, err := runCmd("", timeout, "rex", full...)
+	if err != nil {
+		return r.Stdout, err
+	}
+	if r.Code != 0 {
+		return r.Stdout, fmt.Errorf("rex %s: %s", strings.Join(full, " "), strings.TrimSpace(r.Stderr))
+	}
+	return r.Stdout, nil
+}
+
+// DoOn targets a client on one host's server.
+func DoOn(host, client, action string, kv ...string) error {
+	args := []string{"-C", client, "do", action}
+	for _, s := range kv {
+		args = append(args, s)
+	}
+	_, err := RunOn(host, args...)
+	return err
+}
+
 type rexSession struct {
 	SessionID string `json:"session_id"`
 	Label     string `json:"label"`
@@ -150,17 +196,56 @@ func BlockForeground(blockID string) string {
 // ---------- zoxide ----------
 
 func ZoxideList() []string {
-	r, err := runCmd("", 5*time.Second, "zoxide", "query", "-l")
+	return parseZoxide(zoxideOut(""))
+}
+
+// ZoxideListOn lists one host's frecency directories. Remote hosts answer over
+// SSH; a non-interactive login may not carry zoxide on PATH, so well-known
+// install locations are tried before giving up.
+func ZoxideListOn(host string) []string {
+	if host == "" || host == LocalHostLabel {
+		return ZoxideList()
+	}
+	return parseZoxide(remoteZoxideOut(host))
+}
+
+func parseZoxide(out string, err error) []string {
 	if err != nil {
 		return nil
 	}
 	var dirs []string
-	for _, line := range strings.Split(strings.TrimSpace(r.Stdout), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			dirs = append(dirs, line)
 		}
 	}
 	return dirs
+}
+
+func zoxideOut(host string) (string, error) {
+	r, err := runCmd("", 5*time.Second, "zoxide", "query", "-l")
+	return r.Stdout, err
+}
+
+// remoteZoxideCandidates keeps unexpanded tilde paths: the remote shell expands them.
+var remoteZoxideCandidates = []string{
+	"zoxide",
+	"~/.local/share/mise/shims/zoxide",
+	"~/.local/bin/zoxide",
+	"~/.cargo/bin/zoxide",
+	"/usr/local/bin/zoxide",
+}
+
+func remoteZoxideOut(host string) (string, error) {
+	for _, zoxide := range remoteZoxideCandidates {
+		r, err := runCmd("", 8*time.Second, "ssh",
+			"-o", "BatchMode=yes", "-o", "ConnectTimeout=4", host,
+			zoxide+" query -l")
+		if err == nil && r.Code == 0 {
+			return r.Stdout, nil
+		}
+	}
+	return "", fmt.Errorf("zoxide is unavailable on %s", host)
 }
 
 // ---------- last-session state ----------

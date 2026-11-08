@@ -59,7 +59,7 @@ esac
 	checkSessions := func(active bool) {
 		t.Helper()
 		result := call("sessions").(sessionsResult)
-		if len(result.Items) != 2 {
+		if len(result.Items) != 1 {
 			t.Fatalf("sessions=%+v", result)
 		}
 		for _, item := range result.Items {
@@ -95,23 +95,23 @@ esac
 	}
 	h.activityAt = time.Now().Add(-activitySnapshotTTL - time.Second)
 	checkSessions(false)
-	scans(4)
+	scans(5)
 	// A failed fresh agent request must still fail, not return cached activity.
 	if _, err := h.call("agents", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("accepted failed agents snapshot")
 	}
-	scans(5)
+	scans(6)
 	if err := os.Remove(fail); err != nil {
 		t.Fatal(err)
 	}
 	checkSessions(true)
-	scans(6)
+	scans(7)
 	// Cache is per Handler, not process-wide.
 	other := New(rex.Ctx{}, config.Default())
 	if _, err := other.activitySnapshot(false); err != nil {
 		t.Fatal(err)
 	}
-	scans(7)
+	scans(8)
 }
 
 func TestActivityCachesSuccessfulEmptySnapshot(t *testing.T) {

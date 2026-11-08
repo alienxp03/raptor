@@ -21,7 +21,13 @@ type Directory struct {
 }
 
 func Directories(reposOnly bool) []Directory {
-	return DirectoryItems(rex.ZoxideList(), reposOnly)
+	return DirectoriesOn("", reposOnly)
+}
+
+// DirectoriesOn scopes frecency directories to one host. The empty host and
+// "This Mac" read the local zoxide database; remote hosts answer over SSH.
+func DirectoriesOn(host string, reposOnly bool) []Directory {
+	return DirectoryItems(rex.ZoxideListOn(host), reposOnly)
 }
 
 // DirectoryItems keeps zoxide order. Repository discovery also accepts subdirectories.

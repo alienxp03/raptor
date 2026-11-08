@@ -464,6 +464,10 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             model.selectView(.agents)
             return true
         }
+        if command && shift && !option && !control && key == "s" {
+            model.selectView(.sessions)
+            return true
+        }
         // Numbered rows: ⌘1–9 opens that result directly with the chosen target.
         if command && !option && !control, let number = event.charactersIgnoringModifiers.flatMap(Int.init), (1...9).contains(number) {
             model.openNumbered(number)
@@ -508,6 +512,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if model.view == .repos && model.page == .worktrees && ((command && event.keyCode == 51) || (control && key == "x")) {
             model.askRemove(); return true
+        }
+        if model.view == .sessions && model.page == .directories && control && !command && !option && key == "x" {
+            model.askCloseSession(); return true
         }
         if control && !command && !option {
             switch key {

@@ -17,11 +17,14 @@ actor DemoBackend: BackendClient {
         PickerItem(path: "agent:demo-3", label: "Review tests", kind: "agent", sessionID: "session:demo-2", sessionLabel: "castty", app: "Claude", state: "idle", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)), windowID: "window:demo-2a", windowLabel: "research", blockID: "block:demo-review")
     ]
     private var sessionEntries: [PickerItem] = [
-        PickerItem(path: "session:demo-1", label: "dotfiles", kind: "session", sessionID: "session:demo-1", sessionLabel: "dotfiles", active: true),
-        PickerItem(path: "window:demo-1a", label: "dotfiles shell", kind: "window", sessionID: "session:demo-1", sessionLabel: "dotfiles", active: true),
-        PickerItem(path: "window:demo-1b", label: "build", kind: "window", sessionID: "session:demo-1", sessionLabel: "dotfiles", active: false),
-        PickerItem(path: "session:demo-2", label: "castty", kind: "session", sessionID: "session:demo-2", sessionLabel: "castty", active: false),
-        PickerItem(path: "window:demo-2a", label: "research", kind: "window", sessionID: "session:demo-2", sessionLabel: "castty", active: true)
+        PickerItem(path: "session:demo-1", label: "dotfiles", kind: "session", sessionID: "session:demo-1", sessionLabel: "dotfiles", state: "blocked", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), active: true, host: "This Mac"),
+        PickerItem(path: "session:demo-2", label: "castty", kind: "session", sessionID: "session:demo-2", sessionLabel: "castty", state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), host: "This Mac"),
+        PickerItem(path: "session:demo-3", label: "research", kind: "session", sessionID: "session:demo-3", sessionLabel: "research", state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), host: "Demo Host")
+    ]
+    private let sessionHosts: [HostHeader] = [
+        HostHeader(label: "This Mac", local: true, reachable: true, error: nil),
+        HostHeader(label: "Demo Host", local: false, reachable: true, error: nil),
+        HostHeader(label: "Offline Host", local: false, reachable: false, error: "ssh: host down")
     ]
     nonisolated func close() {}
 
@@ -41,25 +44,34 @@ actor DemoBackend: BackendClient {
         let branches = ["main", "develop", "feat/native-picker", "fix/focus"]
         switch method {
         case "directories":
-            let items = [repo, "/Users/demo/Projects/sample-console", "/Users/demo/Projects/demo-sandbox", "/Users/demo/Work/demo-studio", "/Users/demo/Work/sample-notes"]
+            let host = text("host")
+            if host.isEmpty {
+                let items = [repo, "/Users/demo/Projects/sample-console", "/Users/demo/Projects/demo-sandbox", "/Users/demo/Work/demo-studio", "/Users/demo/Work/sample-notes"]
+                    .filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) }
+                    .map { path in
+                        PickerItem(path: path, state: path == repo ? "blocked" : "working", working: true,
+                                   updatedAt: ISO8601DateFormatter().string(from: Date()), isPinned: pinned.contains(path))
+                    }
+                let sorted = items.sorted { ($0.isPinned ?? false) && !($1.isPinned ?? false) }
+                return APIResult(items: sorted, targets: targets, target: "tab")
+            }
+            // Host-scoped listing for the New Session flow.
+            let items = ["/Users/demo/Projects/x", "/Users/demo/Projects/demo-sandbox", "/Users/demo/Work/demo-studio"]
                 .filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) }
-                .map { path in
-                    PickerItem(path: path, state: path == repo ? "blocked" : "working", working: true,
-                               updatedAt: ISO8601DateFormatter().string(from: Date()), isPinned: pinned.contains(path))
-                }
-            let sorted = items.sorted { ($0.isPinned ?? false) && !($1.isPinned ?? false) }
-            return APIResult(items: sorted, targets: targets, target: "tab")
+                .map { PickerItem(path: $0) }
+            return APIResult(items: items)
         case "sessions":
             let query = text("query")
-            return APIResult(items: sessionEntries.map { entry in
-                var item = entry
-                item.state = entry.sessionID == "session:demo-1" ? "blocked" : "idle"
-                item.working = entry.sessionID == "session:demo-1"
-                item.updatedAt = ISO8601DateFormatter().string(from: Date())
-                return item
-            }.filter {
-                query.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(query) || ($0.sessionLabel ?? "").localizedCaseInsensitiveContains(query)
-            }, targets: [], target: "tab")
+            let filtered = sessionEntries.filter {
+                query.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(query)
+                    || ($0.sessionLabel ?? "").localizedCaseInsensitiveContains(query)
+            }
+            // Match Go: groups with no matching rows are omitted; unreachable
+            // hosts stay listed so their error remains visible.
+            let hosts = sessionHosts.filter { header in
+                !header.reachable || filtered.contains { $0.host == header.label }
+            }
+            return APIResult(items: filtered, hosts: hosts)
         case "agents":
             let query = text("query")
             let ordered = agents.sorted { lhs, rhs in
@@ -76,13 +88,10 @@ actor DemoBackend: BackendClient {
             return APIResult()
         case "sessions.jump":
             return APIResult()
-        case "sessions.close":
-            sessionEntries.removeAll { $0.path == text("window_id") || $0.path == text("session_id") && text("kind") == "session" }
+        case "sessions.create":
             return APIResult()
-        case "sessions.rename":
-            for index in sessionEntries.indices where sessionEntries[index].path == (text("kind") == "window" ? text("window_id") : text("session_id")) {
-                sessionEntries[index].label = text("label")
-            }
+        case "sessions.close":
+            sessionEntries.removeAll { $0.path == text("session_id") }
             return APIResult()
         case "pins.toggle":
             if pinned.contains(text("path")) { pinned.remove(text("path")) } else { pinned.insert(text("path")) }

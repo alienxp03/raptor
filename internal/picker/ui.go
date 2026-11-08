@@ -43,7 +43,7 @@ type row struct {
 type dirModel struct {
 	cfg                 config.Config
 	ctx                 rex.Ctx
-	viewMode            int   // 0 = repos, 2 = agents (1 is reserved)
+	viewMode            int   // 0 = repos, 1 = sessions, 2 = agents
 	rows                []row // full set
 	view                []int // indices into rows after filtering (repos view)
 	pinned              map[string]bool
@@ -65,6 +65,12 @@ type dirModel struct {
 	agentSnapshot       bool
 	pendingAgents       []rex.AgentEntry
 	agentGroups         map[agentIdentity]int
+	sessions            []rex.HostGroup // cached per-host session groups
+	sessionsView        []sessionsRow   // selectable rows after filtering
+	sessionsLoaded      bool
+	sessionsLoading     bool
+	sessionsRequest     uint64
+	createSession       *sessionCreate // "+ New session" flow; Dir set when chosen
 	activityFrame       int
 	activityTickPending bool
 	activityTickID      uint64
@@ -74,10 +80,12 @@ type dirModel struct {
 	width               int
 	height              int
 	// result of the interaction, read after the program exits
-	picked      *row            // non-nil when a directory was chosen
-	jumpedAgent *rex.AgentEntry // separate result: jump to the exact agent pane
-	next        string          // "wt" or "wt-create" with a repo path in nextRepo
-	nextRepo    string
+	picked       *row              // non-nil when a directory was chosen
+	jumpedAgent  *rex.AgentEntry   // separate result: jump to the exact agent pane
+	jumpSession  *rex.SessionEntry // separate result: switch to that session
+	closeSession *rex.SessionEntry // separate result: close that session
+	next         string            // "wt" or "wt-create" with a repo path in nextRepo
+	nextRepo     string
 }
 
 // Scroll position is derived from sel and the current viewport height.
@@ -113,13 +121,18 @@ func RunAgents(ctx rex.Ctx, cfg config.Config) int {
 	return runDirs(ctx, cfg, false, 2)
 }
 
+// RunSessions opens the picker directly in its Sessions view.
+func RunSessions(ctx rex.Ctx, cfg config.Config) int {
+	return runDirs(ctx, cfg, false, 1)
+}
+
 // RunLauncher previews a path's actions before dispatching. Normal pickers stay unchanged.
 func RunLauncher(ctx rex.Ctx, cfg config.Config) int {
 	return runDirs(ctx, cfg, true, 0)
 }
 
 func newDirModel(ctx rex.Ctx, cfg config.Config, launcher bool, view int) *dirModel {
-	if view != 2 {
+	if view != 1 && view != 2 {
 		view = 0
 	}
 	m := &dirModel{cfg: cfg, ctx: ctx, rows: loadDirRows(ctx), target: cfg.Enter, launcher: launcher, viewMode: view}
@@ -138,6 +151,9 @@ func runDirs(ctx rex.Ctx, cfg config.Config, launcher bool, view int) int {
 			return 1
 		}
 		dm = final.(*dirModel)
+		if code, done := finishSessionsResult(ctx, dm); done {
+			return code
+		}
 		if dm.jumpedAgent != nil {
 			if err := rex.JumpAgent(*dm.jumpedAgent, ctx.Client); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -188,11 +204,16 @@ func (m *dirModel) Init() tea.Cmd {
 	m.activityTickPending = false
 	m.activityTickID++
 	commands := []tea.Cmd{m.ctx.TitleCommand(), m.scheduleActivityTick()}
-	if m.viewMode != 2 && !m.agentsLoading {
+	// Sessions rows carry their own State/Working from the backend listing;
+	// the local-only activity fetch is a repos-view concern.
+	if m.viewMode == 0 && !m.agentsLoading {
 		commands = append(commands, activityCommand(m.ctx.Session))
 	}
 	if m.agentsLoading || (m.viewMode == 2 && !m.agentsLoaded) {
 		commands = append(commands, m.loadAgents(true))
+	}
+	if m.sessionsLoading || (m.viewMode == 1 && !m.sessionsLoaded) {
+		commands = append(commands, m.loadSessions(true))
 	}
 	if m.reposLoading {
 		m.reposLoading = false
@@ -279,9 +300,12 @@ func (m *dirModel) acceptRepos(msg reposLoadedMsg) {
 }
 
 func (m *dirModel) applyCurrentFilter() {
-	if m.viewMode == 2 {
+	switch m.viewMode {
+	case 1:
+		m.applySessionFilter()
+	case 2:
 		m.applyAgentFilter()
-	} else {
+	default:
 		m.applyFilter()
 	}
 }
@@ -302,14 +326,14 @@ func (m *dirModel) selected() *row {
 func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	stopping := false
 	if key, ok := msg.(tea.KeyMsg); ok {
-		stopping = key.String() == "ctrl+c" || (key.String() == "esc" && !m.splitMode && !m.actionMenu)
+		stopping = key.String() == "ctrl+c" || (key.String() == "esc" && !m.splitMode && !m.actionMenu && m.createSession == nil)
 	}
 	model, cmd := m.update(msg)
-	if stopping || m.picked != nil || m.jumpedAgent != nil || m.next != "" {
+	if stopping || m.picked != nil || m.jumpedAgent != nil || m.jumpSession != nil || m.closeSession != nil || m.next != "" || (m.createSession != nil && m.createSession.Dir != "") {
 		m.activityStopping = true
 	}
 	switch msg.(type) {
-	case activityTickMsg, activityLoadedMsg, agentsLoadedMsg, reposLoadedMsg:
+	case activityTickMsg, activityLoadedMsg, agentsLoadedMsg, reposLoadedMsg, sessionsLoadedMsg:
 		if tick := m.scheduleActivityTick(); tick != nil {
 			return model, tea.Batch(cmd, tick)
 		}
@@ -336,6 +360,12 @@ func (m *dirModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reposLoadedMsg:
 		m.acceptRepos(msg)
 		return m, nil
+	case sessionsLoadedMsg:
+		m.acceptSessions(msg)
+		return m, nil
+	case createDirsLoadedMsg:
+		m.acceptCreateDirs(msg)
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
@@ -344,20 +374,33 @@ func (m *dirModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.actionMenu {
 			return m.updateLauncherActions(msg)
 		}
+		if m.createSession != nil {
+			return m.updateCreateSession(msg)
+		}
 		if msg.String() == "ctrl+a" {
 			if m.viewMode == 2 {
 				return m, nil
 			}
 			return m, m.switchView(2)
 		}
-		if !m.splitMode && (msg.String() == "tab" || msg.String() == "shift+tab") {
-			if m.viewMode == 2 {
-				return m, m.switchView(0)
+		if msg.String() == "ctrl+s" {
+			if m.viewMode == 1 {
+				return m, nil
 			}
-			return m, m.switchView(2)
+			return m, m.switchView(1)
+		}
+		if !m.splitMode && (msg.String() == "tab" || msg.String() == "shift+tab") {
+			next := (m.viewMode + 1) % 3
+			if msg.String() == "shift+tab" {
+				next = (m.viewMode + 2) % 3
+			}
+			return m, m.switchView(next)
 		}
 		if m.viewMode == 2 {
 			return m.updateAgents(msg)
+		}
+		if m.viewMode == 1 {
+			return m.updateSessions(msg)
 		}
 		if m.splitMode {
 			switch msg.String() {
@@ -504,8 +547,14 @@ func (m *dirModel) View() string {
 	if m.actionMenu {
 		return m.viewLauncherActions()
 	}
+	if m.createSession != nil {
+		return m.viewCreateSession()
+	}
 	if m.viewMode == 2 {
 		return m.viewAgents()
+	}
+	if m.viewMode == 1 {
+		return m.viewSessions()
 	}
 	width := m.width - 2
 	blank := pickerLine("", width)

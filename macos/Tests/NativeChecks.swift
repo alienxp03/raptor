@@ -2,6 +2,19 @@ import Foundation
 import AppKit
 import SwiftUI
 
+// Check failures must exit cleanly instead of trapping: a precondition trap
+// makes macOS file a crash report for every headless assertion failure.
+private func require(_ condition: Bool, _ message: String = "", file: StaticString = #fileID, line: UInt = #line) {
+    if !condition {
+        testFailure(message.isEmpty ? "check failed at \(file):\(line)" : message)
+    }
+}
+
+private func testFailure(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("FAIL: \(message)\n".utf8))
+    exit(2)
+}
+
 // Standalone headless checks. Compile with Backend, DemoBackend and PickerModel,
 // not RaptorApp. No NSApplication, panel, Rex call or live file operation.
 private actor ScriptedBackend: BackendClient {
@@ -84,7 +97,7 @@ private actor DelayedMetadataBackend: BackendClient {
             guard case .text("feat/typed-early") = params["branch"],
                   case .text("/resolved") = params["repo"],
                   case .text("main") = params["base"] else {
-                preconditionFailure("Preview ran before metadata or lost entered branch")
+                testFailure("Preview ran before metadata or lost entered branch")
             }
             return APIResult(path: "/resolved-worktrees/typed", validationError: "")
         }
@@ -112,9 +125,11 @@ private actor CachedListBackend: BackendClient {
     func count(_ method: String) -> Int { calls.filter { $0 == method }.count }
     func waiting(_ method: String) -> Bool { !(pending[method] ?? []).isEmpty }
     func reply(_ method: String, _ result: APIResult) {
+        guard waiting(method) else { testFailure("Reply for \(method) arrived with no pending call") }
         pending[method]!.removeFirst().resume(returning: result)
     }
     func fail(_ method: String) {
+        guard waiting(method) else { testFailure("Failure for \(method) arrived with no pending call") }
         pending[method]!.removeFirst().resume(throwing: APIError.message("Refresh failed"))
     }
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
@@ -129,53 +144,61 @@ private actor CachedListBackend: BackendClient {
 
 @main
 struct NativeChecks {
-    @MainActor static func main() async throws {
+    @MainActor static func main() async {
+        do { try await run() } catch {
+            // An unhandled top-level error also traps; report it cleanly instead.
+            testFailure("Unhandled error: \(error)")
+        }
+    }
+
+    @MainActor private static func run() async throws {
         if CommandLine.arguments.contains("--theme-integration") {
             try await themeIntegrationChecks()
             return
         }
-        precondition(PickerStyle.panelAnimationBehavior(reduceMotion: false) == .default,
+        require(PickerStyle.panelAnimationBehavior(reduceMotion: false) == .default,
                      "Panel presentation must use resh's default AppKit animation")
-        precondition(PickerStyle.panelAnimationBehavior(reduceMotion: true) == .none,
+        require(PickerStyle.panelAnimationBehavior(reduceMotion: true) == .none,
                      "Reduced Motion must disable panel presentation animation")
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/demo", "--session", "S", "--block", "B", "--client", "C", "--title", "A title"])
-        precondition(options.backendArguments == ["--session", "S", "--block", "B", "--client", "C", "--title", "A title", "api"])
-        do {
-            _ = try LaunchOptions(arguments: ["--mode", "sessions"])
-            preconditionFailure("Invalid mode accepted")
-        } catch {}
+        require(options.backendArguments == ["--session", "S", "--block", "B", "--client", "C", "--title", "A title", "api"])
+        let sessionsMode = try LaunchOptions(arguments: ["--mode", "sessions", "--session", "S", "--block", "B", "--client", "C"])
+        require(sessionsMode.mode == "sessions")
+        require(sessionsMode.backendArguments == ["--session", "S", "--block", "B", "--client", "C", "--title", "", "api"])
+        let sessionsPanel = try LaunchOptions(panelRequest: PanelRequest(mode: "sessions", session: "S", block: "B", client: "C"))
+        require(sessionsMode.matches(sessionsPanel), "The panel variant must route Sessions like the flag form")
         do {
             _ = try LaunchOptions(arguments: ["--repo"])
-            preconditionFailure("Missing argument accepted")
+            testFailure("Missing argument accepted")
         } catch {}
-        for mode in ["WT-CREATE", "wt-create-extra", "wt-create ", "AGENTS", "agents-extra", "agents ", ""] {
+        for mode in ["WT-CREATE", "wt-create-extra", "wt-create ", "AGENTS", "agents-extra", "agents ", "SESSIONS", "sessions-extra", "sessions ", ""] {
             do {
                 _ = try LaunchOptions(arguments: ["--mode", mode])
-                preconditionFailure("Invalid create mode accepted")
+                testFailure("Invalid create mode accepted")
             } catch {}
         }
         let screen = CGRect(x: -1200, y: 200, width: 1200, height: 800)
         let frame = PickerStyle.panelFrame(in: screen, height: 220)
         let taller = PickerStyle.panelFrame(in: screen, height: 400)
-        precondition(frame.midX == screen.midX && frame.maxY == screen.maxY - 72,
+        require(frame.midX == screen.midX && frame.maxY == screen.maxY - 72,
                      "Picker must anchor below the top of the active screen")
-        precondition(taller.maxY == frame.maxY, "Content growth must preserve the top anchor")
+        require(taller.maxY == frame.maxY, "Content growth must preserve the top anchor")
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data("{\"needs_repo\":false,\"base_branch\":\"main\",\"items\":[{\"path\":\"/a\",\"branch\":\"main\",\"is_main\":true}]}".utf8))
-        precondition(decoded.items?.first?.isMain == true && decoded.baseBranch == "main")
+        require(decoded.items?.first?.isMain == true && decoded.baseBranch == "main")
 
-        precondition(PickerStyle.rowFontSize == 13 && PickerStyle.rowHeight == 32 && PickerStyle.createHeaderHeight == PickerStyle.searchHeight,
+        require(PickerStyle.rowFontSize == 13 && PickerStyle.rowHeight == 32 && PickerStyle.createHeaderHeight == PickerStyle.searchHeight,
                      "Launcher and form must share typography and control sizing")
-        precondition(PickerModel.targetLabel("tab") == "New tab")
-        precondition(PickerModel.targetLabel("session") == "Session")
-        precondition(PickerModel.targetLabel("here") == "cd here")
+        require(PickerModel.targetLabel("tab") == "New tab")
+        require(PickerModel.targetLabel("session") == "Session")
+        require(PickerModel.targetLabel("here") == "cd here")
         let launcher = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: SlowDirectoryBackend())
         let initialListHeight = PickerStyle.height(for: launcher)
-        precondition(launcher.loading && initialListHeight == 372,
+        require(launcher.loading && initialListHeight == 372,
                      "Launcher must reserve eight compact rows plus the pills row before its first render")
         launcher.start()
-        precondition(PickerStyle.height(for: launcher) == initialListHeight && !launcher.canOpen)
+        require(PickerStyle.height(for: launcher) == initialListHeight && !launcher.canOpen)
         try await wait { !launcher.loading }
-        precondition(launcher.items.count == 30 && PickerStyle.height(for: launcher) == initialListHeight,
+        require(launcher.items.count == 30 && PickerStyle.height(for: launcher) == initialListHeight,
                      "Populated launcher must not jump from a search-sized window to a list")
         launcher.close()
 
@@ -183,61 +206,61 @@ struct NativeChecks {
         let model = PickerModel(options: options, backend: backend)
         model.start()
         try await wait { !model.loading }
-        precondition(model.page == .worktrees && model.items.count == 3)
-        precondition(model.destinationRoot == "/Users/demo/Projects/example-kit-worktrees",
+        require(model.page == .worktrees && model.items.count == 3)
+        require(model.destinationRoot == "/Users/demo/Projects/example-kit-worktrees",
                      "Default destination must come from shared backend before branch input")
-        precondition(PickerStyle.width == 640 && PickerStyle.height(for: model) == 232,
+        require(PickerStyle.width == 640 && PickerStyle.height(for: model) == 232,
                      "The picker must use a wider layout with compact, content-fitted height")
-        precondition(PickerStyle.rowHeight == 32 && PickerStyle.worktreeRowHeight == 28,
+        require(PickerStyle.rowHeight == 32 && PickerStyle.worktreeRowHeight == 28,
                      "Directory and worktree rows must keep Rex spacing")
         model.askRemove()
-        precondition(model.removalCandidate == nil, "Main worktree must not be removable")
+        require(model.removalCandidate == nil, "Main worktree must not be removable")
         model.move(1)
         model.askRemove()
-        precondition(model.removalCandidate != nil)
+        require(model.removalCandidate != nil)
         model.escape()
-        precondition(model.removalCandidate != nil && model.page == .worktrees, "Esc must not navigate behind confirmation")
+        require(model.removalCandidate != nil && model.page == .worktrees, "Esc must not navigate behind confirmation")
         let candidate = model.removalCandidate!
         model.removalCandidate = nil // SwiftUI can reset its presentation binding first.
         model.confirmRemove(candidate)
         model.confirmRemove(candidate) // Busy guard blocks repeated submission.
         try await wait { !model.busy && !model.loading }
-        precondition(model.items.count == 2)
+        require(model.items.count == 2)
         model.beginCreate()
-        precondition(PickerStyle.height(for: model) == 240, "Creation form grew beyond the compact layout")
+        require(PickerStyle.height(for: model) == 240, "Creation form grew beyond the compact layout")
         model.branch = "feat/test"
         try await wait { model.previewReady }
-        precondition(model.canCreate && model.destination == "/Users/demo/Projects/example-kit-worktrees/feat-test")
+        require(model.canCreate && model.destination == "/Users/demo/Projects/example-kit-worktrees/feat-test")
         model.create()
         model.create()
         try await wait { !model.busy }
-        precondition(model.createdPath != nil && model.notice?.contains("No Rex call") == true,
+        require(model.createdPath != nil && model.notice?.contains("No Rex call") == true,
                      "Create must also open without a second click")
         model.escape()
         try await wait { !model.loading }
-        precondition(model.page == .worktrees && model.items.count == 3, "Ordinary create must return to the list without repeated creation")
+        require(model.page == .worktrees && model.items.count == 3, "Ordinary create must return to the list without repeated creation")
         model.toggleSplit()
-        precondition(model.splitMode)
+        require(model.splitMode)
         model.escape()
-        precondition(!model.splitMode && model.page == .worktrees)
+        require(!model.splitMode && model.page == .worktrees)
         let previousTarget = model.target
         model.cycleTarget(backward: false)
         model.cycleTarget(backward: true)
-        precondition(model.target == previousTarget)
+        require(model.target == previousTarget)
         model.close()
 
         let compactList = PickerModel(options: options, backend: DemoBackend())
         compactList.items = (0..<8).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
         let eightRowHeight = PickerStyle.height(for: compactList)
         compactList.items = (0..<30).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
-        precondition(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 372,
+        require(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 372,
                      "Lists must stop growing after eight compact rows")
         let longBranch = PickerItem(path: "/demo/long", branch: "feat/" + String(repeating: "long-name-", count: 15))
-        precondition(PickerStyle.branchLines(for: longBranch) == 2,
+        require(PickerStyle.branchLines(for: longBranch) == 2,
                      "Selected long branch names must wrap instead of sharing width with paths")
         compactList.items[0] = longBranch
         compactList.selectedID = longBranch.id
-        precondition(PickerStyle.height(for: compactList) == eightRowHeight + PickerStyle.worktreeRowHeight,
+        require(PickerStyle.height(for: compactList) == eightRowHeight + PickerStyle.worktreeRowHeight,
                      "A wrapped selected branch needs one extra row without hiding the path detail")
         compactList.close()
 
@@ -248,6 +271,7 @@ struct NativeChecks {
         try await agentsChecks()
         try await directAgentsChecks()
         try await stableAgentsChecks()
+        try await sessionsChecks()
         try await groupedActivityChecks()
         try await cachedListChecks()
         try await warmReopenChecks()
@@ -259,21 +283,21 @@ struct NativeChecks {
         try await wait { !directoryCreate.loading }
         let selectedRepo = directoryCreate.selected?.path
         directoryCreate.beginCreate()
-        precondition(directoryCreate.page == .create && directoryCreate.loading && directoryCreate.repo == selectedRepo,
+        require(directoryCreate.page == .create && directoryCreate.loading && directoryCreate.repo == selectedRepo,
                      "New from directories must open Create directly for the selected repository")
         try await wait { !directoryCreate.loading }
         directoryCreate.escape()
         try await wait { !directoryCreate.loading }
-        precondition(directoryCreate.page == .directories, "Create opened from directories must return there")
+        require(directoryCreate.page == .directories, "Create opened from directories must return there")
         directoryCreate.close()
 
         let fallback = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt"]), backend: DemoBackend())
         fallback.start()
         try await wait { !fallback.loading }
-        precondition(fallback.page == .repositories && !fallback.items.isEmpty)
+        require(fallback.page == .repositories && !fallback.items.isEmpty)
         fallback.choose()
         try await wait { !fallback.loading }
-        precondition(fallback.page == .worktrees && fallback.repo != nil)
+        require(fallback.page == .worktrees && fallback.repo != nil)
         fallback.close()
 
         let scripted = ScriptedBackend()
@@ -285,12 +309,12 @@ struct NativeChecks {
         stale.query = "new"
         try await wait { !stale.loading }
         try await Task.sleep(for: .milliseconds(350))
-        precondition(stale.items.first?.path == "/demo/new", "Stale query replaced current results")
-        precondition(PickerStyle.height(for: stale) == 180, "Filtered results must shrink the panel")
+        require(stale.items.first?.path == "/demo/new", "Stale query replaced current results")
+        require(PickerStyle.height(for: stale) == 180, "Filtered results must shrink the panel")
         stale.choose(); stale.choose()
         try await wait { !stale.busy }
         let dispatches = await scripted.count("dispatch")
-        precondition(dispatches == 1, "Repeated Enter submitted twice")
+        require(dispatches == 1, "Repeated Enter submitted twice")
         stale.close()
 
         let previewBackend = ScriptedBackend()
@@ -300,46 +324,46 @@ struct NativeChecks {
         preview.beginCreate()
         try await Task.sleep(for: .milliseconds(250))
         let blankPreviews = await previewBackend.count("worktrees.preview")
-        precondition(!preview.previewReady && preview.validationError == nil && blankPreviews == 0,
+        require(!preview.previewReady && preview.validationError == nil && blankPreviews == 0,
                      "An untouched branch field must not show premature validation")
         preview.branch = "old"
         try await Task.sleep(for: .milliseconds(220))
         preview.branch = "new"
         try await wait { preview.previewReady }
         try await Task.sleep(for: .milliseconds(350))
-        precondition(preview.destination == "/demo/new" && preview.validationError == nil && preview.canCreate, "Stale preview or empty validation error blocked creation")
+        require(preview.destination == "/demo/new" && preview.validationError == nil && preview.canCreate, "Stale preview or empty validation error blocked creation")
         preview.close()
 
         let retryBackend = CreateThenOpenBackend()
         let retry = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/demo"]), backend: retryBackend)
         retry.start()
         try await wait { !retry.loading }
-        precondition(retry.page == .create && !retry.loading)
+        require(retry.page == .create && !retry.loading)
         let baseMatches = try await retry.searchBaseBranches("backend-order")
-        precondition(baseMatches == ["zeta", "alpha"], "Branch search must preserve the backend's matching and order")
+        require(baseMatches == ["zeta", "alpha"], "Branch search must preserve the backend's matching and order")
         retry.branch = "feat/demo"
         try await wait { retry.canCreate }
         retry.basePickerPresented = true
         retry.create()
         let modalCounts = await retryBackend.counts()
-        precondition(modalCounts.0 == 0 && modalCounts.1 == 0 && !retry.canSubmitForm,
+        require(modalCounts.0 == 0 && modalCounts.1 == 0 && !retry.canSubmitForm,
                      "The branch popover must not submit the form beneath it")
         retry.escape()
-        precondition(!retry.basePickerPresented && retry.page == .create && retry.branch == "feat/demo",
+        require(!retry.basePickerPresented && retry.page == .create && retry.branch == "feat/demo",
                      "Escape must dismiss the branch popover without discarding the form")
         retry.submitBranch(); retry.submitBranch()
         try await wait { !retry.busy }
         let firstCounts = await retryBackend.counts()
-        precondition(firstCounts.0 == 1 && firstCounts.1 == 1 && retry.createdPath == "/demo/new-worktree")
-        precondition(retry.error?.contains("Worktree created, but opening failed") == true && retry.canSubmitForm && !retry.canCreate)
+        require(firstCounts.0 == 1 && firstCounts.1 == 1 && retry.createdPath == "/demo/new-worktree")
+        require(retry.error?.contains("Worktree created, but opening failed") == true && retry.canSubmitForm && !retry.canCreate)
         retry.cycleTarget(backward: false)
         retry.submitBranch(); retry.submitBranch() // Retry the open step only, even after repeated submission.
         try await wait { !retry.busy }
         let retriedCounts = await retryBackend.counts()
         let openedTargets = await retryBackend.targets()
-        precondition(retriedCounts.0 == 1 && retriedCounts.1 == 2 && openedTargets == ["tab", "session"],
+        require(retriedCounts.0 == 1 && retriedCounts.1 == 2 && openedTargets == ["tab", "session"],
                      "A failed open retried creation or ignored the newly selected target")
-        precondition(retry.error == nil && retry.notice?.contains("No Rex call") == true)
+        require(retry.error == nil && retry.notice?.contains("No Rex call") == true)
         retry.close()
 
         // Optional transport fixture exists only inside an aux test .app bundle.
@@ -352,31 +376,31 @@ struct NativeChecks {
     @MainActor private static func groupedActivityChecks() async throws {
         let json = #"{"path":"a","kind":"agent","state":"working","updated_at":"2026-01-02T03:04:05.123Z","cwd":"/repo","working":false}"#
         var item = try JSONDecoder().decode(PickerItem.self, from: Data(json.utf8))
-        precondition(item.cwd == "/repo" && item.updatedDate != nil && item.activity.working)
+        require(item.cwd == "/repo" && item.updatedDate != nil && item.activity.working)
         let date = item.updatedDate!
-        precondition(item.updatedAge(now: date.addingTimeInterval(-100)) == "now")
-        precondition(item.updatedAge(now: date.addingTimeInterval(120)) == "2m")
-        precondition(item.updatedAge(now: date.addingTimeInterval(3600)) == "1h")
+        require(item.updatedAge(now: date.addingTimeInterval(-100)) == "now")
+        require(item.updatedAge(now: date.addingTimeInterval(120)) == "2m")
+        require(item.updatedAge(now: date.addingTimeInterval(3600)) == "1h")
         item.updatedAt = "2026-01-02T03:04:05Z"
-        precondition(item.updatedDate != nil)
+        require(item.updatedDate != nil)
         item.updatedAt = nil
-        precondition(item.updatedAge() == nil)
+        require(item.updatedAge() == nil)
         let heartbeatOnly = try JSONDecoder().decode(PickerItem.self, from: Data(#"{"path":"legacy","metadata":{"heartbeat":"2026-01-02T03:04:05Z"}}"#.utf8))
-        precondition(heartbeatOnly.updatedAge() == nil, "Never use metadata heartbeat as updated_at")
+        require(heartbeatOnly.updatedAge() == nil, "Never use metadata heartbeat as updated_at")
         item.updatedAt = "bad"
-        precondition(item.updatedAge() == nil)
+        require(item.updatedAge() == nil)
         for kind in ["session", "window", "directory"] {
             item.kind = kind; item.state = "blocked"; item.working = true
-            precondition(item.activity == ActivityProjection(blocked: true, working: true))
-            precondition(item.activityAccessibility == "Blocked, Working")
-            precondition(item.activity.shouldPulse(reduceMotion: false, visible: true))
-            precondition(!item.activity.shouldPulse(reduceMotion: true, visible: true))
-            precondition(!item.activity.shouldPulse(reduceMotion: false, visible: false))
+            require(item.activity == ActivityProjection(blocked: true, working: true))
+            require(item.activityAccessibility == "Blocked, Working")
+            require(item.activity.shouldPulse(reduceMotion: false, visible: true))
+            require(!item.activity.shouldPulse(reduceMotion: true, visible: true))
+            require(!item.activity.shouldPulse(reduceMotion: false, visible: false))
             item.working = false
-            precondition(!item.activity.shouldPulse(reduceMotion: false, visible: true))
+            require(!item.activity.shouldPulse(reduceMotion: false, visible: true))
         }
         item.kind = "agent"; item.state = "idle"; item.working = true
-        precondition(!item.activity.working, "Agent activity must derive only from state")
+        require(!item.activity.working, "Agent activity must derive only from state")
 
         let backend = CachedListBackend()
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "agents"])
@@ -389,8 +413,8 @@ struct NativeChecks {
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: first))
         try await wait { !model.refreshing }
-        precondition(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
-        precondition(model.agentSections.flatMap(\.items).map { model.numberedPosition(of: $0) } == [1, 2, 3])
+        require(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
+        require(model.agentSections.flatMap(\.items).map { model.numberedPosition(of: $0) } == [1, 2, 3])
         let fullHeight = PickerStyle.height(for: model)
         model.selectView(.repos)
         try await pending("directories", backend)
@@ -401,15 +425,15 @@ struct NativeChecks {
         let fresh = [row("new", "blocked"), row("i", "blocked"), row("w", "working"), row("b", "idle")]
         await backend.reply("agents", APIResult(items: fresh))
         try await wait { !model.refreshing }
-        precondition(model.items.map(\.id) == ["b", "w", "i"])
-        precondition(model.items[0].state == "idle", "Live activity changes in place")
-        precondition(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
-        precondition(model.agentSections[0].items.map(\.id) == ["b"], "Snapshot membership stays fixed")
-        precondition(PickerStyle.height(for: model) == fullHeight)
+        require(model.items.map(\.id) == ["b", "w", "i"])
+        require(model.items[0].state == "idle", "Live activity changes in place")
+        require(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
+        require(model.agentSections[0].items.map(\.id) == ["b"], "Snapshot membership stays fixed")
+        require(PickerStyle.height(for: model) == fullHeight)
         let token = model.prepareReconfigure(options)
-        precondition(model.items.map(\.id) == fresh.map(\.id), "Next open uses raw cached backend order, including deferred records")
-        precondition(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
-        precondition(model.agentSections[0].items.map(\.id) == ["new", "i"])
+        require(model.items.map(\.id) == fresh.map(\.id), "Next open uses raw cached backend order, including deferred records")
+        require(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
+        require(model.agentSections[0].items.map(\.id) == ["new", "i"])
         await model.completeReconfigure(token)
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: fresh))
@@ -418,10 +442,10 @@ struct NativeChecks {
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: [fresh[1], fresh[2]]))
         try await wait { !model.refreshing }
-        precondition(model.agentSections.map(\.id) == ["Blocked", "Working"])
-        precondition(model.items.map(\.id) == ["i", "w"])
-        precondition(model.numberedPosition(of: model.items[1]) == 2)
-        precondition(PickerStyle.height(for: model) == fullHeight - PickerStyle.agentRowHeight - PickerStyle.agentGroupHeight - PickerStyle.agentGroupSpacing)
+        require(model.agentSections.map(\.id) == ["Blocked", "Working"])
+        require(model.items.map(\.id) == ["i", "w"])
+        require(model.numberedPosition(of: model.items[1]) == 2)
+        require(PickerStyle.height(for: model) == fullHeight - PickerStyle.agentRowHeight - PickerStyle.agentGroupHeight - PickerStyle.agentGroupSpacing)
         model.close()
         print("PASS: native timestamps/ages, aggregate projections/pulse gates, snapshot groups, deferred records, raw cache reopen, search groups and header height/numbering")
     }
@@ -450,40 +474,40 @@ struct NativeChecks {
             await backend.reply("directories", repos)
             try await wait { !model.refreshing }
             model.selectView(.agents)
-            precondition(!model.loading && model.canOpen, "Cached Agents must remain usable")
+            require(!model.loading && model.canOpen, "Cached Agents must remain usable")
             try await pending("agents", backend)
             await backend.reply("agents", APIResult(items: rows))
             try await wait { !model.refreshing }
         }
         try await refresh([agent("c"), agent("a", "Renamed"), agent("b")])
-        precondition(model.items.map(\.id) == ["b", "a"] && model.selectedID == "a" && model.scrollID == "a")
-        precondition(model.items[1].label == "Renamed", "Stable identity must still update row content")
+        require(model.items.map(\.id) == ["b", "a"] && model.selectedID == "a" && model.scrollID == "a")
+        require(model.items[1].label == "Renamed", "Stable identity must still update row content")
         model.openNumbered(1)
         try await wait { !model.busy }
-        precondition(model.selectedID == "b", "Numbered targets must not move during refresh")
+        require(model.selectedID == "b", "Numbered targets must not move during refresh")
         try await refresh([agent("d"), agent("c"), agent("a")])
-        precondition(model.items.map(\.id) == ["a"], "Remove gone records; defer all new records")
+        require(model.items.map(\.id) == ["a"], "Remove gone records; defer all new records")
         model.query = "ranked"
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: [agent("d"), agent("a")]))
         try await wait { !model.refreshing }
-        precondition(model.items.map(\.id) == ["d", "a"], "Search changes must use backend relevance")
+        require(model.items.map(\.id) == ["d", "a"], "Search changes must use backend relevance")
         model.query = ""
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: [agent("d"), agent("c"), agent("a")]))
         try await wait { !model.refreshing }
-        precondition(model.items.map(\.id) == ["d", "c", "a"], "Revisited search must also take fresh backend relevance")
+        require(model.items.map(\.id) == ["d", "c", "a"], "Revisited search must also take fresh backend relevance")
         try await refresh([agent("a"), agent("c"), agent("d")])
-        precondition(model.items.map(\.id) == ["d", "c", "a"], "Refresh after search must freeze the new relevance order")
+        require(model.items.map(\.id) == ["d", "c", "a"], "Refresh after search must freeze the new relevance order")
         let token = model.prepareReconfigure(options)
-        precondition(model.canOpen && !model.loading, "Warm open must remain synchronous")
+        require(model.canOpen && !model.loading, "Warm open must remain synchronous")
         await model.completeReconfigure(token)
         model.selectView(.agents)
-        precondition(!model.loading && model.canOpen)
+        require(!model.loading && model.canOpen)
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: [agent("a"), agent("c"), agent("d")]))
         try await wait { !model.refreshing }
-        precondition(model.items.map(\.id) == ["a", "c", "d"], "New presentation must reset frozen order")
+        require(model.items.map(\.id) == ["a", "c", "d"], "New presentation must reset frozen order")
         model.close()
         print("PASS: stable Agents refresh identities, content, numbered targets, removal/deferred additions, search order, instant new-open reset")
     }
@@ -495,11 +519,11 @@ struct NativeChecks {
         func agent(_ id: String) -> PickerItem {
             PickerItem(path: id, kind: "agent", sessionID: "S", windowID: "W", blockID: id)
         }
-        precondition(model.view == .agents && model.page == .directories && model.loading)
+        require(model.view == .agents && model.page == .directories && model.loading)
         model.start()
         try await pending("agents", backend)
         let coldDirectories = await backend.count("directories")
-        precondition(coldDirectories == 0, "Cold Agents must not load directories")
+        require(coldDirectories == 0, "Cold Agents must not load directories")
         await backend.reply("agents", APIResult(items: [agent("b"), agent("a")]))
         try await wait { !model.refreshing }
         model.query = "filtered"
@@ -508,22 +532,22 @@ struct NativeChecks {
         try await wait { !model.refreshing }
         model.selectedID = "a"; model.scrollID = "a"
         model.selectView(.agents)
-        precondition(model.query == "filtered" && model.selectedID == "a" && model.shouldToggle(for: options))
+        require(model.query == "filtered" && model.selectedID == "a" && model.shouldToggle(for: options))
         let shortcutCalls = await backend.count("agents")
-        precondition(shortcutCalls == 2, "Active Agents shortcut must be idempotent")
+        require(shortcutCalls == 2, "Active Agents shortcut must be idempotent")
         model.selectView(.repos)
-        precondition(!model.shouldToggle(for: options), "A routed Agents request must not hide another view")
+        require(!model.shouldToggle(for: options), "A routed Agents request must not hide another view")
         try await pending("directories", backend)
         await backend.reply("directories", APIResult(items: []))
         try await wait { !model.refreshing }
         let token = model.prepareReconfigure(options)
-        precondition(model.view == .agents && model.contextReady && model.canOpen && !model.loading)
-        precondition(model.query == "filtered" && model.selectedID == "a" && model.scrollID == "a")
+        require(model.view == .agents && model.contextReady && model.canOpen && !model.loading)
+        require(model.query == "filtered" && model.selectedID == "a" && model.scrollID == "a")
         await model.completeReconfigure(token)
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: [agent("a"), agent("b")]))
         try await wait { !model.refreshing }
-        precondition(model.items.map(\.id) == ["b", "a"], "New presentation captures the latest raw cache at first display")
+        require(model.items.map(\.id) == ["b", "a"], "New presentation captures the latest raw cache at first display")
         model.selectView(.repos)
         try await pending("directories", backend)
         await backend.reply("directories", APIResult(items: []))
@@ -532,47 +556,229 @@ struct NativeChecks {
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: [agent("b"), agent("a"), agent("c")]))
         try await wait { !model.refreshing }
-        precondition(model.items.map(\.id) == ["b", "a"], "Freeze order and defer new records within a presentation")
+        require(model.items.map(\.id) == ["b", "a"], "Freeze order and defer new records within a presentation")
         model.askRemove(); model.beginCreate(); model.togglePin()
-        precondition(!model.busy && model.removalCandidate == nil)
+        require(!model.busy && model.removalCandidate == nil)
         for method in ["sessions", "context", "pins.toggle", "worktrees.remove", "sessions.close", "sessions.rename", "dispatch", "agents.jump"] {
             let calls = await backend.count(method)
-            precondition(calls == 0, "Direct route must not issue unrelated actions: \(method)")
+            require(calls == 0, "Direct route must not issue unrelated actions: \(method)")
         }
         await backend.hold("context")
         let changed = try LaunchOptions(arguments: ["--demo", "--mode", "agents", "--session", "changed"])
         let changedToken = model.prepareReconfigure(changed)
-        precondition(model.view == .agents && model.items.isEmpty && model.loading && !model.contextReady && !model.canOpen)
+        require(model.view == .agents && model.items.isEmpty && model.loading && !model.contextReady && !model.canOpen)
         model.choose(); model.openNumbered(1); model.selectView(.repos)
-        precondition(model.view == .agents && !model.busy)
+        require(model.view == .agents && !model.busy)
         let completion = Task { await model.completeReconfigure(changedToken) }
         try await pending("context", backend)
         let gatedAgents = await backend.count("agents")
-        precondition(gatedAgents == 4, "Agents must wait for context acknowledgement")
+        require(gatedAgents == 4, "Agents must wait for context acknowledgement")
         await backend.reply("context", APIResult())
         await completion.value
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: [agent("new")]))
         try await wait { !model.refreshing }
-        precondition(model.canOpen && model.items.map(\.id) == ["new"] && model.query.isEmpty)
+        require(model.canOpen && model.items.map(\.id) == ["new"] && model.query.isEmpty)
         let totalDirectories = await backend.count("directories")
-        precondition(totalDirectories == 2, "Only explicit Repos visits may load directories")
+        require(totalDirectories == 2, "Only explicit Repos visits may load directories")
         model.close()
 
         // The shortcut uses selectView; forms, confirmations and popovers keep ownership.
         let guarded = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
-        guarded.busy = true; guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.busy = true; guarded.selectView(.agents); require(guarded.view == .repos)
         guarded.busy = false; guarded.page = .create
-        guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.selectView(.agents); require(guarded.view == .repos)
         guarded.page = .directories; guarded.removalCandidate = PickerItem(path: "confirm")
-        guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.selectView(.agents); require(guarded.view == .repos)
         guarded.removalCandidate = nil; guarded.basePickerPresented = true
-        guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.selectView(.agents); require(guarded.view == .repos)
         guarded.basePickerPresented = false; guarded.targetPickerPresented = true
-        guarded.selectView(.agents); precondition(guarded.view == .repos)
+        guarded.selectView(.agents); require(guarded.view == .repos)
         guarded.targetPickerPresented = false; guarded.selectView(.agents)
-        precondition(guarded.view == .agents)
+        require(guarded.view == .agents)
         guarded.close()
+    }
+
+    @MainActor private static func sessionsChecks() async throws {
+        // Wire decoding: hosts array plus session rows, exact keys, optional fields.
+        let decoded = try JSONDecoder().decode(APIResult.self, from: Data(#"""
+        {"items":[{"path":"session:w","kind":"session","label":"dotfiles","session_id":"session:w","host":"This Mac","active":true,"state":"blocked"}],
+         "hosts":[{"label":"This Mac","local":true,"reachable":true},{"label":"Down Host","reachable":false,"error":"ssh: host down"}]}
+        """#.utf8))
+        require(decoded.items?.first?.kind == "session" && decoded.items?.first?.sessionID == "session:w")
+        require(decoded.items?.first?.host == "This Mac" && decoded.items?.first?.activity.blocked == true)
+        require(decoded.hosts?.count == 2)
+        require(decoded.hosts?[0] == HostHeader(label: "This Mac", local: true, reachable: true, error: nil))
+        require(decoded.hosts?[1].local == nil && decoded.hosts?[1].reachable == false
+                     && decoded.hosts?[1].error == "ssh: host down",
+                     "Unreachable host headers must carry their transport error")
+
+        let payload = APIResult(
+            items: [
+                PickerItem(path: "session:x", label: "dotfiles", kind: "session", sessionID: "session:x",
+                           state: "working", working: true, active: true, host: "This Mac"),
+                PickerItem(path: "session:y", label: "build", kind: "session", sessionID: "session:y", host: "Demo Host"),
+                PickerItem(path: "/tmp/plain", host: "This Mac"),
+            ],
+            hosts: [
+                HostHeader(label: "This Mac", local: true, reachable: true, error: nil),
+                HostHeader(label: "Demo Host", local: false, reachable: true, error: nil),
+                HostHeader(label: "Down Host", local: false, reachable: false, error: "ssh: host down"),
+            ])
+        let options = try LaunchOptions(arguments: ["--demo", "--mode", "sessions", "--session", "S"])
+        let backend = CachedListBackend()
+        let model = PickerModel(options: options, backend: backend)
+        require(model.view == .sessions && model.page == .directories && model.loading,
+                     "Direct Sessions mode must open the grouped sessions list")
+        require(model.shouldToggle(for: options), "A repeated Sessions request with the same context toggles closed")
+        model.start()
+        try await pending("sessions", backend)
+        let coldDirectories = await backend.count("directories")
+        require(coldDirectories == 0, "Cold Sessions must not load directories")
+        await backend.reply("sessions", payload)
+        try await wait { !model.refreshing }
+        require(model.sessionHosts.map(\.label) == ["This Mac", "Demo Host", "Down Host"])
+        require(model.hostSections.map(\.id) == ["This Mac", "Demo Host", "Down Host"],
+                     "Host sections must follow the backend hosts order")
+        require(model.hostSections[0].items.map(\.id) == ["session:x", "/tmp/plain"])
+        require(model.hostSections[1].items.map(\.id) == ["session:y"])
+        require(model.hostSections[2].items.isEmpty, "Unreachable hosts must render no rows")
+        require(model.numberedPosition(of: model.items[2]) == 3, "New Session rows must not take numbered positions")
+        model.selectedID = "/tmp/plain"
+        require(!model.canOpen, "Only session rows may open from the Sessions view")
+        model.selectedID = "session:x"
+        require(model.canOpen)
+        model.selectView(.sessions)
+        let sessionsCalls = await backend.count("sessions")
+        require(sessionsCalls == 1, "Active Sessions shortcut must be idempotent")
+
+        model.choose()
+        try await wait { !model.busy }
+        let jumpParams = await backend.parameters("sessions.jump")
+        if case .text("session") = jumpParams["kind"],
+           case .text("session:x") = jumpParams["session_id"],
+           case .text("This Mac") = jumpParams["host"] {} else {
+            testFailure("Sessions jump must target the exact session and host")
+        }
+        require(model.notice?.contains("No Rex call") == true, "Demo jumps stay visible with their notice")
+
+        // Close flow mirrors removal: confirm first, then sessions.close + refresh.
+        model.askCloseSession()
+        require(model.removalCandidate?.id == "session:x", "Close must confirm like removal")
+        model.escape()
+        require(model.removalCandidate != nil, "Esc must not navigate behind the confirmation")
+        await backend.hold("sessions.close")
+        model.confirmCloseSession(model.removalCandidate!)
+        try await pending("sessions.close", backend)
+        let failedCloseParams = await backend.parameters("sessions.close")
+        if case .text("session") = failedCloseParams["kind"],
+           case .text("session:x") = failedCloseParams["session_id"],
+           case .text("This Mac") = failedCloseParams["host"] {} else {
+            testFailure("Close must send kind, session id and host")
+        }
+        await backend.fail("sessions.close")
+        try await wait { !model.busy }
+        require(model.removalCandidate == nil && model.error != nil,
+                     "A failed close must surface the backend error without refreshing")
+        model.askCloseSession()
+        model.confirmCloseSession(model.removalCandidate!)
+        try await pending("sessions.close", backend)
+        await backend.reply("sessions.close", APIResult())
+        try await pending("sessions", backend)
+        await backend.reply("sessions", payload)
+        try await wait { !model.busy && !model.refreshing }
+        require(model.items.count == 3 && model.error == nil, "A completed close must refresh the list")
+
+        model.selectView(.repos)
+        require(!model.shouldToggle(for: options), "A routed Sessions request must not hide another view")
+        try await pending("directories", backend)
+        await backend.reply("directories", APIResult(items: [PickerItem(path: "/repo")], targets: ["tab"], target: "tab"))
+        try await wait { !model.refreshing }
+        model.selectView(.sessions)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", payload)
+        try await wait { !model.refreshing }
+
+        // The New Session affordance: outside items, Enter starts a create flow.
+        model.selectedID = PickerModel.newSessionID("Demo Host")
+        require(model.selectedNewSessionHost == "Demo Host" && model.canOpen)
+        model.openNumbered(2)
+        try await wait { !model.busy }
+        require(model.selectedID == "session:y" && model.selectedNewSessionHost == nil,
+                     "Numbered open must skip New Session rows and stay on real items")
+        model.selectedID = PickerModel.newSessionID("Demo Host")
+        model.choose()
+        require(model.page == .newSession(host: "Demo Host") && model.loading,
+                     "New Session must open a host-scoped directory search")
+        require(!model.showsPills, "The create flow must hide the view pills")
+        try await pending("directories", backend)
+        let dirParams = await backend.parameters("directories")
+        if case .text("Demo Host") = dirParams["host"], case .flag(false) = dirParams["repos_only"] {} else {
+            testFailure("Directory search must scope to the chosen host")
+        }
+        await backend.reply("directories", APIResult(items: [PickerItem(path: "/Volumes/Demo/Projects/x"), PickerItem(path: "/Volumes/Demo/Work/y")]))
+        try await wait { !model.loading }
+        require(model.items.map(\.path) == ["/Volumes/Demo/Projects/x", "/Volumes/Demo/Work/y"])
+        model.choose()
+        try await wait { !model.busy }
+        let createParams = await backend.parameters("sessions.create")
+        if case .text("Demo Host") = createParams["host"], case .text("/Volumes/Demo/Projects/x") = createParams["dir"] {} else {
+            testFailure("Create must send the host and selected directory")
+        }
+        try await wait { !model.busy }
+        require(model.notice?.contains("No Rex call") == true)
+        var dismissals = 0
+        model.onDismiss = { dismissals += 1 }
+        model.escape()
+        require(dismissals == 1 && model.page == .newSession(host: "Demo Host"),
+                     "A direct Sessions open owns the panel: Escape dismisses the create flow")
+        model.close()
+
+        // Routed (non-direct) Sessions: Escape walks back, never dismisses.
+        let routed = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        routed.view = .sessions
+        routed.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", payload)
+        try await wait { !routed.refreshing }
+        routed.selectedID = PickerModel.newSessionID("This Mac")
+        routed.choose()
+        require(routed.page == .newSession(host: "This Mac"))
+        try await pending("directories", backend)
+        await backend.reply("directories", APIResult(items: [PickerItem(path: "/Users/demo/Projects/x")]))
+        try await wait { !routed.loading }
+        routed.query = "proj"
+        try await pending("directories", backend)
+        await backend.reply("directories", APIResult(items: [PickerItem(path: "/Users/demo/Projects/x")]))
+        try await wait { !routed.refreshing }
+        routed.escape()
+        require(routed.query.isEmpty && routed.page == .newSession(host: "This Mac"),
+                     "Escape must clear the search before navigating back")
+        routed.escape()
+        try await wait { !routed.loading }
+        require(routed.view == .sessions && routed.page == .directories,
+                     "Escape must walk back from the create flow without dismissing")
+        dismissals = 0
+        routed.onDismiss = { dismissals += 1 }
+        routed.escape()
+        require(dismissals == 1, "Escape from the sessions list dismisses the panel")
+        routed.close()
+
+        // Without host headers the rows still group by host, local machine first.
+        let plainBackend = CachedListBackend()
+        let plain = PickerModel(options: options, backend: plainBackend)
+        plain.start()
+        try await pending("sessions", plainBackend)
+        await plainBackend.reply("sessions", APIResult(items: [
+            PickerItem(path: "session:remote", kind: "session", host: "Demo Host"),
+            PickerItem(path: "session:local", kind: "session", host: "This Mac"),
+        ]))
+        try await wait { !plain.refreshing }
+        require(plain.sessionHosts.isEmpty)
+        require(plain.hostSections.map(\.id) == ["This Mac", "Demo Host"],
+                     "Fallback grouping must list the local machine first")
+        plain.close()
+        print("PASS: Sessions decoding with hosts, direct open, grouped/unreachable host sections, canOpen gating, idempotent shortcut, jump/close params, refresh, New Session flow, direct versus routed Escape, fallback grouping")
     }
 
     @MainActor private static func agentsChecks() async throws {
@@ -580,96 +786,96 @@ struct NativeChecks {
         {"path":"record-unique","kind":"agent","label":"Plan","app":"Pi","state":"working","agent_id":"a","session_id":"s","session_label":"Project","window_id":"w","window_label":"Build","block_id":"b","active":true}
         """.utf8)
         let item = try JSONDecoder().decode(PickerItem.self, from: payload)
-        precondition(item.id == "record-unique" && item.agentID == "a" && item.windowID == "w" && item.blockID == "b")
-        precondition(item.app == "Pi" && item.state == "working" && item.windowLabel == "Build" && !item.isSessionEntry)
-        precondition(PickerStyle.agentRowHeight == 32 && PickerStyle.agentRowHeight == PickerStyle.rowHeight)
+        require(item.id == "record-unique" && item.agentID == "a" && item.windowID == "w" && item.blockID == "b")
+        require(item.app == "Pi" && item.state == "working" && item.windowLabel == "Build" && !item.isSessionEntry)
+        require(PickerStyle.agentRowHeight == 32 && PickerStyle.agentRowHeight == PickerStyle.rowHeight)
         var compact = item
         compact.label = ".dotfiles"; compact.sessionLabel = "personal"; compact.windowLabel = "dotfiles"
-        precondition(compact.agentContext == "personal")
+        require(compact.agentContext == "personal")
         compact.windowLabel = "namedtest"
-        precondition(compact.agentContext == "personal / namedtest")
+        require(compact.agentContext == "personal / namedtest")
         compact.state = "idle"
-        precondition(compact.agentActivity == nil && !compact.agentAccessibility.lowercased().contains("idle") && !compact.agentHelp.lowercased().contains("idle"))
-        precondition(compact.agentAccessibility.contains("Pi") && compact.agentHelp.contains("Current pane"))
+        require(compact.agentActivity == nil && !compact.agentAccessibility.lowercased().contains("idle") && !compact.agentHelp.lowercased().contains("idle"))
+        require(compact.agentAccessibility.contains("Pi") && compact.agentHelp.contains("Current pane"))
         for state in ["blocked", "needs_input", "needs-input", "waiting"] {
             compact.state = state
-            precondition(compact.agentActivity == "Blocked" && compact.agentAccessibility.contains("Blocked"))
+            require(compact.agentActivity == "Blocked" && compact.agentAccessibility.contains("Blocked"))
         }
         compact.state = "working"
-        precondition(compact.agentActivity == "Working")
+        require(compact.agentActivity == "Working")
         let backend = DemoBackend()
         let options = try LaunchOptions(arguments: ["--demo"])
         let model = PickerModel(options: options, backend: backend)
         model.start()
         try await wait { !model.refreshing }
-        precondition(PickerModel.ViewKind.allCases == [.repos, .agents], "Only Repos and Agents are navigable")
-        for expected: PickerModel.ViewKind in [.agents, .repos, .agents, .repos] {
+        require(PickerModel.ViewKind.allCases == [.repos, .sessions, .agents], "Repos, Sessions and Agents are navigable in pill order")
+        for expected: PickerModel.ViewKind in [.sessions, .agents, .repos, .sessions] {
             model.switchView()
-            precondition(model.view == expected)
+            require(model.view == expected)
             try await wait { !model.refreshing }
         }
-        for expected: PickerModel.ViewKind in [.agents, .repos, .agents, .repos] {
+        for expected: PickerModel.ViewKind in [.repos, .agents, .sessions, .repos] {
             model.switchView(backward: true)
-            precondition(model.view == expected)
+            require(model.view == expected)
             try await wait { !model.refreshing }
         }
         model.selectView(.agents)
-        precondition(model.view == .agents && !model.loading && model.canOpen)
+        require(model.view == .agents && !model.loading && model.canOpen)
         try await wait { !model.refreshing }
-        precondition(model.items.count == 3 && Set(model.items.map(\.id)).count == 3)
+        require(model.items.count == 3 && Set(model.items.map(\.id)).count == 3)
         model.query = "picker"
         try await wait { !model.refreshing }
-        precondition(model.items.count == 2)
+        require(model.items.count == 2)
         model.selectedID = model.items[1].id; model.scrollID = model.items[1].id
         let selected = model.selectedID
         model.selectView(.repos)
         model.selectView(.agents)
-        precondition(model.view == .agents && model.query == "picker" && model.selectedID == selected && model.scrollID == selected && model.canOpen)
+        require(model.view == .agents && model.query == "picker" && model.selectedID == selected && model.scrollID == selected && model.canOpen)
         model.selectView(.agents)
-        precondition(model.view == .agents, "Clicking an active pill must not cycle")
+        require(model.view == .agents, "Clicking an active pill must not cycle")
         model.togglePin(); model.askRemove(); model.beginCreate(); model.showWorktrees(); model.toggleSplit()
-        precondition(model.removalCandidate == nil && !model.splitMode && model.page == .directories && !model.busy)
+        require(model.removalCandidate == nil && !model.splitMode && model.page == .directories && !model.busy)
         model.openNumbered(2)
         try await wait { !model.busy }
         var params = await backend.parameters("agents.jump")
-        precondition(params.count == 3)
+        require(params.count == 3)
         if case .text("session:demo-1") = params["session_id"],
            case .text("window:demo-1a") = params["window_id"],
            case .text("block:demo-left") = params["block_id"] {} else {
-            preconditionFailure("Agents jump must focus the exact pane, not record identity")
+            testFailure("Agents jump must focus the exact pane, not record identity")
         }
         model.selectedID = model.items[0].id
         var dismissed = false
         model.onDismiss = { dismissed = true }
         model.choose()
         model.escape()
-        precondition(dismissed && model.busy, "Busy Escape must hide without cancelling navigation")
+        require(dismissed && model.busy, "Busy Escape must hide without cancelling navigation")
         try await wait { !model.busy }
         params = await backend.parameters("agents.jump")
-        if case .text("block:demo-right") = params["block_id"] {} else { preconditionFailure("Enter must jump to selected agent") }
+        if case .text("block:demo-right") = params["block_id"] {} else { testFailure("Enter must jump to selected agent") }
         for method in ["sessions.close", "sessions.rename", "pins.toggle", "worktrees.remove", "worktrees.create", "dispatch"] {
             let count = await backend.count(method)
-            precondition(count == 0, "Agents are navigation only: \(method)")
+            require(count == 0, "Agents are navigation only: \(method)")
         }
         try await wait { !model.refreshing }
         model.selectedID = selected
         let token = model.prepareReconfigure(options)
-        precondition(model.contextReady && !model.loading && model.canOpen && model.view == .repos)
+        require(model.contextReady && !model.loading && model.canOpen && model.view == .repos)
         await model.completeReconfigure(token)
         model.selectView(.agents)
-        precondition(!model.loading && model.query == "picker" && model.selectedID == selected && model.scrollID == selected)
+        require(!model.loading && model.query == "picker" && model.selectedID == selected && model.scrollID == selected)
         dismissed = false
         model.escape()
-        precondition(dismissed && model.view == .agents && model.query == "picker",
+        require(dismissed && model.view == .agents && model.query == "picker",
                      "Escape must dismiss, not clear search or select Repos")
         let changed = model.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "changed"]))
         await model.completeReconfigure(changed)
         try await wait { !model.refreshing }
         model.selectView(.agents)
-        precondition(model.loading && model.items.isEmpty, "Changed context must discard the Agents cache")
+        require(model.loading && model.items.isEmpty, "Changed context must discard the Agents cache")
         try await wait { !model.refreshing }
         model.close()
-        print("PASS: Agents decoding, two-view forward/backward cycle and exact pills, cached query/selection/scroll, warm reopen, context invalidation, exact-pane Enter/numbered jump, no destructive actions, busy dismissal")
+        print("PASS: Agents decoding, three-view forward/backward cycle and exact pills, cached query/selection/scroll, warm reopen, context invalidation, exact-pane Enter/numbered jump, no destructive actions, busy dismissal")
     }
 
     @MainActor private static func launcherEscapeChecks() throws {
@@ -681,7 +887,7 @@ struct NativeChecks {
                 var dismissals = 0
                 model.onDismiss = { dismissals += 1 }
                 model.escape()
-                precondition(dismissals == 1 && model.view == view && model.query == query,
+                require(dismissals == 1 && model.view == view && model.query == query,
                              "Escape must dismiss every launcher view without clearing search or selecting Repos")
                 model.close()
             }
@@ -694,20 +900,25 @@ struct NativeChecks {
         let agents = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: agentsBackend)
         agents.start()
         try await wait { !agents.loading }
-        precondition(agents.view == .repos && agents.page == .directories && agents.showsPills)
+        require(agents.view == .repos && agents.page == .directories && agents.showsPills)
         agents.switchView()
         try await wait { !agents.loading }
-        precondition(agents.view == .agents && agents.items.count == 3 && agents.items.allSatisfy { $0.kind == "agent" })
-        precondition(agents.items.contains { $0.active == true }, "Active agents must be marked")
+        require(agents.view == .sessions && agents.items.allSatisfy { $0.kind == "session" },
+                     "First cycle step must land on the grouped Sessions view")
+        require(agents.items.contains { $0.active == true }, "Active sessions must be marked")
+        agents.switchView()
+        try await wait { !agents.loading }
+        require(agents.view == .agents && agents.items.count == 3 && agents.items.allSatisfy { $0.kind == "agent" })
+        require(agents.items.contains { $0.active == true }, "Active agents must be marked")
         agents.openNumbered(2)
         try await wait { !agents.busy }
         let jumpCount = await agentsBackend.count("agents.jump")
-        precondition(jumpCount == 1, "Numbered open must jump to the agent")
-        agents.switchView(backward: true)
+        require(jumpCount == 1, "Numbered open must jump to the agent")
+        agents.selectView(.repos)
         try await wait { !agents.loading }
-        precondition(agents.view == .repos && agents.page == .directories, "Reverse switch must return to Repos")
+        require(agents.view == .repos && agents.page == .directories, "Reverse switch must return to Repos")
         let sessionCalls = await agentsBackend.count("sessions")
-        precondition(sessionCalls == 0, "View navigation must never request Sessions")
+        require(sessionCalls == 1, "Direct Repos navigation must not request Sessions")
         agents.close()
 
         // Pins float to the top of the repos list.
@@ -717,9 +928,9 @@ struct NativeChecks {
         try await wait { !pinned.loading }
         pinned.togglePin()
         try await wait { !pinned.busy && !pinned.loading }
-        precondition(pinned.items.first?.isPinned == true, "Pinned directories must float to the top")
+        require(pinned.items.first?.isPinned == true, "Pinned directories must float to the top")
         let pinCount = await pinsBackend.count("pins.toggle")
-        precondition(pinCount == 1, "Pinning must ask the backend once")
+        require(pinCount == 1, "Pinning must ask the backend once")
         pinned.close()
 
         // Resident reconfigure: one model serves repeated opens.
@@ -730,16 +941,16 @@ struct NativeChecks {
         let contexts = await backend.contextUpdateCount
         await resident.reconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/Users/demo/Projects/example-kit"]))
         try await wait { !resident.loading }
-        precondition(resident.page == .worktrees && resident.view == .repos,
+        require(resident.page == .worktrees && resident.view == .repos,
                      "Reconfigure must apply the new mode")
         let contextsAfter = await backend.contextUpdateCount
-        precondition(contextsAfter == contexts + 1,
+        require(contextsAfter == contexts + 1,
                      "Reconfigure must retell the shared backend its context")
         await resident.reconfigure(try LaunchOptions(arguments: ["--demo"]))
         try await wait { !resident.loading }
-        precondition(resident.page == .directories)
+        require(resident.page == .directories)
         resident.close()
-        print("PASS: resident Agents view, numbered jump, reverse switch, no Sessions route, pins, resident reconfigure")
+        print("PASS: resident Sessions step in the view cycle, resident Agents view, numbered jump, direct Repos return, pins, resident reconfigure")
     }
 
     @MainActor private static func cachedListChecks() async throws {
@@ -752,86 +963,86 @@ struct NativeChecks {
         await backend.reply("directories", repos)
         try await wait { !model.refreshing }
         model.selectedID = "/b"; model.scrollID = "/c"; model.target = "session"
-        model.switchView()
-        precondition(model.loading && model.items.isEmpty && model.selectedID == nil && model.scrollID == nil,
+        model.selectView(.agents)
+        require(model.loading && model.items.isEmpty && model.selectedID == nil && model.scrollID == nil,
                      "An uncached view must clear the other view before its request starts")
         try await pending("agents", backend)
         await backend.reply("agents", agents)
         try await wait { !model.refreshing }
         model.selectedID = "A2"; model.scrollID = "A3"
         model.selectView(.repos)
-        precondition(!model.loading && model.refreshing && model.canOpen && model.selectedID == "/b" && model.scrollID == "/c" && model.target == "session",
+        require(!model.loading && model.refreshing && model.canOpen && model.selectedID == "/b" && model.scrollID == "/c" && model.target == "session",
                      "Cached repos must restore selection, scroll and target before refreshing, with Open enabled")
         try await pending("directories", backend)
-        model.switchView()
-        precondition(!model.loading && model.canOpen && model.selectedID == "A2" && model.scrollID == "A3")
+        model.selectView(.agents)
+        require(!model.loading && model.canOpen && model.selectedID == "A2" && model.scrollID == "A3")
         try await pending("agents", backend)
         await backend.reply("directories", APIResult(items: [PickerItem(path: "/obsolete")]))
         await backend.reply("agents", APIResult(items: [agents.items![0]]))
         try await wait { !model.refreshing }
-        precondition(model.selectedID == "A1" && model.scrollID == nil,
+        require(model.selectedID == "A1" && model.scrollID == nil,
                      "Refresh must repair selection and scroll when their rows disappear")
         model.selectView(.repos)
-        precondition(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c",
+        require(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c",
                      "A cancelled reply must not overwrite the inactive cache")
         try await pending("directories", backend)
         await backend.fail("directories")
         try await wait { !model.refreshing }
-        precondition(model.canOpen && model.items == repos.items && model.error != nil,
+        require(model.canOpen && model.items == repos.items && model.error != nil,
                      "A failed background refresh must keep cached rows usable")
 
         model.query = "filtered"
-        precondition(model.loading && model.items.isEmpty, "Uncached queries must not expose stale rows")
+        require(model.loading && model.items.isEmpty, "Uncached queries must not expose stale rows")
         try await pending("directories", backend)
         await backend.reply("directories", repos)
         try await wait { !model.refreshing }
         model.selectedID = "/c"; model.scrollID = "/b"
-        model.switchView()
+        model.selectView(.agents)
         try await pending("agents", backend)
         model.selectView(.repos)
-        precondition(model.query == "filtered" && model.selectedID == "/c" && model.scrollID == "/b" && model.canOpen,
+        require(model.query == "filtered" && model.selectedID == "/c" && model.scrollID == "/b" && model.canOpen,
                      "Each view must retain its own query and list position")
         try await pending("directories", backend)
         model.openNumbered(2)
         try await wait { !model.busy }
         let cachedDispatches = await backend.count("dispatch")
-        precondition(cachedDispatches == 1, "Cached numbered Open must not wait for refresh")
+        require(cachedDispatches == 1, "Cached numbered Open must not wait for refresh")
         // Dispatch invalidates both lists: new agent metadata may now exist.
         await backend.reply("agents", agents)
         await backend.reply("directories", repos)
-        model.switchView()
-        precondition(model.loading && model.items.isEmpty, "Dispatch must invalidate the Agents cache too")
+        model.selectView(.agents)
+        require(model.loading && model.items.isEmpty, "Dispatch must invalidate the Agents cache too")
         try await pending("agents", backend)
         await backend.fail("agents")
         try await wait { !model.refreshing }
-        precondition(model.items.isEmpty && model.error != nil, "Failed post-mutation refresh must not restore stale rows")
+        require(model.items.isEmpty && model.error != nil, "Failed post-mutation refresh must not restore stale rows")
         model.selectView(.repos)
-        precondition(model.loading && model.items.isEmpty, "Mutation must invalidate the Repos cache too")
+        require(model.loading && model.items.isEmpty, "Mutation must invalidate the Repos cache too")
         try await pending("directories", backend)
 
         // Reconfigure while an old-origin reply is pending. No old rows can
         // appear either during the context request or on a subsequent switch.
         await model.reconfigure(try LaunchOptions(arguments: ["--demo", "--session", "new-origin", "--mode", "wt", "--repo", "/new-repo"]))
-        precondition(model.items.isEmpty && model.scrollID == nil && model.loading && !model.canOpen)
+        require(model.items.isEmpty && model.scrollID == nil && model.loading && !model.canOpen)
         await backend.reply("directories", repos)
         try await pending("worktrees.list", backend)
         let worktrees = APIResult(items: [PickerItem(path: "/new-repo/main", branch: "main")], targets: ["tab"], target: "tab", repo: "/new-repo", branches: ["main"], baseBranch: "main")
         await backend.reply("worktrees.list", worktrees)
         try await wait { !model.refreshing }
-        model.switchView()
-        precondition(model.loading && model.items.isEmpty, "New origin must not reuse old agent rows")
+        model.selectView(.agents)
+        require(model.loading && model.items.isEmpty, "New origin must not reuse old agent rows")
         try await pending("agents", backend)
         await backend.reply("agents", agents)
         try await wait { !model.refreshing }
-        precondition(model.repo == "/new-repo" && model.base == "main",
+        require(model.repo == "/new-repo" && model.base == "main",
                      "Agents replies on the worktree page must not replace repository metadata")
         model.selectView(.repos)
-        precondition(model.items == worktrees.items && model.canOpen)
+        require(model.items == worktrees.items && model.canOpen)
         try await pending("worktrees.list", backend)
         model.beginCreate()
         await backend.reply("worktrees.list", APIResult(items: [PickerItem(path: "/late")], repo: "/wrong"))
         try await Task.sleep(for: .milliseconds(30))
-        precondition(model.page == .create && model.repo == "/new-repo", "Late background list must not change Create metadata")
+        require(model.page == .create && model.repo == "/new-repo", "Late background list must not change Create metadata")
         model.close()
 
         // The first open may overtake startup's directory warmup. Its reply
@@ -847,14 +1058,14 @@ struct NativeChecks {
         await warmBackend.reply("directories", repos)
         warm.start()
         try await Task.sleep(for: .milliseconds(30))
-        precondition(warm.items.isEmpty && warm.page == .worktrees && warm.repo == "/first" && !warm.contextReady,
+        require(warm.items.isEmpty && warm.page == .worktrees && warm.repo == "/first" && !warm.contextReady,
                      "A late startup reply or repeated start must not overwrite the first open")
         await warmBackend.reply("context", APIResult())
         await firstOpen.value
         try await pending("worktrees.list", warmBackend)
         await warmBackend.reply("worktrees.list", APIResult(items: [PickerItem(path: "/first/main")], targets: ["tab"], target: "tab", repo: "/first"))
         try await wait { !warm.refreshing }
-        precondition(warm.contextReady && warm.canOpen && warm.repo == "/first")
+        require(warm.contextReady && warm.canOpen && warm.repo == "/first")
         warm.close()
 
         let mutationBackend = CachedListBackend()
@@ -868,15 +1079,15 @@ struct NativeChecks {
         try await pending("pins.toggle", mutationBackend)
         await mutationBackend.hold("context")
         let context = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "changed"]))
-        precondition(mutation.items == repos.items && !mutation.loading && !mutation.busy && !mutation.contextReady && !mutation.canOpen,
+        require(mutation.items == repos.items && !mutation.loading && !mutation.busy && !mutation.contextReady && !mutation.canOpen,
                      "Prepare must synchronously show global directories, but gate all actions")
-        precondition(mutation.targets.isEmpty && mutation.target.isEmpty && mutation.repo == nil && mutation.branches.isEmpty,
+        require(mutation.targets.isEmpty && mutation.target.isEmpty && mutation.repo == nil && mutation.branches.isEmpty,
                      "Cached directories must not restore old-origin targets or repository state")
         mutation.openNumbered(2); mutation.choose(); mutation.togglePin()
         mutation.showWorktrees(); mutation.beginCreate(); mutation.switchView()
         mutation.askRemove(); mutation.confirmRemove(PickerItem(path: "/old", isMain: false))
         mutation.create(); mutation.openCreated(); mutation.cycleTarget(backward: false); mutation.toggleSplit()
-        precondition(mutation.page == .directories && mutation.view == .repos && mutation.repo == nil && !mutation.busy && mutation.removalCandidate == nil,
+        require(mutation.page == .directories && mutation.view == .repos && mutation.repo == nil && !mutation.busy && mutation.removalCandidate == nil,
                      "Actions must not change navigation or candidates before context is ready")
         let reopen = Task { await mutation.completeReconfigure(context) }
         try await pending("context", mutationBackend)
@@ -884,7 +1095,7 @@ struct NativeChecks {
         let callsWhileBlocked = await mutationBackend.count("directories")
         let dispatchesWhileBlocked = await mutationBackend.count("dispatch")
         let pinsWhileBlocked = await mutationBackend.count("pins.toggle")
-        precondition(callsWhileBlocked == 1 && dispatchesWhileBlocked == 0 && pinsWhileBlocked == 1,
+        require(callsWhileBlocked == 1 && dispatchesWhileBlocked == 0 && pinsWhileBlocked == 1,
                      "Blocked actions and late start must not send requests using the old context")
         await mutationBackend.reply("pins.toggle", APIResult())
         await mutationBackend.reply("context", APIResult())
@@ -893,34 +1104,34 @@ struct NativeChecks {
         await mutationBackend.reply("directories", APIResult(items: [PickerItem(path: "/new-origin")], targets: ["tab"], target: "tab"))
         try await wait { !mutation.refreshing }
         let directoryCalls = await mutationBackend.count("directories")
-        precondition(directoryCalls == 2 && mutation.selectedID == "/new-origin" && mutation.error == nil,
+        require(directoryCalls == 2 && mutation.selectedID == "/new-origin" && mutation.error == nil,
                      "Old mutation completion must not refresh or modify a new context")
         let failedContext = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "failed"]))
         let failedOpen = Task { await mutation.completeReconfigure(failedContext) }
         try await pending("context", mutationBackend)
         await mutationBackend.fail("context")
         await failedOpen.value
-        precondition(!mutation.contextReady && !mutation.canOpen && !mutation.canCreate && !mutation.canSubmitForm && mutation.error != nil && !mutation.refreshing,
+        require(!mutation.contextReady && !mutation.canOpen && !mutation.canCreate && !mutation.canSubmitForm && mutation.error != nil && !mutation.refreshing,
                      "Context failure must be explicit and must never enable stale-backend actions")
         mutation.openNumbered(1); mutation.togglePin(); mutation.beginCreate(); mutation.switchView()
-        precondition(!mutation.busy && mutation.page == .directories && mutation.view == .repos)
+        require(!mutation.busy && mutation.page == .directories && mutation.view == .repos)
         let worktreeContext = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/different", "--session", "third"]))
-        precondition(mutation.items.isEmpty && mutation.loading && mutation.repo == "/different" && mutation.branches.isEmpty && mutation.base.isEmpty,
+        require(mutation.items.isEmpty && mutation.loading && mutation.repo == "/different" && mutation.branches.isEmpty && mutation.base.isEmpty,
                      "A worktree open must never show cached directories or old contextual metadata")
         let directoryContext = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "fourth"]))
         await mutation.completeReconfigure(worktreeContext)
-        precondition(mutation.items.first?.path == "/new-origin" && !mutation.contextReady,
+        require(mutation.items.first?.path == "/new-origin" && !mutation.contextReady,
                      "A superseded completion must not send context or enable actions")
         let recovered = Task { await mutation.completeReconfigure(directoryContext) }
         try await pending("context", mutationBackend)
         await mutationBackend.reply("context", APIResult())
         await recovered.value
         try await pending("directories", mutationBackend)
-        precondition(mutation.contextReady && mutation.target.isEmpty && !mutation.canOpen,
+        require(mutation.contextReady && mutation.target.isEmpty && !mutation.canOpen,
                      "Targets must come from the refreshed origin, not the global directory cache")
         await mutationBackend.reply("directories", repos)
         try await wait { !mutation.refreshing }
-        precondition(mutation.canOpen, "A successful retry and list refresh must restore actions")
+        require(mutation.canOpen, "A successful retry and list refresh must restore actions")
         mutation.close()
         print("PASS: instant cached switching, per-view query/selection/scroll, cached Open, cancelled replies, refresh failure, mutation invalidation, origin/repo/page isolation, synchronous directory reopen, blocked context action gates, context failure/retry, startup warmup race")
     }
@@ -951,14 +1162,14 @@ struct NativeChecks {
             model.escape()
             model.dismiss() // Window close / resident toggle / Command-Q use this API.
             model.choose()
-            precondition(model.busy && dismissals == 2 && closes == 0 && !model.backendIsClosed,
+            require(model.busy && dismissals == 2 && closes == 0 && !model.backendIsClosed,
                          "Dismiss must hide without closing or cancelling a live operation")
             await backend.reply(method, APIResult())
             try await wait { closes == 1 }
-            precondition(!model.busy && model.backendIsClosed,
+            require(!model.busy && model.backendIsClosed,
                          "Successful non-demo jump/dispatch must close without sticky busy; resident recovery must be eligible")
             let calls = await backend.count(method)
-            precondition(calls == 1, "Dismiss and repeated Open must not replay an operation")
+            require(calls == 1, "Dismiss and repeated Open must not replay an operation")
             // The resident delegate replaces a closed backend before reconfiguration.
             let freshBackend = CachedListBackend()
             let fresh = PickerModel(options: options, backend: freshBackend)
@@ -966,7 +1177,7 @@ struct NativeChecks {
             try await pending("directories", freshBackend)
             await freshBackend.reply("directories", rows)
             try await wait { fresh.canOpen }
-            precondition(!fresh.busy && !fresh.backendIsClosed)
+            require(!fresh.busy && !fresh.backendIsClosed)
             fresh.close()
         }
 
@@ -987,38 +1198,38 @@ struct NativeChecks {
         create.create()
         try await pending("worktrees.create", backend)
         create.escape(); create.dismiss(); create.create()
-        precondition(create.busy && hidden == 2 && !create.backendIsClosed)
+        require(create.busy && hidden == 2 && !create.backendIsClosed)
         await backend.reply("worktrees.create", APIResult(path: "/repo-new"))
         try await pending("dispatch", backend)
         create.escape() // Hide after create committed, while dispatch is pending.
         let busyReopen = create.prepareReconfigure(createOptions)
         await create.completeReconfigure(busyReopen)
-        precondition(create.busy && create.createdPath == "/repo-new")
+        require(create.busy && create.createdPath == "/repo-new")
         await backend.fail("dispatch")
         try await wait { !create.busy }
-        precondition(create.createdPath == "/repo-new" && create.error != nil,
+        require(create.createdPath == "/repo-new" && create.error != nil,
                      "Hidden create must finish and retain its path after dispatch failure")
         let savedError = create.error
         let reopen = create.prepareReconfigure(createOptions)
         await create.completeReconfigure(reopen)
-        precondition(create.page == .create && create.createdPath == "/repo-new"
+        require(create.page == .create && create.createdPath == "/repo-new"
                      && create.error == savedError && create.canSubmitForm && !create.canCreate,
                      "Actual resident reopen must restore Retry opening and its failure")
         create.escape()
-        precondition(hidden == 4 && create.createdPath == "/repo-new",
+        require(hidden == 4 && create.createdPath == "/repo-new",
                      "Escape must hide recovery without discarding it")
         let unrelated = try LaunchOptions(arguments: ["--mode", "wt-create", "--repo", "/other", "--session", "new", "--block", "new", "--client", "new", "--title", "New"])
         for incoming in [unrelated, try LaunchOptions(arguments: ["--mode", "agents"])] {
             let changed = create.prepareReconfigure(incoming)
             await create.completeReconfigure(changed)
-            precondition(create.options.matches(createOptions) && create.repo == "/repo"
+            require(create.options.matches(createOptions) && create.repo == "/repo"
                          && create.target == "tab" && create.createdPath == "/repo-new"
                          && create.error?.contains("original context") == true && !create.canCreate,
                          "Unrelated requests must show recovery, not retarget its repo or origin")
         }
         let contexts = await backend.count("context")
         let lists = await backend.count("worktrees.list")
-        precondition(contexts == 0 && lists == 1,
+        require(contexts == 0 && lists == 1,
                      "Recovery reopen must not reconfigure the backend or regenerate the form")
         create.submitBranch() // Retry opens only, never creates again.
         try await pending("dispatch", backend)
@@ -1028,9 +1239,9 @@ struct NativeChecks {
         let opens = await backend.count("dispatch")
         let openParams = await backend.parameters("dispatch")
         if case .text("/repo-new") = openParams["path"], case .text("tab") = openParams["target"] {} else {
-            preconditionFailure("Retry must open the committed path with the retained target")
+            testFailure("Retry must open the committed path with the retained target")
         }
-        precondition(creates == 1 && opens == 2 && !create.busy && create.createdPath == nil,
+        require(creates == 1 && opens == 2 && !create.busy && create.createdPath == nil,
                      "Successful retry must clear recovery so the resident can replace the closed backend")
 
         // Directory-origin Create has a different createParent. Neither a hide
@@ -1059,24 +1270,24 @@ struct NativeChecks {
         let retained = discard.prepareReconfigure(unrelated)
         await discard.completeReconfigure(retained)
         discard.escape()
-        precondition(discard.page == .create && discard.createdPath == "/repo-discard" && discard.repo == "/repo")
+        require(discard.page == .create && discard.createdPath == "/repo-discard" && discard.repo == "/repo")
         discard.discardCreatedRecovery()
         discard.submitBranch(); discard.create(); discard.openCreated()
-        precondition(discard.createdPath == nil && !discard.contextReady && !discard.canCreate,
+        require(discard.createdPath == nil && !discard.contextReady && !discard.canCreate,
                      "Explicit discard must gate all old-context actions until a new request")
         let freshContext = discard.prepareReconfigure(unrelated)
         await discard.completeReconfigure(freshContext)
         try await pending("worktrees.list", discardBackend)
-        precondition(discard.options.matches(unrelated) && discard.repo == "/other")
+        require(discard.options.matches(unrelated) && discard.repo == "/other")
         let contextParams = await discardBackend.parameters("context")
         if case .text("new") = contextParams["session"], case .text("new") = contextParams["block"] {} else {
-            preconditionFailure("Only explicit discard may install the new origin")
+            testFailure("Only explicit discard may install the new origin")
         }
         await discardBackend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/other", branches: ["main"], baseBranch: "main"))
         try await wait { !discard.loading }
         let discardedCreates = await discardBackend.count("worktrees.create")
         let discardedOpens = await discardBackend.count("dispatch")
-        precondition(discardedCreates == 1 && discardedOpens == 1)
+        require(discardedCreates == 1 && discardedOpens == 1)
         discard.close()
 
         let pinBackend = CachedListBackend()
@@ -1090,13 +1301,13 @@ struct NativeChecks {
         pin.togglePin()
         try await pending("pins.toggle", pinBackend)
         pin.escape(); pin.dismiss(); pin.togglePin()
-        precondition(pin.busy && !pin.backendIsClosed)
+        require(pin.busy && !pin.backendIsClosed)
         await pinBackend.reply("pins.toggle", APIResult())
         try await pending("directories", pinBackend)
         await pinBackend.reply("directories", APIResult(items: []))
         try await wait { !pin.busy && !pin.refreshing }
         let pins = await pinBackend.count("pins.toggle")
-        precondition(pins == 1 && pin.items.isEmpty && pin.error == nil,
+        require(pins == 1 && pin.items.isEmpty && pin.error == nil,
                      "Hidden pin mutation must finish once and refresh, without cancellation or replay")
         pin.close()
         print("PASS: non-demo jump/dispatch closes without sticky busy, resident replacement reopens, pending Escape/dismiss preserves create/pin, real recovery reconfigure retains error/path/origin without recreation, explicit discard gates stale actions")
@@ -1111,29 +1322,29 @@ struct NativeChecks {
                 let payload = ThemePayload(isDark: dark, background: "#112233", foreground: "#aabbaa",
                                            selection: "#223322", selectionForeground: "#ddeedd",
                                            interfaceStyle: style, ui: ui)
-                precondition(PickerPalette.apply(payload))
-                precondition(NSColor(PickerStyle.background) == NSColor(hexColor("#303030")!) &&
+                require(PickerPalette.apply(payload))
+                require(NSColor(PickerStyle.background) == NSColor(hexColor("#303030")!) &&
                              NSColor(PickerStyle.selection) == NSColor(hexColor("#aaccaa")!) &&
                              NSColor(PickerStyle.selectionText) == NSColor(hexColor("#102030")!) &&
                              PickerPalette.selectionOpacity == 0.75,
                              "Native roles must not reuse terminal canvas, selection or selected text")
                 let label = NSColor(PickerStyle.foreground).usingColorSpace(.sRGB)!
                 if style == "useTheme" {
-                    precondition(NSColor(PickerStyle.foreground) == NSColor(hexColor("#ddbbcc")!),
+                    require(NSColor(PickerStyle.foreground) == NSColor(hexColor("#ddbbcc")!),
                                  "Full-theme chrome must use UI content, not terminal foreground")
                 } else {
-                    precondition(abs(label.redComponent - label.greenComponent) < 0.01 &&
+                    require(abs(label.redComponent - label.greenComponent) < 0.01 &&
                                  abs(label.greenComponent - label.blueComponent) < 0.01 &&
                                  (dark ? label.redComponent > 0.8 : label.redComponent < 0.2),
                                  "Native labels must follow Rex appearance, not system or terminal colors")
                 }
                 let tinted = style == "blendTheme" || style == "useTheme"
-                precondition(PickerPalette.usesThemeTint == tinted)
+                require(PickerPalette.usesThemeTint == tinted)
                 if #available(macOS 26.0, *) {
                     let glass = NSGlassEffectView(frame: .zero)
                     glass.wantsLayer = true
                     PickerStyle.applyPanelTheme(to: glass)
-                    precondition(glass.tintColor == (tinted ? PickerStyle.glassTint : nil),
+                    require(glass.tintColor == (tinted ? PickerStyle.glassTint : nil),
                                  "Only Rex's theme-tinted styles may color the glass")
                 }
             }
@@ -1160,18 +1371,18 @@ struct NativeChecks {
         try await pending("directories", backend)
         await backend.reply("directories", rows)
         try await wait { !model.refreshing }
-        precondition(model.canOpen && !model.themeLoaded,
+        require(model.canOpen && !model.themeLoaded,
                      "A slow theme lookup must not block loaded rows")
         let first = model.refreshTheme()
         await backend.reply("theme", APIResult(theme: dark))
         await first?.value
-        precondition(model.themeLoaded && model.themeRevision == 1 && PickerPalette.isDark)
-        precondition(NSColor(PickerStyle.selectionText) == NSColor(hexColor("#203040")!),
+        require(model.themeLoaded && model.themeRevision == 1 && PickerPalette.isDark)
+        require(NSColor(PickerStyle.selectionText) == NSColor(hexColor("#203040")!),
                      "Selected text must use Rex's selected-theme color, not hardcoded white")
         let material = NSView()
         material.wantsLayer = true
         PickerStyle.applyPanelTheme(to: material)
-        precondition(material.appearance?.name == .darkAqua &&
+        require(material.appearance?.name == .darkAqua &&
                      material.layer?.backgroundColor == NSColor(PickerPalette.background).cgColor,
                      "Asynchronous theme loading must repaint the native material")
 
@@ -1184,16 +1395,16 @@ struct NativeChecks {
         model.refreshTheme()
         try await pending("theme", backend)
         let themeCalls = await backend.count("theme")
-        precondition(themeCalls == 2 && model.canOpen && !model.busy,
+        require(themeCalls == 2 && model.canOpen && !model.busy,
                      "Theme refresh must coalesce requests without gating cached Open")
         await backend.reply("theme", APIResult(theme: light))
         await refresh?.value
-        precondition(model.themeRevision == 2 && !PickerPalette.isDark)
-        precondition(model.query == "keep" && model.selectedID == "/b" && model.scrollID == "/a" &&
+        require(model.themeRevision == 2 && !PickerPalette.isDark)
+        require(model.query == "keep" && model.selectedID == "/b" && model.scrollID == "/a" &&
                      model.target == "session" && model.items == rows.items,
                      "Theme changes must preserve query, rows, selection, scroll and target")
         PickerStyle.applyPanelTheme(to: material)
-        precondition(material.appearance?.name == .aqua &&
+        require(material.appearance?.name == .aqua &&
                      material.layer?.backgroundColor == NSColor(PickerPalette.background).cgColor &&
                      material.layer?.borderColor == PickerStyle.hairline.cgColor,
                      "Native surface, border and appearance must follow a changed Rex theme")
@@ -1202,13 +1413,13 @@ struct NativeChecks {
             glass.wantsLayer = true
             glass.tintColor = .red
             PickerStyle.applyPanelTheme(to: glass)
-            precondition(glass.tintColor == PickerStyle.glassTint && glass.appearance?.name == .aqua,
+            require(glass.tintColor == PickerStyle.glassTint && glass.appearance?.name == .aqua,
                          "Glass must replace the previous tint with the loaded Rex theme")
         }
         let effect = NSVisualEffectView(frame: .zero)
         effect.wantsLayer = true
         PickerStyle.applyPanelTheme(to: effect)
-        precondition(effect.layer?.backgroundColor == PickerStyle.glassTint.cgColor &&
+        require(effect.layer?.backgroundColor == PickerStyle.glassTint.cgColor &&
                      effect.appearance?.name == .aqua,
                      "Pre-glass macOS material must also follow the Rex theme")
 
@@ -1216,31 +1427,31 @@ struct NativeChecks {
         try await pending("theme", backend)
         await backend.reply("theme", APIResult(theme: light))
         await unchanged?.value
-        precondition(model.themeRevision == 2, "An unchanged theme must not repaint")
+        require(model.themeRevision == 2, "An unchanged theme must not repaint")
         let failed = model.refreshTheme()
         try await pending("theme", backend)
         await backend.fail("theme")
         await failed?.value
-        precondition(model.themeRevision == 2 && model.error == nil,
+        require(model.themeRevision == 2 && model.error == nil,
                      "A failed refresh must retain the palette without disrupting the picker")
         let invalid = model.refreshTheme()
         try await pending("theme", backend)
         await backend.reply("theme", APIResult(theme: ThemePayload(background: "invalid")))
         await invalid?.value
-        precondition(model.themeRevision == 2 && !PickerPalette.isDark,
+        require(model.themeRevision == 2 && !PickerPalette.isDark,
                      "Malformed colors must not replace the last valid palette")
         let retry = model.refreshTheme()
         try await pending("theme", backend)
         await backend.reply("theme", APIResult(theme: dark))
         await retry?.value
-        precondition(model.themeRevision == 3 && PickerPalette.isDark,
+        require(model.themeRevision == 3 && PickerPalette.isDark,
                      "Theme lookup must remain retryable after an error or invalid payload")
         let late = model.refreshTheme()
         try await pending("theme", backend)
         model.close()
         await backend.reply("theme", APIResult(theme: light))
         await late?.value
-        precondition(model.themeRevision == 3 && PickerPalette.isDark && model.refreshTheme() == nil,
+        require(model.themeRevision == 3 && PickerPalette.isDark && model.refreshTheme() == nil,
                      "Closed models must reject late themes and new refreshes")
         PickerPalette.useFallback(dark: true)
         print("PASS: asynchronous Rex theme refresh, request coalescing, cached Open, stable picker state, selected text, material repaint, unchanged/error/invalid responses, retry and close")
@@ -1262,32 +1473,32 @@ struct NativeChecks {
             try await pending("directories", backend)
             await backend.reply("directories", APIResult(items: [PickerItem(path: "/filtered")], targets: ["tab"], target: "tab"))
             try await wait { !model.refreshing }
-            model.switchView()
+            model.selectView(.agents)
             try await pending("agents", backend)
             await backend.reply("agents", APIResult(items: [PickerItem(path: "A", kind: "agent", sessionID: "S", windowID: "W", blockID: "B")]))
             try await wait { !model.refreshing }
 
             let token = model.prepareReconfigure(options)
-            precondition(model.contextReady && model.canOpen && !model.loading && model.view == .repos && model.page == .directories && model.query.isEmpty,
+            require(model.contextReady && model.canOpen && !model.loading && model.view == .repos && model.page == .directories && model.query.isEmpty,
                          "Warm same-context reopen must enable Open synchronously, before any backend reply")
-            precondition(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c" && model.targets == ["tab", "session"] && model.target == "session",
+            require(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c" && model.targets == ["tab", "session"] && model.target == "session",
                          "Warm reopen must restore unfiltered repos, selection, scroll and valid cached targets")
             await model.completeReconfigure(token)
             if ttl == 0 { try await pending("directories", backend) }
             for _ in 0..<10 {
                 await model.reconfigure(options)
-                precondition(model.canOpen && model.target == "session" && model.selectedID == "/b" && model.scrollID == "/c")
+                require(model.canOpen && model.target == "session" && model.selectedID == "/b" && model.scrollID == "/c")
                 await Task.yield()
             }
             let contexts = await backend.count("context")
             let themes = await backend.count("theme")
             let directories = await backend.count("directories")
-            precondition(contexts == 0 && themes == 1 && directories == (ttl == 0 ? 3 : 2),
+            require(contexts == 0 && themes == 1 && directories == (ttl == 0 ? 3 : 2),
                          "Warm reopen must skip context/theme RPCs, honor TTL and coalesce an in-flight refresh")
             model.choose()
             try await wait { !model.busy }
             let opens = await backend.count("dispatch")
-            precondition(opens == 1, "Cached Open must dispatch before the background directory reply")
+            require(opens == 1, "Cached Open must dispatch before the background directory reply")
             if ttl == 0 { await backend.reply("directories", repos) }
             model.close()
         }
@@ -1303,59 +1514,62 @@ struct NativeChecks {
             await backend.hold("context")
             let changed = try LaunchOptions(arguments: ["--demo", "--session", "S", "--block", "B", "--client", "C", "--title", "T", flag, "changed"])
             let token = model.prepareReconfigure(changed)
-            precondition(!model.contextReady && !model.canOpen && model.targets.isEmpty && model.target.isEmpty,
+            require(!model.contextReady && !model.canOpen && model.targets.isEmpty && model.target.isEmpty,
                          "A changed context component must gate actions and discard cached targets")
             model.choose(); model.showWorktrees(); model.switchView()
             let completion = Task { await model.completeReconfigure(token) }
             try await pending("context", backend)
             let directoryCalls = await backend.count("directories")
             let dispatches = await backend.count("dispatch")
-            precondition(directoryCalls == 1 && dispatches == 0 && !model.contextReady)
+            require(directoryCalls == 1 && dispatches == 0 && !model.contextReady)
             await backend.reply("context", APIResult())
             await completion.value
             try await pending("directories", backend)
-            precondition(!model.canOpen, "Context acknowledgement alone must not trust old-origin targets")
+            require(!model.canOpen, "Context acknowledgement alone must not trust old-origin targets")
             await backend.reply("directories", repos)
             try await wait { !model.refreshing }
-            precondition(model.canOpen)
+            require(model.canOpen)
             let themes = await backend.count("theme")
-            precondition(themes == 1, "A loaded theme must not reload on reopen")
+            require(themes == 1, "A loaded theme must not reload on reopen")
             model.close()
         }
         print("PASS: synchronous warm reopen, unfiltered repos and targets, pre-reply Open, theme/context RPC bypass, refresh TTL/coalescing, all changed-context components gated")
     }
 
     @MainActor private static func pending(_ method: String, _ backend: CachedListBackend) async throws {
-        for _ in 0..<150 {
+        // Headless model calls must survive a busy machine: a short budget made
+        // this flaky under load, which surfaced as a crash report instead of a
+        // failure.
+        for _ in 0..<750 {
             if await backend.waiting(method) { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        preconditionFailure("Timed out waiting for \(method)")
+        testFailure("Timed out waiting for \(method)")
     }
 
     @MainActor private static func suggestedBranchChecks() async throws {
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data(#"{"suggested_branch":"amber-falcon"}"#.utf8))
-        precondition(decoded.suggestedBranch == "amber-falcon")
+        require(decoded.suggestedBranch == "amber-falcon")
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/demo"])
         let demo = DemoBackend()
         let direct = PickerModel(options: options, backend: demo)
         direct.start()
         direct.submitBranch() // Loading Enter must not be queued.
         try await wait { direct.canCreate }
-        precondition(direct.branch == "amber-falcon" && direct.base == "main" && direct.target == "tab")
-        precondition(direct.destination == "/Users/demo/Projects/example-kit-worktrees/amber-falcon")
+        require(direct.branch == "amber-falcon" && direct.base == "main" && direct.target == "tab")
+        require(direct.destination == "/Users/demo/Projects/example-kit-worktrees/amber-falcon")
         let before = await demo.count("worktrees.create")
-        precondition(before == 0 && !direct.basePickerPresented)
+        require(before == 0 && !direct.basePickerPresented)
         direct.submitBranch()
         direct.submitBranch()
         try await wait { direct.createdPath != nil && !direct.busy }
         let creates = await demo.count("worktrees.create"), opens = await demo.count("dispatch")
-        precondition(creates == 1 && opens == 1, "One Enter creates and opens; repeated Enter cannot duplicate")
+        require(creates == 1 && opens == 1, "One Enter creates and opens; repeated Enter cannot duplicate")
         let params = await demo.parameters("worktrees.create")
         if case .text("amber-falcon") = params["branch"], case .text("main") = params["base"],
-           case .text("/Users/demo/Projects/example-kit") = params["repo"] {} else { preconditionFailure("Wrong default create params") }
+           case .text("/Users/demo/Projects/example-kit") = params["repo"] {} else { testFailure("Wrong default create params") }
         let dispatch = await demo.parameters("dispatch")
-        if case .text("tab") = dispatch["target"], case .text("/Users/demo/Projects/example-kit-worktrees/amber-falcon") = dispatch["path"] {} else { preconditionFailure("Wrong default dispatch") }
+        if case .text("tab") = dispatch["target"], case .text("/Users/demo/Projects/example-kit-worktrees/amber-falcon") = dispatch["path"] {} else { testFailure("Wrong default dispatch") }
         direct.close()
 
         // Explicit metadata responses cover loading, early edits and authoritative collisions.
@@ -1370,17 +1584,17 @@ struct NativeChecks {
             await backend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/demo",
                 branches: ["main"], baseBranch: "main", suggestedBranch: "quiet-otter"))
             try await wait { !model.loading }
-            precondition(model.branch == (edit ?? "quiet-otter"), "Metadata must preserve early typing and explicit blank")
+            require(model.branch == (edit ?? "quiet-otter"), "Metadata must preserve early typing and explicit blank")
             if edit != "" {
                 try await pending("worktrees.preview", backend)
                 model.submitBranch()
                 await backend.reply("worktrees.preview", APIResult(path: "/demo/new", validationError: "Branch already exists"))
                 try await wait { model.previewReady }
                 model.submitBranch()
-                precondition(!model.canCreate && !model.basePickerPresented)
+                require(!model.canCreate && !model.basePickerPresented)
             }
             let count = await backend.count("worktrees.create")
-            precondition(count == 0, "Loading or collision must block Enter")
+            require(count == 0, "Loading or collision must block Enter")
             model.close()
         }
 
@@ -1400,28 +1614,28 @@ struct NativeChecks {
         await backend.reply("worktrees.list", metadata("fresh-otter"))
         try await wait { !list.refreshing }
         list.beginCreate()
-        precondition(list.branch == "fresh-otter" && list.base == "main", "List entry must prefill synchronously with current metadata")
+        require(list.branch == "fresh-otter" && list.base == "main", "List entry must prefill synchronously with current metadata")
         list.query = "default-form-query"
         try await Task.sleep(for: .milliseconds(200))
-        precondition(list.branch == "fresh-otter", "Query must not replace the initial default")
+        require(list.branch == "fresh-otter", "Query must not replace the initial default")
         list.editBranch("feat/custom")
         list.query = "ignored-form-query"
         try await Task.sleep(for: .milliseconds(200))
-        precondition(list.branch == "feat/custom", "Query must not rename the form")
+        require(list.branch == "feat/custom", "Query must not rename the form")
         list.escape()
         try await pending("worktrees.list", backend)
         await backend.reply("worktrees.list", metadata("next-otter"))
         try await wait { !list.refreshing }
         list.beginCreate()
-        precondition(list.branch == "next-otter" && !list.branchWasEdited, "New form resets edit/default flags")
+        require(list.branch == "next-otter" && !list.branchWasEdited, "New form resets edit/default flags")
         list.escape()
         try await pending("worktrees.list", backend)
         await backend.reply("worktrees.list", metadata(nil))
         try await wait { !list.refreshing }
         list.beginCreate()
-        precondition(list.branch.isEmpty && !list.canCreate, "Missing suggestion requires manual input")
+        require(list.branch.isEmpty && !list.canCreate, "Missing suggestion requires manual input")
         list.editBranch("feat/manual")
-        precondition(list.branch == "feat/manual" && list.branchWasEdited)
+        require(list.branch == "feat/manual" && list.branchWasEdited)
         list.close()
 
         let continuation = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt-create"]), backend: DemoBackend())
@@ -1429,63 +1643,63 @@ struct NativeChecks {
         try await wait { continuation.page == .repositories && !continuation.loading }
         continuation.choose()
         try await wait { continuation.canCreate }
-        precondition(continuation.branch == "amber-falcon")
+        require(continuation.branch == "amber-falcon")
         continuation.editBranch("feat/old-repo")
         let newRepoOptions = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/another-repo"])
         let token = continuation.prepareReconfigure(newRepoOptions)
-        precondition(continuation.branch.isEmpty && !continuation.branchWasEdited)
+        require(continuation.branch.isEmpty && !continuation.branchWasEdited)
         await continuation.completeReconfigure(token)
         try await wait { continuation.canCreate }
-        precondition(continuation.branch == "amber-falcon")
+        require(continuation.branch == "amber-falcon")
         continuation.close()
         print("PASS: suggested branch decoding, direct/list prefill, one-Enter create/open, early edits/blank, refresh, reset, missing suggestion, collision and loading gates")
     }
 
     @MainActor private static func directCreateChecks() async throws {
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/origin"])
-        precondition(options.mode == "wt-create" && options.repo == "/origin")
+        require(options.mode == "wt-create" && options.repo == "/origin")
         let backend = DelayedMetadataBackend()
         let direct = PickerModel(options: options, backend: backend)
-        precondition(direct.page == .create && direct.loading && !direct.canSubmitForm,
+        require(direct.page == .create && direct.loading && !direct.canSubmitForm,
                      "Direct launch must render a disabled form before starting backend work")
         direct.start()
         direct.branch = "feat/typed-early"
         direct.create()
         try await Task.sleep(for: .milliseconds(230))
         let pendingMethods = await backend.methods()
-        precondition(direct.page == .create && direct.branch == "feat/typed-early" && !direct.canCreate)
-        precondition(pendingMethods.filter { $0 != "theme" } == ["worktrees.list"], "Metadata must precede preview and create")
+        require(direct.page == .create && direct.branch == "feat/typed-early" && !direct.canCreate)
+        require(pendingMethods.filter { $0 != "theme" } == ["worktrees.list"], "Metadata must precede preview and create")
         try await wait { direct.canCreate }
         let origin = await backend.requestedRepo()
-        precondition(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)
-        precondition(direct.branch == "feat/typed-early" && direct.base == "main")
-        precondition(PickerStyle.height(for: direct) == 240)
+        require(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)
+        require(direct.branch == "feat/typed-early" && direct.base == "main")
+        require(PickerStyle.height(for: direct) == 240)
         direct.validationError = "Branch already exists"
-        precondition(!direct.canSubmitForm && PickerStyle.height(for: direct) == 264)
+        require(!direct.canSubmitForm && PickerStyle.height(for: direct) == 264)
         direct.error = "Backend error"
-        precondition(PickerStyle.height(for: direct) == 296)
+        require(PickerStyle.height(for: direct) == 296)
         direct.validationError = nil
         direct.error = nil
         let targets = ["tab", "session", "here", "pane_right", "pane_below"]
         let labels = ["New tab", "Session", "cd here", "Split right", "Split below"]
-        precondition(direct.targets == targets)
+        require(direct.targets == targets)
         for (target, label) in zip(targets, labels) {
-            precondition(direct.target == target && PickerModel.targetLabel(target) == label)
+            require(direct.target == target && PickerModel.targetLabel(target) == label)
             direct.cycleTarget(backward: false)
         }
-        precondition(direct.target == "tab", "Ctrl+O must wrap through all five targets")
+        require(direct.target == "tab", "Ctrl+O must wrap through all five targets")
         for target in targets.reversed() {
             direct.cycleTarget(backward: true)
-            precondition(direct.target == target)
+            require(direct.target == target)
         }
         var closed = false
         direct.onClose = { closed = true }
         direct.onDismiss = { direct.close() } // Nonresident idle dismissal.
         direct.basePickerPresented = true
         direct.escape()
-        precondition(!direct.basePickerPresented && !closed && direct.page == .create)
+        require(!direct.basePickerPresented && !closed && direct.page == .create)
         direct.escape()
-        precondition(closed, "Direct Escape must close, not show a worktree list")
+        require(closed, "Direct Escape must close, not show a worktree list")
 
         let slow = PickerModel(options: options, backend: DelayedMetadataBackend())
         var slowClosed = false
@@ -1495,59 +1709,59 @@ struct NativeChecks {
         slow.branch = "feat/typed-early"
         try await Task.sleep(for: .milliseconds(40))
         slow.escape()
-        precondition(slowClosed && !slow.canCreate, "Escape must work while metadata loads")
+        require(slowClosed && !slow.canCreate, "Escape must work while metadata loads")
         try await Task.sleep(for: .milliseconds(350))
-        precondition(slow.repo == "/origin" && slow.base.isEmpty && !slow.previewReady,
+        require(slow.repo == "/origin" && slow.base.isEmpty && !slow.previewReady,
                      "Late metadata must not update a closed picker")
 
         let fallback = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt-create"]), backend: DemoBackend())
         fallback.start()
-        precondition(fallback.page == .create)
+        require(fallback.page == .create)
         try await wait { !fallback.loading }
-        precondition(fallback.page == .repositories && !fallback.items.isEmpty)
+        require(fallback.page == .repositories && !fallback.items.isEmpty)
         fallback.choose()
-        precondition(fallback.page == .create && fallback.loading && !fallback.canCreate,
+        require(fallback.page == .create && fallback.loading && !fallback.canCreate,
                      "Repository selection must continue directly to the form")
         fallback.branch = "feat/repository"
         try await wait { fallback.canCreate }
-        precondition(fallback.page == .create && fallback.items.isEmpty && fallback.branch == "feat/repository")
+        require(fallback.page == .create && fallback.items.isEmpty && fallback.branch == "feat/repository")
         fallback.close()
         print("PASS: immediate direct form, origin metadata, early typing, disabled submit, close during load, stale metadata, direct repository continuation, direct Escape/popover, five target labels and bidirectional cycling")
     }
 
     @MainActor private static func wait(_ condition: () -> Bool) async throws {
-        for _ in 0..<150 {
+        for _ in 0..<750 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        preconditionFailure("Timed out waiting for model")
+        testFailure("Timed out waiting for model")
     }
 
     @MainActor private static func themeIntegrationChecks() async throws {
         let options = try LaunchOptions(arguments: [])
         let backend = ProcessBackend(options: options)
         let result = try await backend.request("theme", params: [:])
-        precondition(result.theme?.name == "Wire Forest" && result.theme?.background == "#102030" &&
+        require(result.theme?.name == "Wire Forest" && result.theme?.background == "#102030" &&
                      result.theme?.ui?.selection == "#bfbfbf",
                      "Real Go NDJSON must decode result.theme, not silently drop a flat palette")
         let model = PickerModel(options: options, backend: backend)
         await model.refreshTheme()?.value
-        precondition(model.themeRevision == 1 && model.themeLoaded && PickerPalette.isDark,
+        require(model.themeRevision == 1 && model.themeLoaded && PickerPalette.isDark,
                      "The real backend must update the native model's palette")
-        precondition(NSColor(PickerStyle.background) == NSColor(hexColor("#333333")!) &&
+        require(NSColor(PickerStyle.background) == NSColor(hexColor("#333333")!) &&
                      NSColor(PickerStyle.selection) == NSColor(hexColor("#bfbfbf")!) &&
                      NSColor(PickerStyle.selectionText) == NSColor(hexColor("#1a191a")!) &&
                      PickerPalette.selectionOpacity == 0.75,
                      "Native selection must use UI tokens, not terminal selection colors")
         let label = NSColor(PickerStyle.foreground).usingColorSpace(.sRGB)!
-        precondition(abs(label.redComponent - label.greenComponent) < 0.01 &&
+        require(abs(label.redComponent - label.greenComponent) < 0.01 &&
                      abs(label.greenComponent - label.blueComponent) < 0.01,
                      "Glass chrome must keep native neutral labels, not green terminal text")
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView(frame: .zero)
             glass.wantsLayer = true
             PickerStyle.applyPanelTheme(to: glass)
-            precondition(glass.tintColor == NSColor(hexColor("#333333")!).withAlphaComponent(0.35),
+            require(glass.tintColor == NSColor(hexColor("#333333")!).withAlphaComponent(0.35),
                          "Real backend colors must reach the panel material")
         }
         model.close()
@@ -1560,25 +1774,25 @@ struct NativeChecks {
         dismissed.close() // Closing before the first request must not start a child.
         do {
             _ = try await dismissed.request("ok", params: [:])
-            preconditionFailure("Closed connection survived close")
+            testFailure("Closed connection survived close")
         } catch {}
         let backend = ProcessBackend(options: options)
         _ = try await backend.request("ok", params: [:])
         do {
             _ = try await backend.request("error", params: [:])
-            preconditionFailure("API error accepted")
-        } catch { precondition(error.localizedDescription == "fixture error", "Unexpected error: \(error.localizedDescription)") }
+            testFailure("API error accepted")
+        } catch { require(error.localizedDescription == "fixture error", "Unexpected error: \(error.localizedDescription)") }
         _ = try await backend.request("ok", params: [:])
         backend.close()
         for method in ["bad-id", "malformed", "eof", "both", "no-result"] {
             let connection = ProcessBackend(options: options)
             do {
                 _ = try await connection.request(method, params: [:])
-                preconditionFailure("Invalid transport accepted: \(method)")
+                testFailure("Invalid transport accepted: \(method)")
             } catch {}
             do {
                 _ = try await connection.request("ok", params: [:])
-                preconditionFailure("Broken connection reused: \(method)")
+                testFailure("Broken connection reused: \(method)")
             } catch {}
             connection.close()
         }
@@ -1588,7 +1802,7 @@ struct NativeChecks {
         blocked.close()
         do {
             _ = try await pending.value
-            preconditionFailure("In-flight request survived close")
+            testFailure("In-flight request survived close")
         } catch {}
         print("PASS: persistent NDJSON, split reads, valid API error recovery, ID mismatch, malformed JSON, EOF, invalid envelopes, closed connection, in-flight shutdown")
     }

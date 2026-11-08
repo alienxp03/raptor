@@ -18,13 +18,13 @@ func pickerAgent(id string) rex.AgentEntry {
 	return rex.AgentEntry{Path: "/repo", Kind: "agent", Label: "Agent " + id, App: "pi", State: "working", AgentID: id, SessionID: "s", SessionLabel: "Work", WindowID: "w", WindowLabel: "Tab", BlockID: "pane-" + id}
 }
 
-func TestPickerCyclesTwoViewsBothDirections(t *testing.T) {
+func TestPickerCyclesThreeViewsBothDirections(t *testing.T) {
 	for _, tc := range []struct {
 		key  tea.KeyType
 		want []int
 	}{
-		{tea.KeyTab, []int{2, 0, 2, 0}},
-		{tea.KeyShiftTab, []int{2, 0, 2, 0}},
+		{tea.KeyTab, []int{1, 2, 0, 1}},
+		{tea.KeyShiftTab, []int{2, 1, 0, 2}},
 	} {
 		m := &dirModel{}
 		for _, want := range tc.want {
@@ -39,7 +39,7 @@ func TestPickerCyclesTwoViewsBothDirections(t *testing.T) {
 func TestAgentFirstLoadIsAsyncAndKeepsPendingInput(t *testing.T) {
 	log := pickerRexLog(t)
 	m := &dirModel{width: 70, height: 10}
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
 	if cmd == nil || !m.agentsLoading || m.agentsLoaded {
 		t.Fatal("expected async agent load")
 	}
@@ -213,8 +213,10 @@ func TestAgentRenderingFitsViewport(t *testing.T) {
 		}
 	}
 	pills := ansi.Strip(pickerPills(2, 60))
-	if !strings.Contains(pills, "Repos") || strings.Contains(pills, "Sessions") || !strings.Contains(pills, "Agents") {
-		t.Fatal("missing pill")
+	for _, name := range []string{"Repos", "Sessions", "Agents"} {
+		if !strings.Contains(pills, name) {
+			t.Fatalf("missing %s pill: %q", name, pills)
+		}
 	}
 }
 
@@ -255,7 +257,7 @@ func TestAgentSearchAndEscape(t *testing.T) {
 }
 
 func TestLauncherEscapeDismissesEveryView(t *testing.T) {
-	for _, view := range []int{0, 2} {
+	for _, view := range []int{0, 1, 2} {
 		for _, query := range []string{"", "filtered"} {
 			m := &dirModel{viewMode: view, filter: query}
 			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})

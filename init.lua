@@ -283,6 +283,28 @@ function M.setup(options)
 	})
 
 	rex.action({
+		name = "raptor_sessions",
+		title = "Open Sessions",
+		description = "Switch, create, or close sessions across every connected host.",
+		category = "Navigate",
+		keywords = "sessions switch hosts create close",
+		run = function(ctx)
+			if ctx.session_id == nil then
+				error("raptor: no session context", 0)
+			end
+			if ctx.block_id then
+				local origin = rex.session.describe_block({ block_id = ctx.block_id })
+				if origin and origin.block and origin.block.label == "raptor" then
+					-- Internal forwarding only: never create a nested picker layer.
+					rex.client.queue("pane.send_key", { key = "ctrl+s" })
+					return { ui = "terminal" }
+				end
+			end
+			return show_picker(ctx, "sessions")
+		end,
+	})
+
+	rex.action({
 		name = "raptor_worktree_list",
 		title = "Raptor Worktrees",
 		description = "Browse local worktrees or create one with a branch name and full path preview.",
@@ -466,6 +488,20 @@ function M.setup(options)
 		keywords = "last pane block back toggle",
 		run = last_pane,
 	})
+
+	-- Direct keybinding entry points. Unlike actions, these never touch the
+	-- server's action registry, so they keep working on servers that have not
+	-- restarted since the module gained an action.
+	function M.open(mode)
+		return function(ctx)
+			if ctx.session_id == nil then
+				error("raptor: no session context; run from a key or inside a session", 0)
+			end
+			return show_picker(resolve_context(ctx), mode)
+		end
+	end
+
+	return M
 end
 
 return M

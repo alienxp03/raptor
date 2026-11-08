@@ -83,6 +83,13 @@ func (m *dirModel) hasWorkingData() bool {
 			return true
 		}
 	}
+	for _, group := range m.sessions {
+		for _, e := range group.Entries {
+			if e.Working || e.State == "working" {
+				return true
+			}
+		}
+	}
 	return false
 }
 

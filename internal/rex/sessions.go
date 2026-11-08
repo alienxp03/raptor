@@ -6,12 +6,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alienxp03/raptor/internal/paths"
 )
 
 // SessionEntry describes one selectable row in the Sessions view.
 // Kind "session" jumps to a session; kind "window" jumps to one of its tabs.
 // SessionID links each tab to its parent session row. Path mirrors ID so native
-// clients can reuse their item decode shape.
+// clients can reuse their item decode shape. Host carries the display label of
+// the server that owns the row ("This Mac" locally).
 type SessionEntry struct {
 	Kind         string `json:"kind"` // "session" | "window"
 	ID           string `json:"id"`
@@ -20,8 +23,19 @@ type SessionEntry struct {
 	Label        string `json:"label"`
 	SessionLabel string `json:"session_label"`
 	Active       bool   `json:"active"`
+	Host         string `json:"host"`
 	State        string `json:"state,omitempty"`
 	Working      bool   `json:"working,omitempty"`
+}
+
+// HostGroup is one host's slice of the Sessions view. Unreachable hosts keep
+// their header row and an error string so the group does not silently vanish.
+type HostGroup struct {
+	Label     string         `json:"label"`
+	Local     bool           `json:"local,omitempty"`
+	Reachable bool           `json:"reachable"`
+	Error     string         `json:"error,omitempty"`
+	Entries   []SessionEntry `json:"entries"`
 }
 
 // ApplySessionActivity replaces activity in place. Session rows match SessionID;
@@ -162,6 +176,10 @@ func sessionWindowLabel(sessionID string, window apiWindow) string {
 }
 
 func apiCall(sessionID, method string, params any) (string, error) {
+	return apiCallOn("", sessionID, method, params)
+}
+
+func apiCallOn(host, sessionID, method string, params any) (string, error) {
 	args := []string{"api", "call"}
 	if sessionID != "" {
 		args = append(args, "-s", sessionID)
@@ -171,7 +189,7 @@ func apiCall(sessionID, method string, params any) (string, error) {
 		return "", err
 	}
 	args = append(args, method, string(payload))
-	out, err := Run(args...)
+	out, err := RunOn(host, args...)
 	if err != nil {
 		return "", err
 	}
@@ -188,13 +206,21 @@ func Jump(entry SessionEntry, client string) error {
 		}
 		return Do(client, "session.select", kv...)
 	}
+	return focusLocalSession(entry)
+}
+
+func focusLocalSession(entry SessionEntry) error {
 	if entry.Kind == "window" {
-		return FocusWindow(entry.SessionID, entry.ID)
+		return FocusWindow("", entry.SessionID, entry.ID)
 	}
 	windows, err := sessionWindows(entry.SessionID)
 	if err != nil || len(windows) == 0 {
 		return fmt.Errorf("session %s has no windows", entry.SessionLabel)
 	}
+	return focusWindowOf(windows, entry)
+}
+
+func focusWindowOf(windows []apiWindow, entry SessionEntry) error {
 	active := windows[0].WindowID
 	for _, window := range windows {
 		if window.Active {
@@ -202,33 +228,245 @@ func Jump(entry SessionEntry, client string) error {
 			break
 		}
 	}
-	return FocusWindow(entry.SessionID, active)
+	return FocusWindow("", entry.SessionID, active)
 }
 
-func FocusWindow(sessionID, windowID string) error {
-	_, err := apiCall("", "session.focus_window", map[string]string{"session_id": sessionID, "window_id": windowID})
+// JumpOnHost activates a row that lives on another host. The app keeps one
+// client per server; the remote client shares the origin client's label, so the
+// row is selected through that host's copy of the app. Server-side focus is
+// the fallback when no matching client answers.
+func JumpOnHost(host string, entry SessionEntry, clientID string) error {
+	if host == "" || host == LocalHostLabel {
+		return Jump(entry, clientID)
+	}
+	if client := appClientOn(host, ClientLabel(clientID)); client != "" {
+		kv := []string{"session_id=" + entry.SessionID}
+		if entry.Kind == "window" {
+			kv = append(kv, "window_id="+entry.ID)
+		}
+		if err := DoOn(host, client, "session.select", kv...); err == nil {
+			return nil
+		}
+	}
+	windows, err := hostWindows(host, entry.SessionID)
+	if err != nil || len(windows) == 0 {
+		return fmt.Errorf("session %s has no windows on %s", entry.SessionLabel, host)
+	}
+	if entry.Kind == "window" {
+		return FocusWindow(host, entry.SessionID, entry.ID)
+	}
+	return focusRemoteWindow(host, windows, entry)
+}
+
+func focusRemoteWindow(host string, windows []apiWindow, entry SessionEntry) error {
+	active := windows[0].WindowID
+	for _, window := range windows {
+		if window.Active {
+			active = window.WindowID
+			break
+		}
+	}
+	return FocusWindow(host, entry.SessionID, active)
+}
+
+func hostWindows(host, sessionID string) ([]apiWindow, error) {
+	out, err := apiCallOn(host, sessionID, "session.view", map[string]string{"session_id": sessionID})
+	if err != nil {
+		return nil, err
+	}
+	var view sessionView
+	if json.Unmarshal([]byte(out), &view) != nil {
+		return nil, fmt.Errorf("could not parse the window list for %s", sessionID)
+	}
+	return view.Windows, nil
+}
+
+func FocusWindow(host, sessionID, windowID string) error {
+	_, err := apiCallOn(host, "", "session.focus_window", map[string]string{"session_id": sessionID, "window_id": windowID})
 	return err
 }
 
 // CloseWindow closes one window; CloseSession destroys the whole session.
-func CloseWindow(sessionID, windowID string) error {
-	_, err := apiCall("", "session.close_window", map[string]string{"session_id": sessionID, "window_id": windowID})
+func CloseWindow(host, sessionID, windowID string) error {
+	_, err := apiCallOn(host, "", "session.close_window", map[string]string{"session_id": sessionID, "window_id": windowID})
 	return err
 }
 
-func CloseSession(sessionID string) error {
-	_, err := apiCall("", "session.destroy", map[string]string{"session_id": sessionID})
+func CloseSession(host, sessionID string) error {
+	_, err := apiCallOn(host, "", "session.destroy", map[string]string{"session_id": sessionID})
 	return err
 }
 
-func SetWindowLabel(sessionID, windowID, label string) error {
-	_, err := apiCall("", "session.set_window_label", map[string]string{"session_id": sessionID, "window_id": windowID, "label": label})
+func SetWindowLabel(host, sessionID, windowID, label string) error {
+	_, err := apiCallOn(host, "", "session.set_window_label", map[string]string{"session_id": sessionID, "window_id": windowID, "label": label})
 	return err
 }
 
-func SetSessionLabel(sessionID, label string) error {
-	_, err := apiCall("", "session.set_label", map[string]string{"session_id": sessionID, "label": label})
+func SetSessionLabel(host, sessionID, label string) error {
+	_, err := apiCallOn(host, "", "session.set_label", map[string]string{"session_id": sessionID, "label": label})
 	return err
+}
+
+// SessionGroups lists every host's sessions, local first. Each host answers in
+// parallel: one ls for the sessions and one agent snapshot for activity. A
+// host that fails keeps its header with the error; the view must not hide
+// configured hosts just because SSH or the server is down. localAgents feeds
+// the local group's activity so callers with a fresh cached snapshot avoid a
+// second scan; nil just means plain local rows.
+func SessionGroups(originSession string, localAgents []AgentEntry) []HostGroup {
+	hosts := Hosts()
+	groups := make([]HostGroup, len(hosts))
+	of := make([]HostGroup, len(hosts))
+	var mu sync.Mutex
+	mapHosts(hosts, func(host Host) {
+		group := hostGroup(host, originSession, localAgents)
+		mu.Lock()
+		of[indexOfHost(hosts, host)] = group
+		mu.Unlock()
+	})
+	copy(groups, of)
+	return groups
+}
+
+func indexOfHost(hosts []Host, target Host) int {
+	for i, host := range hosts {
+		if host.Label == target.Label {
+			return i
+		}
+	}
+	return 0
+}
+
+// Session listing budgets: remote hosts answer over SSH and may be down;
+// sessions and activity fetch in parallel so the slower one hides inside the
+// faster one. A host that misses its budget keeps its header with a short
+// error instead of stalling the whole view.
+const (
+	remoteListTimeout  = 3
+	remoteAgentTimeout = 4
+	localAgentTimeout  = 3
+)
+
+func hostGroup(host Host, originSession string, localAgents []AgentEntry) HostGroup {
+	name := ""
+	if !host.Local {
+		name = host.Label
+	}
+	group := HostGroup{Label: host.Label, Local: host.Local, Reachable: true, Entries: []SessionEntry{}}
+	type listing struct {
+		out string
+		err error
+	}
+	ls := make(chan listing, 1)
+	go func() {
+		out, err := RunOnBounded(name, remoteListTimeout, "ls", "--json")
+		ls <- listing{out, err}
+	}()
+	type activity struct {
+		agents []AgentEntry
+		err    error
+	}
+	agents := make(chan activity, 1)
+	go func() {
+		if host.Local && localAgents != nil {
+			agents <- activity{agents: localAgents}
+			return
+		}
+		budget := localAgentTimeout
+		if !host.Local {
+			budget = remoteAgentTimeout
+		}
+		out, err := RunOnBounded(name, budget, "do", "-e", agentsScript, "--json")
+		if err != nil {
+			agents <- activity{err: err}
+			return
+		}
+		decoded, decodeErr := decodeAgentEntries([]byte(out), "", time.Now())
+		agents <- activity{agents: decoded, err: decodeErr}
+	}()
+	listed := <-ls
+	if listed.err != nil {
+		group.Reachable = false
+		group.Error = shortHostError(listed.err)
+		if group.Error == "" {
+			group.Error = "unreachable"
+		}
+		return group
+	}
+	var data struct {
+		Sessions []apiSession `json:"sessions"`
+	}
+	if json.Unmarshal([]byte(listed.out), &data) != nil {
+		group.Reachable = false
+		group.Error = "could not parse the session list"
+		return group
+	}
+	entries := make([]SessionEntry, 0, len(data.Sessions))
+	for _, session := range data.Sessions {
+		entries = append(entries, SessionEntry{
+			Kind: "session", ID: session.SessionID, Path: session.SessionID, SessionID: session.SessionID,
+			Label: session.Label, SessionLabel: session.Label, Host: host.Label,
+			Active: host.Local && session.SessionID == originSession,
+		})
+	}
+	// Activity is optional: a slow or absent snapshot keeps plain rows.
+	if snapshot := <-agents; snapshot.err == nil && snapshot.agents != nil {
+		ApplySessionActivity(entries, snapshot.agents)
+	}
+	group.Entries = entries
+	return group
+}
+
+// shortHostError strips the rex command line and transport detail: the view
+// should explain "the host is down", not dump an argv.
+func shortHostError(err error) string {
+	message := err.Error()
+	if idx := strings.Index(message, ": "); idx >= 0 && strings.HasPrefix(message, "rex ") {
+		message = message[idx+2:]
+	}
+	if idx := strings.IndexByte(message, '\n'); idx >= 0 {
+		message = message[:idx]
+	}
+	if len(message) > 120 {
+		message = message[:120]
+	}
+	return message
+}
+
+// CreateSessionOn reuses a host session by label or creates one at dir, then
+// returns the session id. The bool reports whether an existing session matched.
+func CreateSessionOn(host, dir string) (string, bool, error) {
+	name := paths.Basename(dir)
+	if out, err := RunOn(host, "ls", "--json"); err == nil {
+		var data struct {
+			Sessions []apiSession `json:"sessions"`
+		}
+		if json.Unmarshal([]byte(out), &data) == nil {
+			for _, session := range data.Sessions {
+				if session.Label == name {
+					return session.SessionID, true, nil
+				}
+			}
+		}
+	}
+	out, err := RunOn(host, "new", "--json", "-c", dir, name)
+	if err != nil {
+		return "", false, err
+	}
+	var res struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal([]byte(out), &res) != nil || res.SessionID == "" {
+		return "", false, fmt.Errorf("could not create session for %s on %s", dir, host)
+	}
+	return res.SessionID, false, nil
+}
+
+// SelectOnHost switches the host's app client to a session, falling back to
+// server-side focus on that host.
+func SelectOnHost(host, sessionID, clientID string) error {
+	entry := SessionEntry{Kind: "session", ID: sessionID, Path: sessionID, SessionID: sessionID}
+	return JumpOnHost(host, entry, clientID)
 }
 
 // apiTimeout documents the shared rex call budget for session mutations.
