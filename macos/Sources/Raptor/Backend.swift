@@ -103,6 +103,14 @@ struct ActivityProjection: Equatable, Sendable {
     func shouldPulse(reduceMotion: Bool, visible: Bool) -> Bool {
         working && !reduceMotion && visible
     }
+
+    static func workingDotOpacities(at time: TimeInterval?) -> [Double] {
+        (0..<3).map { index in
+            guard let time else { return 1 }
+            let phase = time * .pi * 2 / 1.4 - Double(index) * .pi * 2 / 3
+            return 0.4 + 0.6 * (1 + sin(phase)) / 2
+        }
+    }
 }
 
 struct PickerItem: Codable, Identifiable, Equatable, Sendable {

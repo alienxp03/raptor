@@ -3,33 +3,43 @@ package catalog
 import (
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/alienxp03/raptor/internal/paths"
 
 	"github.com/alienxp03/raptor/internal/rex"
 )
 
-// ApplyDirectoryActivity replaces activity in place. A directory contains an
-// agent when its canonical cwd equals the directory or is below it.
+// ApplyDirectoryActivity replaces activity in place. Only an exact canonical
+// working-directory match contributes activity; parent directories stay quiet.
 func ApplyDirectoryActivity(items []Directory, agents []rex.AgentEntry) {
+	ApplyDirectoryActivityOn("", items, agents)
+}
+
+// Remote paths belong to another filesystem. Never resolve their symlinks or
+// relative paths against this machine when projecting a host-native snapshot.
+func ApplyDirectoryActivityOn(host string, items []Directory, agents []rex.AgentEntry) {
+	normalize := paths.Canonical
+	if host != "" && host != rex.LocalHostLabel {
+		normalize = func(value string) string {
+			if value == "" {
+				return ""
+			}
+			return filepath.Clean(value)
+		}
+	}
 	cwds := make([]string, len(agents))
 	for i, agent := range agents {
-		cwds[i] = paths.Canonical(agent.Cwd)
+		cwds[i] = normalize(agent.Cwd)
 	}
 	for i := range items {
 		item := &items[i]
 		item.State, item.Working = "", false
-		dir := paths.Canonical(item.Path)
+		dir := normalize(item.Path)
 		if dir == "" {
 			continue
 		}
 		for j, agent := range agents {
-			if cwds[j] == "" {
-				continue
-			}
-			rel, err := filepath.Rel(dir, cwds[j])
-			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			if cwds[j] != dir {
 				continue
 			}
 			state := agent.State

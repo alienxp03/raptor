@@ -37,6 +37,13 @@ enum PickerStyle {
     static var fieldBackground: Color { PickerPalette.fieldBackground }
     static var foreground: Color { PickerPalette.foreground }
     static var secondaryText: Color { foreground.opacity(0.55) }
+    static var sessionText: Color {
+        PickerPalette.isDark ? Color(red: 173 / 255.0, green: 208 / 255.0, blue: 173 / 255.0)
+            : Color(red: 57 / 255.0, green: 96 / 255.0, blue: 57 / 255.0)
+    }
+    static var directoryText: Color {
+        PickerPalette.isDark ? Color(red: 198 / 255.0, green: 201 / 255.0, blue: 198 / 255.0) : foreground
+    }
     static var glassTint: NSColor { NSColor(background).withAlphaComponent(0.35) }
     static var hairline: NSColor { NSColor(foreground).withAlphaComponent(0.15) }
 

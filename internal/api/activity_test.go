@@ -33,7 +33,7 @@ case "$*" in
  *) exit 1 ;;
 esac
 `
-	for name, contents := range map[string]string{"rex": script, "zoxide": "#!/bin/sh\nprintf '/repo\\n/repo-other\\n'\n"} {
+	for name, contents := range map[string]string{"rex": script, "zoxide": "#!/bin/sh\nprintf '/repo\\n/repo/sub\\n/repo-other\\n'\n"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -68,21 +68,19 @@ esac
 	checkSessions := func(active bool) {
 		t.Helper()
 		result := call("sessions").(sessionsResult)
-		if len(result.Items) != 3 {
+		if len(result.Items) != 4 {
 			t.Fatalf("sessions=%+v", result)
 		}
-		// The session and its repo directory light up; the unrelated
-		// directory stays quiet in both cases.
-		for i, item := range result.Items[:2] {
-			if active && (item.State != "blocked" || !item.Working) {
+		// The session and exact working folder light up. The parent and
+		// unrelated directories stay quiet, even while the agent is working.
+		for i, item := range result.Items {
+			matches := active && (item.Kind == "session" || item.Path == "/repo/sub")
+			if matches && (item.State != "blocked" || !item.Working) {
 				t.Fatalf("row %d=%+v", i, item)
 			}
-			if !active && (item.State != "" || item.Working) {
+			if !matches && (item.State != "" || item.Working) {
 				t.Fatalf("failed snapshot row %d=%+v", i, item)
 			}
-		}
-		if result.Items[2].State != "" || result.Items[2].Working {
-			t.Fatalf("unrelated directory=%+v", result.Items[2])
 		}
 	}
 

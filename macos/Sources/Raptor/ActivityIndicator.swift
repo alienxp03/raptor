@@ -3,6 +3,7 @@ import SwiftUI
 /// No repeating work for idle, offscreen, hidden-panel or reduced-motion rows.
 struct ActivityIndicator: View {
     let activity: ActivityProjection
+    var workingColor: Color = .primary
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var visible = false
     @State private var panelVisible = false
@@ -13,15 +14,24 @@ struct ActivityIndicator: View {
             if activity.working {
                 if activity.shouldPulse(reduceMotion: reduceMotion, visible: visible && panelVisible) {
                     TimelineView(.animation(minimumInterval: 1 / 24)) { context in
-                        dot(.blue).opacity(0.4 + 0.6 * (1 + sin(context.date.timeIntervalSinceReferenceDate * .pi * 2 / 1.4)) / 2)
+                        workingDots(at: context.date.timeIntervalSinceReferenceDate)
                     }
-                } else { dot(.blue) }
+                } else { workingDots(at: nil) }
             }
         }
         .background(PanelVisibilityReader { panelVisible = $0 })
         .onAppear { visible = true }
         .onDisappear { visible = false }
         .accessibilityHidden(true)
+    }
+
+    private func workingDots(at time: TimeInterval?) -> some View {
+        let opacities = ActivityProjection.workingDotOpacities(at: time)
+        return HStack(spacing: 3) {
+            ForEach(0..<3) { index in
+                dot(workingColor).opacity(opacities[index])
+            }
+        }
     }
 
     private func dot(_ color: Color) -> some View {

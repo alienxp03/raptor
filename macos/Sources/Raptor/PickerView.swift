@@ -202,7 +202,7 @@ struct PickerView: View {
                     .frame(width: 16, height: 16).accessibilityHidden(true)
                 Text(item.label ?? item.agentID ?? "Agent")
                     .lineLimit(1).truncationMode(.tail).layoutPriority(1)
-                ActivityIndicator(activity: item.activity)
+                ActivityIndicator(activity: item.activity, workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground)
                 Spacer(minLength: 8)
                 if !item.agentContext.isEmpty {
                     Text(item.agentContext)
@@ -222,7 +222,7 @@ struct PickerView: View {
             } else if isSessionRow {
                 Image(systemName: "terminal.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.secondaryText)
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.sessionText)
                     .accessibilityHidden(true)
                 if item.active == true {
                     Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
@@ -231,6 +231,7 @@ struct PickerView: View {
                         .accessibilityLabel("Active")
                 }
                 Text(item.label ?? item.path)
+                    .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.sessionText)
                     .lineLimit(1).truncationMode(.tail).layoutPriority(1)
             } else if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
@@ -239,17 +240,19 @@ struct PickerView: View {
             } else if isLauncherDir {
                 Image(systemName: "folder")
                     .font(.system(size: 11))
-                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.secondaryText)
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.directoryText)
                     .accessibilityHidden(true)
-                // Directory candidates read quieter than live sessions.
+                // Use hue, not disabled text, to distinguish folders from sessions.
                 Text(displayPath(item.path))
                     .lineLimit(1).truncationMode(.middle)
-                    .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.secondaryText)
+                    .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.directoryText)
             } else {
                 Text(displayPath(item.path))
                     .lineLimit(1).truncationMode(.middle)
             }
-            if !isAgent { ActivityIndicator(activity: item.activity) }
+            if !isAgent {
+                ActivityIndicator(activity: item.activity, workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground)
+            }
             if !isAgent, item.isLocal == false, let host = item.host, !host.isEmpty {
                 // Never truncates: the label yields its space instead.
                 Text("· " + host)

@@ -63,6 +63,12 @@ func apply(t *theme.Theme) {
 	// Compact palette (palette.go). Terminals cannot reproduce native glass;
 	// paint the resolved UI colors as opaque surfaces instead.
 	pickerText = pickerText.Foreground(lipgloss.Color(foreground))
+	pickerSession = pickerSession.Foreground(lipgloss.Color("#ADD0AD"))
+	pickerFolder = pickerFolder.Foreground(lipgloss.Color("#C6C9C6"))
+	if !t.IsDark {
+		pickerSession = pickerSession.Foreground(lipgloss.Color("#396039"))
+		pickerFolder = pickerFolder.Foreground(lipgloss.Color(foreground))
+	}
 	pickerMuted = pickerMuted.Foreground(ansi(8))
 	pickerAccent = pickerAccent.Foreground(lipgloss.Color(t.Accent))
 	pickerInput = pickerInput.Foreground(lipgloss.Color(foreground)).Background(lipgloss.Color(surface))

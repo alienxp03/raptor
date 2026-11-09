@@ -11,6 +11,7 @@ import (
 func TestApplyPickerThemeRoles(t *testing.T) {
 	// apply mutates package styles; restore them for other picker tests.
 	text, muted, accent := pickerText, pickerMuted, pickerAccent
+	sessionText, folderText := pickerSession, pickerFolder
 	input, selected, surface := pickerInput, pickerSelected, pickerSurface
 	rail, mark, prompt, cursor := pickerRail, pickerMark, pickerPrompt, pickerCursor
 	title, dim, sel, session := styTitle, styDim, stySel, stySession
@@ -18,6 +19,7 @@ func TestApplyPickerThemeRoles(t *testing.T) {
 	target, border, preview := styTarget, styBorder, styPreviewB
 	t.Cleanup(func() {
 		pickerText, pickerMuted, pickerAccent = text, muted, accent
+		pickerSession, pickerFolder = sessionText, folderText
 		pickerInput, pickerSelected, pickerSurface = input, selected, surface
 		pickerRail, pickerMark, pickerPrompt, pickerCursor = rail, mark, prompt, cursor
 		styTitle, styDim, stySel, stySession = title, dim, sel, session

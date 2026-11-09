@@ -77,9 +77,9 @@ func activityIndicator(state string, working bool, frame int) string {
 		}
 	}
 	if working || state == "working" {
-		glyph := "•"
+		glyph := "•••"
 		if !reducedMotion() {
-			glyph = []string{"•", "∙", "·", "∙"}[frame%4]
+			glyph = []string{"•··", "·•·", "··•", "·•·"}[frame%4]
 		}
 		indicator := " " + glyph
 		if _, plain := os.LookupEnv("NO_COLOR"); !plain {

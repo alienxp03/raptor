@@ -188,6 +188,13 @@ struct NativeChecks {
 
         require(PickerStyle.rowFontSize == 13 && PickerStyle.rowHeight == 32 && PickerStyle.createHeaderHeight == PickerStyle.searchHeight,
                      "Launcher and form must share typography and control sizing")
+        let sessionColor = PickerPalette.isDark ? "#ADD0AD" : "#396039"
+        require(NSColor(PickerStyle.sessionText) == NSColor(hexColor(sessionColor)!),
+                     "Session rows must use sage text instead of dimming folders")
+        if PickerPalette.isDark {
+            require(NSColor(PickerStyle.directoryText) == NSColor(hexColor("#C6C9C6")!),
+                         "Folder rows must retain readable neutral text")
+        }
         require(PickerModel.targetLabel("tab") == "New tab")
         require(PickerModel.targetLabel("session") == "Session")
         require(PickerModel.targetLabel("here") == "cd here")
@@ -397,6 +404,13 @@ struct NativeChecks {
         require(heartbeatOnly.updatedAge() == nil, "Never use metadata heartbeat as updated_at")
         item.updatedAt = "bad"
         require(item.updatedAge() == nil)
+        require(ActivityProjection.workingDotOpacities(at: nil) == [1, 1, 1],
+                "Reduced-motion working indicator must show three static dots")
+        let firstDots = ActivityProjection.workingDotOpacities(at: 0)
+        require(firstDots.count == 3 && firstDots.allSatisfy { $0 >= 0.4 && $0 <= 1 },
+                "Three working dots must stay visible throughout animation")
+        require(firstDots != ActivityProjection.workingDotOpacities(at: 0.35),
+                "Working dots must animate in sequence")
         for kind in ["session", "window", "directory"] {
             item.kind = kind; item.state = "blocked"; item.working = true
             require(item.activity == ActivityProjection(blocked: true, working: true))

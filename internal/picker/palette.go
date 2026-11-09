@@ -15,6 +15,8 @@ import (
 // replaces these with the active Rex theme when it can be resolved.
 var (
 	pickerText     = lipgloss.NewStyle().Foreground(lipgloss.Color("#EDEAE6"))
+	pickerSession  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ADD0AD"))
+	pickerFolder   = lipgloss.NewStyle().Foreground(lipgloss.Color("#C6C9C6"))
 	pickerMuted    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9A928A"))
 	pickerAccent   = lipgloss.NewStyle().Foreground(lipgloss.Color("#B88242"))
 	pickerInput    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F5F5F5")).Background(lipgloss.Color("#3E3A39"))
@@ -114,7 +116,7 @@ func pickerDirectoryRow(path string, pinned bool, position, width int, selected 
 }
 
 func pickerDirectoryRowActivity(path string, pinned bool, position, width int, selected bool, indicator string) string {
-	style := pickerText
+	style := pickerFolder
 	if selected {
 		style = pickerSelected.Bold(true)
 	}
@@ -144,6 +146,9 @@ func pickerSessionRow(entry rex.SessionEntry, position, width int, selected bool
 
 func pickerSessionRowActivity(entry rex.SessionEntry, position, width int, selected bool, indicator string) string {
 	style := pickerText
+	if entry.Kind == "session" {
+		style = pickerSession
+	}
 	if selected {
 		style = pickerSelected.Bold(true)
 	}

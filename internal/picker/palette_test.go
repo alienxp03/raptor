@@ -14,6 +14,26 @@ import (
 	"github.com/alienxp03/raptor/internal/rex"
 )
 
+func TestLauncherRowColors(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+	for _, selected := range []bool{false, true} {
+		sessionStyle, folderStyle := pickerSession.Bold(true), pickerFolder
+		if selected {
+			sessionStyle, folderStyle = pickerSelected.Bold(true), pickerSelected.Bold(true)
+		}
+		session := pickerSessionRow(rex.SessionEntry{Kind: "session", Label: "personal"}, 1, 60, selected)
+		folder := pickerDirectoryRow("/tmp/project", false, 2, 60, selected)
+		if !strings.Contains(session, sessionStyle.Render("personal")) {
+			t.Fatalf("session lost its color: %q", session)
+		}
+		if !strings.Contains(folder, folderStyle.Render("/tmp/project")) {
+			t.Fatalf("folder lost its color: %q", folder)
+		}
+	}
+}
+
 func TestSessionRowsShowHierarchy(t *testing.T) {
 	for _, width := range []int{24, 44, 78} {
 		for _, selected := range []bool{false, true} {

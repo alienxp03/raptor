@@ -182,12 +182,13 @@ func TestActivityProjectionAllTabs(t *testing.T) {
 	m := &dirModel{launcher: []launcherRow{
 		{dir: &catalog.Directory{Label: "repo", Path: "/repo"}, host: rex.LocalHostLabel},
 		{dir: &catalog.Directory{Label: "other", Path: "/other"}, host: rex.LocalHostLabel},
+		{dir: &catalog.Directory{Label: "sub", Path: "/repo/sub"}, host: rex.LocalHostLabel},
 	}}
 	// Keep coverage of shared session metadata without a Sessions picker view.
 	tabs := []rex.SessionEntry{{Kind: "session", ID: "s", SessionID: "s"}, {Kind: "window", ID: "w", SessionID: "s"}, {Kind: "window", ID: "else", SessionID: "s"}}
 	m.projectActivity([]rex.AgentEntry{e, blocked})
 	rex.ApplySessionActivity(tabs, []rex.AgentEntry{e, blocked})
-	if m.launcher[0].dir.State != "blocked" || !m.launcher[0].dir.Working || m.launcher[1].dir.Working {
+	if m.launcher[0].dir.State != "" || m.launcher[0].dir.Working || m.launcher[1].dir.Working || m.launcher[2].dir.State != "blocked" || !m.launcher[2].dir.Working {
 		t.Fatalf("launcher dirs: %+v", m.launcher)
 	}
 	for _, i := range []int{0, 1} {
@@ -198,7 +199,7 @@ func TestActivityProjectionAllTabs(t *testing.T) {
 	if tabs[2].Working {
 		t.Fatal("unrelated tab marked working")
 	}
-	for _, indicator := range []string{activityIndicator(m.launcher[0].dir.State, m.launcher[0].dir.Working, 0), activityIndicator(tabs[0].State, tabs[0].Working, 0)} {
+	for _, indicator := range []string{activityIndicator(m.launcher[2].dir.State, m.launcher[2].dir.Working, 0), activityIndicator(tabs[0].State, tabs[0].Working, 0)} {
 		plain := ansi.Strip(indicator)
 		if !strings.HasPrefix(plain, " ! ") || !strings.ContainsAny(plain, "•∙·") {
 			t.Fatal("mixed activity must show Blocked and Working together")
@@ -208,6 +209,22 @@ func TestActivityProjectionAllTabs(t *testing.T) {
 	rex.ApplySessionActivity(tabs, nil)
 	if m.hasWorkingData() || m.launcher[0].dir.State != "" || tabs[0].State != "" {
 		t.Fatal("activity not cleared")
+	}
+}
+
+func TestWorkingIndicatorHasThreeDots(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	for _, motion := range []string{"", "1"} {
+		t.Setenv("REX_REDUCED_MOTION", motion)
+		for frame := 0; frame < 4; frame++ {
+			indicator := activityIndicator("working", true, frame)
+			if len([]rune(strings.TrimSpace(indicator))) != 3 || lipgloss.Width(indicator) != 4 {
+				t.Fatalf("working indicator must keep three dots at fixed width: %q", indicator)
+			}
+		}
+	}
+	if got := activityIndicator("idle", false, 0); got != "" {
+		t.Fatalf("idle indicator = %q", got)
 	}
 }
 
