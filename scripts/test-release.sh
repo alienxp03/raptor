@@ -13,6 +13,9 @@ grep -Fq "sha256 \"$checksum\"" "$work/raptor.rb"
 grep -Fq 'releases/download/v1.2.3/Raptor-1.2.3-universal.zip' "$work/raptor.rb"
 grep -Fq 'version "1.2.3"' "$work/raptor.rb"
 grep -Fq 'head "https://github.com/alienxp03/raptor.git"' "$work/raptor.rb"
+for dependency in zoxide worktrunk gh; do
+  grep -Fq "depends_on \"$dependency\"" "$work/raptor.rb"
+done
 for version in 1.2 01.2.3 1.2.3-beta '1.2.3"'; do
   if ruby "$root/scripts/release-formula.rb" "$version" "$work" > /dev/null 2>&1; then
     echo "Accepted invalid version: $version" >&2

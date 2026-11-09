@@ -35,7 +35,7 @@ jobs:
           go-version-file: go.mod
       - name: Test
         run: |
-          brew install lua
+          brew install lua worktrunk gh
           make test
           make test-macos
           bash scripts/test-release.sh
