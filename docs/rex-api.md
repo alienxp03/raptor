@@ -23,6 +23,7 @@ The installed API has no replacement for these functions:
 - **Directory history:** `list_dir` browses a directory; it does not return zoxide history or visit scores.
 - **Git/worktrees, pins, fuzzy search, target order:** Raptor workflow rules, not Rex server data.
 - **Last-session/pane history:** no equivalent MRU-toggle API.
+- **Session recent-use order:** no last-used timestamp or selected-session event. An isolated Mac file observer reads the private focus preference. Go validates and stores actual visits; agent `updated_at` is never a proxy for user activity.
 - **Native panel lifecycle, geometry, and IPC:** platform integration outside the Rex server API.
 
 Session/tab/split creation, focus, rename, close, and client selection already use supported Rex commands or API methods. A Lua wrapper around those methods is not a separate protocol.

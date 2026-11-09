@@ -181,6 +181,7 @@ struct NativeChecks {
             try await themeIntegrationChecks()
             return
         }
+        try await RexFocusChecks.run()
         try await searchLatencyChecks()
         require(PickerStyle.panelAnimationBehavior(reduceMotion: false) == .default,
                      "Panel presentation must use resh's default AppKit animation")

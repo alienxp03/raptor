@@ -53,6 +53,9 @@ func Do(client, action string, kv ...string) error {
 		args = append(args, s)
 	}
 	_, err := Run(args...)
+	if err == nil {
+		recordSelectedSession("", action, kv)
+	}
 	return err
 }
 
@@ -99,6 +102,9 @@ func DoOn(host, client, action string, kv ...string) error {
 		args = append(args, s)
 	}
 	_, err := RunOn(host, args...)
+	if err == nil {
+		recordSelectedSession(host, action, kv)
+	}
 	return err
 }
 

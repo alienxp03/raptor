@@ -19,6 +19,9 @@ xcrun swiftc "${common[@]}" -framework SwiftUI -framework AppKit \
   "$SCRIPT_ROOT/macos/Sources/Raptor/Backend.swift" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/DemoBackend.swift" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/PickerModel.swift" \
+  "$SCRIPT_ROOT/macos/Sources/Raptor/FocusFileWatcher.swift" \
+  "$SCRIPT_ROOT/macos/Sources/Raptor/RexFocusTracker.swift" \
+  "$SCRIPT_ROOT/macos/Tests/RexFocusChecks.swift" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/PathDisplay.swift" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/PickerStyle.swift" \
   "$SCRIPT_ROOT/macos/Sources/Raptor/RexTheme.swift" \

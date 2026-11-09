@@ -98,6 +98,16 @@ func TestFailedHostMergeKeepsSessionsBeforeStableFolders(t *testing.T) {
 	if got := ids(cached.Items); !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged order = %v, want %v", got, want)
 	}
+	// MRU can reorder the merged sessions, but cannot move the folders.
+	h.ranks = rex.SessionRecency{"remote\x00session:remote": 0}
+	result, err := h.call("sessions", []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want[0], want[1] = want[1], want[0]
+	if got := ids(result.(sessionsResult).Items); !reflect.DeepEqual(got, want) {
+		t.Fatalf("MRU order = %v, want %v", got, want)
+	}
 	if got := ids(fresh); !reflect.DeepEqual(got, []string{"session:local", "/local-one", "/local-two"}) {
 		t.Fatalf("merge changed fresh rows: %v", got)
 	}

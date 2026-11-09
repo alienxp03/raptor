@@ -76,6 +76,7 @@ type dirModel struct {
 	previewPending          bool
 	previewText             string
 	activityFrame           int
+	sessionRecency          rex.SessionRecency // fixed for one picker presentation
 	activityEntries         []rex.AgentEntry
 	activityRemote          map[string][]rex.AgentEntry
 	activityTickPending     bool
@@ -150,6 +151,10 @@ func runDirs(ctx rex.Ctx, cfg config.Config, launcher bool, view int) int {
 	m := newDirModel(ctx, cfg, launcher, view)
 	var dm *dirModel
 	for {
+		// Opening from a pane is an explicit visit, not background activity.
+		_ = rex.RecordSessionUse("", ctx.Session)
+		m.sessionRecency = rex.LoadSessionRecency()
+		m.applyLauncher()
 		m.activityWatcher = rex.WatchEvents(context.Background())
 		m.activityWatcher.Discover()
 		final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()

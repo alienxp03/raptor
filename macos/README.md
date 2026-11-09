@@ -43,6 +43,40 @@ Hide unsubscribes without cancelling mutations. Presentation, context and query 
 
 Tests: `macos/Tests/TransportFixture.swift` and `macos/Tests/NativeChecks.swift` cover idle/interleaved events, subscribe ordering, burst/in-flight coalescing, stable rows/groups/state, hidden/context/close isolation, worktree/Create preservation and transport failures. Run `make test-macos`.
 
+## Private Rex focus adapter
+
+`RexFocusTracker.swift` reads `Workspace.lastFocusedSession` from
+`~/Library/Preferences/com.superlogical.rex.plist`. The value is plist Data
+with JSON `{sessionID: ...}`. `FocusFileWatcher.swift` watches the file and
+parent directory, including atomic replacement and deletion/recreation.
+NSWorkspace activation notifications supply frontmost-app changes. No polling
+or UserDefaults loop is used.
+
+Only a frontmost `com.superlogical.rex` app can supply an observation. The
+adapter sends its PID and full session ID through the current model's existing
+backend, even while the panel is hidden or context changes:
+
+```text
+sessions.visit {session_id: string, client_pid: string,
+                observed_at: fractional ISO8601 string, initial: boolean} -> {}
+```
+
+Go owns asynchronous PID validation,
+visit storage, stale-timestamp rejection and presentation ranking. Swift does
+not change row order on focus delivery. Duplicate focus pairs are suppressed;
+missing/corrupt metadata does not clear history or suppress same-ID recovery.
+Pending observations keep their original timestamps on backend/model recovery.
+A bounded queue preserves distinct focus transitions while delivery is busy.
+The watcher runs for the app lifetime and stops at termination.
+
+`Tests/RexFocusChecks.swift` uses temporary files under `aux/`, an injected
+frontmost provider and a private notification center. It covers decoding,
+atomic replacement, deletion/recreation, corrupt recovery, gating, stale and
+duplicate samples, failed-delivery retry, payloads, hidden/context-changing
+models, rapid distinct visits, timestamp precision and close safety. It never
+writes user preferences. Live integration requires a frontmost Rex app and a
+matching local app peer; validate it with isolated history storage.
+
 ## Keys
 
 | Key | Action |
@@ -90,7 +124,10 @@ swiftc -swift-version 6 -warnings-as-errors -parse-as-library \
   macos/Sources/Raptor/Backend.swift \
   macos/Sources/Raptor/DemoBackend.swift \
   macos/Sources/Raptor/PickerModel.swift \
+  macos/Sources/Raptor/FocusFileWatcher.swift \
+  macos/Sources/Raptor/RexFocusTracker.swift \
   macos/Sources/Raptor/RexTheme.swift \
+  macos/Tests/RexFocusChecks.swift \
   macos/Sources/Raptor/PathDisplay.swift \
   macos/Sources/Raptor/PickerStyle.swift \
   macos/Tests/NativeChecks.swift \

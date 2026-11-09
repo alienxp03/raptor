@@ -97,7 +97,7 @@ rex.bind("ctrl+n", "raptor_worktree_new")
 
 These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_worktree_list`, `raptor_worktree_new`, `raptor_session_last`, and `raptor_pane_last` to the Rex command palette. Reload the Rex config after you change it.
 
-The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it. The installed resident host keeps the Go backend warm across navigation; reopening supplies fresh Rex context. If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`. Set `ui = "gui"` to force the server’s Mac app, including from CLI or iOS; a missing app or failed launch reports an error instead of falling back.
+The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it. The installed resident host keeps the Go backend warm across navigation; reopening supplies fresh Rex context. An event-driven Mac focus observer records recent session use, including Rex sidebar switches. See [session ordering](docs/sessions.md#recent-use-order). If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`. Set `ui = "gui"` to force the server’s Mac app, including from CLI or iOS; a missing app or failed launch reports an error instead of falling back.
 
 ### Instant Pi worktree
 
@@ -173,7 +173,7 @@ Both actions run directly in Lua, without starting Raptor or the Rex CLI. Pane h
 
 ## Directory picker
 
-Use the `raptor` Rex action for the platform-appropriate UI. `raptor dirs` always opens the terminal picker. Both show live sessions and frequent directories. The current session comes first; other sessions follow Rex's order. Directory order remains based on frecency and pins.
+Use the `raptor` Rex action for the platform-appropriate UI. `raptor dirs` always opens the terminal picker. Both show live sessions and frequent directories. The current session comes first, then other sessions in recent-use order. Directory order remains based on frecency and pins.
 
 | Key | Action |
 | --- | --- |

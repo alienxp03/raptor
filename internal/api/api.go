@@ -51,11 +51,16 @@ type Handler struct {
 	presentation       uint64
 	notify             func() error
 	loadSnapshot       snapshotLoader // optional backend override; set before serving
-
+	ranks              rex.SessionRecency
+	loadRecency        func() rex.SessionRecency
+	focus              *focusWorker
+	validateFocus      func(context.Context, int) bool
+	resolveFocus       func(context.Context, string) (string, bool)
+	recordFocus        func(string, string, time.Time, bool) error
 }
 
 func New(ctx rex.Ctx, cfg config.Config) *Handler {
-	return &Handler{ctx: ctx, cfg: cfg, snapshotChanged: make(chan struct{})}
+	return &Handler{ctx: ctx, cfg: cfg, snapshotChanged: make(chan struct{}), ranks: rex.LoadSessionRecency()}
 }
 
 const activitySnapshotTTL = 2 * time.Second
@@ -104,6 +109,8 @@ func (h *Handler) Serve(input io.Reader, output io.Writer) error {
 func (h *Handler) ServeContext(ctx context.Context, input io.Reader, output io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	stopFocus := h.startFocusWorker(ctx)
+	defer stopFocus()
 	type inputLine struct {
 		data      []byte
 		oversized bool
@@ -197,6 +204,7 @@ func (h *Handler) ServeContext(ctx context.Context, input io.Reader, output io.W
 				} else {
 					stop()
 					if p.Enabled {
+						h.captureRecency(true)
 						h.cacheMu.Lock()
 						h.notify = func() error {
 							return write(struct {
@@ -493,6 +501,8 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 	switch method {
 	case "theme":
 		return map[string]any{"theme": picker.ThemeJSON()}, nil
+	case "sessions.visit":
+		return h.observeFocus(params)
 	case "context":
 		// The resident backend is shared across opens; every open sends its
 		// origin context here instead of spawning a new process.
@@ -513,6 +523,7 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 			h.generation++
 		}
 		h.cacheMu.Unlock()
+		h.captureRecency(true)
 		return struct{}{}, nil
 	case "pins.toggle":
 		var p struct {
@@ -583,9 +594,13 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 			h.revalidateLauncher()
 		}
 		items := append([]catalog.LauncherItem{}, cached.Items...)
+		h.cacheMu.Lock()
+		origin, ranks := h.ctx.Session, h.ranks
+		h.cacheMu.Unlock()
 		for i := range items {
-			items[i].Active = items[i].Local && items[i].SessionID == h.ctx.Session
+			items[i].Active = items[i].Local && items[i].SessionID == origin
 		}
+		catalog.OrderLauncherSessionsByRecency(items, ranks)
 		// Full IDs were compared above. An empty origin prevents catalog's
 		// reference resolver from making native calls for each candidate.
 		items = catalog.PinLauncherOrigin(items, "")

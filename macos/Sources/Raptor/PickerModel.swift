@@ -297,6 +297,20 @@ final class PickerModel: ObservableObject {
         self.loading = true
     }
 
+    /// Focus belongs to the native app, not the panel's current Rex context.
+    /// No list/cache mutation: the backend captures MRU on presentation.
+    func observeRexFocus(_ observation: RexFocusObservation) async -> Bool {
+        guard !backendIsClosed, !options.demo, !Task.isCancelled else { return false }
+        do {
+            _ = try await backend.request("sessions.visit", params: observation.params)
+            return !backendIsClosed
+        } catch {
+            // A closed/crashed backend is recovered on the next open. Never
+            // surface private preference failures in the picker.
+            return false
+        }
+    }
+
     var selected: PickerItem? { items.first { $0.id == selectedID } }
     /// Resident recovery: did the shared backend connection die?
     var backendIsClosed: Bool { closed || ((backend as? ProcessBackend)?.isClosed ?? false) }

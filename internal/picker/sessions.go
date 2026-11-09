@@ -3,6 +3,7 @@ package picker
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -191,7 +192,7 @@ func (m *dirModel) filterLauncher() {
 					if row := m.launcher[match.index]; row.session != nil && row.session.Active {
 						pinnedMatch := m.launcherView[position+1]
 						copy(m.launcherView[1:position+2], m.launcherView[1:position+1])
-						m.launcherView[1] = pinnedMatch
+						m.launcherView[0] = pinnedMatch
 						break
 					}
 				}
@@ -248,6 +249,23 @@ func (m *dirModel) composeLauncher() []launcherRow {
 				origin = len(rows)
 			}
 			rows = append(rows, launcherRow{session: &group.Entries[ei], host: display, identity: group.Label, local: group.Local})
+		}
+	}
+	if len(m.sessionRecency) != 0 {
+		rank := func(row launcherRow) int {
+			host := row.identity
+			if row.local {
+				host = ""
+			}
+			return m.sessionRecency.Rank(host, row.session.SessionID)
+		}
+		sort.SliceStable(rows, func(i, j int) bool { return rank(rows[i]) < rank(rows[j]) })
+		origin = -1
+		for i, row := range rows {
+			if row.session.Active {
+				origin = i
+				break
+			}
 		}
 	}
 	if origin > 0 {

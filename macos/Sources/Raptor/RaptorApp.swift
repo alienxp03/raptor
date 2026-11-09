@@ -24,6 +24,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // and never activates the app.
     private var resident = false
     private var panelHost: PanelHost?
+    private var focusTracker: RexFocusTracker?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         var arguments = Array(CommandLine.arguments.dropFirst())
@@ -32,6 +33,12 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             resident = true
         }
         installKeyboardMonitor()
+        let tracker = RexFocusTracker { [weak self] observation in
+            guard let model = self?.model else { return false }
+            return await model.observeRexFocus(observation)
+        }
+        focusTracker = tracker
+        tracker.start()
         ready = true
         if resident {
             startResident()
@@ -356,6 +363,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func bindDismissal(_ next: PickerModel) {
         next.keepsBackendWarmOnNavigation = resident
+        // Resolve self.model at delivery, never retain an old context/model.
+        focusTracker?.retryDelivery()
         let dismiss: () -> Void = { [weak self, weak next] in
             guard let self, let next, self.model === next else { return }
             self.dismissPicker()
@@ -400,12 +409,14 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        focusTracker?.stop()
         model?.onClose = nil
         model?.close()
         return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        focusTracker?.stop()
         reopenTask?.cancel()
         stopThemeRefresh()
         sizeSubscription?.cancel()

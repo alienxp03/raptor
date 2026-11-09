@@ -16,10 +16,20 @@ end)
 
 Two row types, one verb:
 
-- **Live sessions** on every connected host. The session you came from is pinned to the top. Remote rows carry an `@host` badge; activity (working/blocked) shows right-aligned. Enter switches to the session — through the host's own copy of the app, so it works across hosts and Tailscale.
+- **Live sessions** on every connected host. The session you came from is pinned to the top. Other sessions use most-recently-used order; sessions without history keep Rex's source order. Remote rows carry an `@host` badge; activity (working/blocked) shows right-aligned. Enter switches to the session — through the host's own copy of the app, so it works across hosts and Tailscale.
 - **Frecency directories** (zoxide) from every host that do not already have a same-name live session. Enter creates the session — named after the directory — and switches to it. An existing session with the same label is reused, never duplicated. Remote directories read the host's zoxide over SSH.
 
 Pinned local directories float to the top of the directory block (Ctrl+G toggles). The origin pane context is kept when refreshing.
+
+## Recent-use order
+
+Raptor records acknowledged session switches and the session from which you open the picker. On macOS, a small adapter also watches Rex's private `Workspace.lastFocusedSession` preference while the app is frontmost. This includes switches made in Rex's sidebar, not just Raptor. The installed Rex API has no last-used timestamp or selected-session event.
+
+Go validates the app PID and session/host membership before saving an observation. History is shared by the Mac and terminal interfaces on the same filesystem. Without the Mac observer, confirmed Raptor navigation still records visits.
+
+The rank snapshot stays fixed while the picker is open. Agent reports, title changes, and background work do not change recency. Search keeps fuzzy-match quality first, with recent-use order for ties; a matching current session stays first.
+
+History builds from observed visits, not inferred past activity. Up to 256 host/session timestamps persist in `$XDG_CACHE_HOME/raptor/session-recency.json`, or `~/Library/Caches/raptor/session-recency.json` by default. The file is private and atomically updated. Missing focus preferences do not clear history.
 
 ## Open-target override
 
