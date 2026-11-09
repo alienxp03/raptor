@@ -19,8 +19,7 @@ The screenshots show the native macOS UI over an illustrative Rex workspace. All
   </tr>
 </table>
 
-- **Directories:** Filter saved folders and open in a tab, session, or current shell.
-- **Sessions:** Switch, create, or close sessions on every connected host, grouped This Mac first. New sessions reuse the host's zoxide list. See [Sessions](docs/sessions.md).
+- **Sessions:** One sesh-style launcher — live sessions and frecency directories from every host in a single list. Enter switches or creates; Ctrl+O overrides the open target; wide terminals preview the selected session live. See [Sessions](docs/sessions.md).
 - **Agents:** Find Pi, Codex, and Claude agents grouped by Blocked, Working, and Idle, then focus their pane. Working indicators animate across Repos and Agents. See [Agents](docs/agents.md).
 - **Worktrees:** Browse local branches and paths; safe removal keeps the branch.
 - **Pane splits:** Press Ctrl+P, then H/J/K/L or arrows. Escape cancels.

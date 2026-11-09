@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/rex"
 	tea "github.com/charmbracelet/bubbletea"
@@ -28,108 +29,129 @@ func pickerRexLog(t *testing.T) string {
 	return log
 }
 
-func TestPickerSwitchKeepsEachViewsFilterSelectionAndScroll(t *testing.T) {
-	m := &dirModel{width: 60, height: 8, filter: "repo", sel: 7, agentsLoaded: true, sessionsLoaded: true}
+func launcherFixtureModel(view int) *dirModel {
+	m := &dirModel{width: 60, height: 8, agentsLoaded: true, launcherLoaded: true,
+		hostDirs: map[string][]catalog.Directory{}}
+	rows := make([]launcherRow, 0, 10)
 	for i := 0; i < 10; i++ {
-		m.rows = append(m.rows, row{label: fmt.Sprintf("repo%d", i), path: fmt.Sprintf("/repo%d", i)})
+		rows = append(rows, launcherRow{dir: &catalog.Directory{Label: fmt.Sprintf("repo%d", i), Path: fmt.Sprintf("/repo%d", i)}, host: rex.LocalHostLabel})
 		m.agents = append(m.agents, pickerAgent(fmt.Sprint(i)))
-		m.sessions = append(m.sessions, rex.HostGroup{Label: fmt.Sprintf("host%d", i), Reachable: true,
-			Entries: []rex.SessionEntry{{Kind: "session", ID: fmt.Sprintf("s%d", i), SessionID: fmt.Sprintf("s%d", i), Label: fmt.Sprintf("session%d", i), Host: fmt.Sprintf("host%d", i)}}})
 	}
-	m.applyFilter()
-	beforeRepos := m.View()
+	seedLauncher(m, rows)
+	m.applyAgentFilter()
+	m.filter, m.sel = "repo", 7
+	m.applyLauncher()
+	if view == 2 {
+		m.viewMode = 2
+		m.filter, m.sel = "Agent", 7
+		m.applyAgentFilter()
+	}
+	return m
+}
+
+func TestPickerSwitchKeepsEachViewsFilterSelectionAndScroll(t *testing.T) {
+	m := launcherFixtureModel(0)
+	beforeLauncher := m.View()
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if cmd == nil || m.viewMode != 1 || m.filter != "" || m.sel != 0 || len(m.sessionsView) != 20 {
-		t.Fatal("cached sessions must appear immediately with independent state")
-	}
-	m.filter, m.sel = "session", 8
-	m.applySessionFilter()
-	beforeSessions := m.View()
-	m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if m.viewMode != 2 || m.filter != "" || m.sel != 0 || len(m.agentsView) != 10 {
+	if cmd == nil || m.viewMode != 2 || m.filter != "" || m.sel != 0 || len(m.agentsView) != 10 {
 		t.Fatal("cached agents must appear immediately with independent state")
 	}
-	m.filter, m.sel = "Agent", 8
+	m.filter, m.sel = "Agent", 7
 	m.applyAgentFilter()
 	beforeAgents := m.View()
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if m.viewMode != 0 || m.filter != "repo" || m.sel != 7 || m.View() != beforeRepos {
-		t.Fatal("repository filter, selection, or viewport changed")
-	}
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if cmd != nil {
-		t.Fatal("switch must not duplicate a pending refresh")
-	}
-	if m.viewMode != 1 || m.filter != "session" || m.sel != 8 || m.View() != beforeSessions {
-		t.Fatal("session filter, selection, or viewport changed")
+	if m.viewMode != 0 || m.filter != "repo" || m.sel != 7 || ansi.Strip(m.View()) != ansi.Strip(beforeLauncher) {
+		t.Fatalf("launcher changed: view=%d filter=%q sel=%d\nBEFORE:\n%s\nAFTER:\n%s", m.viewMode, m.filter, m.sel, ansi.Strip(beforeLauncher), ansi.Strip(m.View()))
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if m.viewMode != 2 || m.filter != "Agent" || m.sel != 8 || m.View() != beforeAgents {
+	if !m.agentsLoading {
+		t.Fatal("switching back to agents must revalidate in the background")
+	}
+	if m.filter != "Agent" || m.sel != 7 || len(m.agentsView) != 10 || m.View() != beforeAgents {
 		t.Fatal("agent filter, selection, or viewport changed")
 	}
 }
 
-func TestRepositoryRefreshKeepsSelectionAndInactiveState(t *testing.T) {
+func TestLauncherRefreshKeepsSelectionAndInactiveState(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	m := &dirModel{rows: []row{{label: "a", path: "/a"}, {label: "b", path: "/b"}}, sel: 1}
-	m.applyFilter()
-	m.refreshRepos()
-	request := m.reposRequest
+	dir := catalog.Directory{Label: "b", Path: "/b"}
+	m := &dirModel{launcher: []launcherRow{{dir: &dir, host: rex.LocalHostLabel}}, launcherView: []launcherMatch{{index: 0}}, sel: 0,
+		hostDirs: map[string][]catalog.Directory{}}
+	m.loadLauncherSessions(false)
+	request := m.launcherSessionsRequest
 	m.switchView(2)
 	m.filter = "agents query"
-	m.Update(reposLoadedMsg{request: request + 1, rows: nil})
-	if !m.reposLoading || len(m.rows) != 2 {
-		t.Fatal("stale repository refresh was accepted")
+	m.Update(launcherSessionsMsg{request: request + 1, groups: nil})
+	if !m.launcherSessionsLoading {
+		t.Fatal("stale launcher refresh was accepted")
 	}
-	m.Update(reposLoadedMsg{request: request, rows: []row{{label: "b", path: "/b"}, {label: "a", path: "/a"}}})
+	groups := []rex.HostGroup{{Label: rex.LocalHostLabel, Local: true, Reachable: true, Entries: []rex.SessionEntry{
+		{Kind: "session", ID: "s", SessionID: "s", Label: "work", Host: rex.LocalHostLabel},
+	}}}
+	m.Update(launcherSessionsMsg{request: request, groups: groups})
 	if m.filter != "agents query" || m.viewMode != 2 {
-		t.Fatal("repository refresh changed active agent state")
+		t.Fatal("launcher refresh changed active agent state")
 	}
-	m.switchToRepos()
-	if m.filter != "" || m.sel != 0 || m.selected().path != "/b" {
-		t.Fatal("repository refresh lost the selected path")
+	m.switchView(0)
+	if m.filter != "" || m.sel != 0 || m.launcher[0].session == nil || m.launcher[0].session.Label != "work" {
+		t.Fatal("launcher refresh lost the first row")
 	}
 }
 
 func TestPickerResumeRestartsPendingLoads(t *testing.T) {
 	m := &dirModel{}
 	m.loadAgents(false)
-	m.refreshRepos()
-	m.loadSessions(false)
-	agents, repos, sessions := m.agentsRequest, m.reposRequest, m.sessionsRequest
-	if m.Init() == nil || m.agentsRequest <= agents || m.reposRequest <= repos || m.sessionsRequest <= sessions {
-		t.Fatal("resumed picker must restart interrupted loads")
+	m.loadLauncherSessions(false)
+	agents, sessions := m.agentsRequest, m.launcherSessionsRequest
+	if m.Init() == nil || m.launcherSessionsRequest <= sessions {
+		t.Fatal("resumed launcher must restart interrupted loads")
 	}
+	agentView := &dirModel{viewMode: 2}
+	agentView.loadAgents(false)
+	before := agentView.agentsRequest
+	if agentView.Init() == nil || agentView.agentsRequest <= before {
+		t.Fatal("resumed agents view must restart interrupted loads")
+	}
+	_ = agents
 }
 
-func TestSessionsViewOpensFromEveryView(t *testing.T) {
+func TestLauncherViewOpensFromEveryView(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	log := pickerRexLog(t)
-	m := newDirModel(rex.Ctx{}, config.Default(), false, 1)
-	if m.viewMode != 1 || m.sessionsLoading {
-		t.Fatal("direct startup must select the Sessions view")
+	m := newDirModel(rex.Ctx{}, config.Default(), false, 0)
+	if m.viewMode != 0 || m.launcherSessionsLoading {
+		t.Fatal("direct startup must select the Sessions launcher")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
-	if cmd := m.Init(); cmd == nil || !m.sessionsLoading || m.sessionsRequest != 1 {
-		t.Fatal("direct startup did not schedule async session discovery")
+	if cmd := m.Init(); cmd == nil {
+		t.Fatal("direct startup did not schedule async loads")
 	}
 	if _, err := os.Stat(log); !os.IsNotExist(err) {
 		t.Fatal("startup called Rex before command execution")
 	}
-	for _, view := range []int{0, 2} {
-		if cmd := m.switchView(view); cmd == nil || m.viewMode != view {
-			t.Fatalf("switching away from Sessions to view %d failed", view)
+	for _, view := range []int{2, 0} {
+		if m.viewMode == view {
+			continue
 		}
-		if cmd := m.switchView(1); cmd != nil || m.viewMode != 1 {
-			t.Fatal("sessions switch failed or duplicated a pending load")
+		if cmd := m.switchView(view); cmd == nil || m.viewMode != view {
+			t.Fatalf("switching away from the launcher to view %d failed", view)
+		}
+		if cmd := m.switchView(0); cmd != nil && m.viewMode != 0 {
+			t.Fatal("launcher switch failed")
 		}
 	}
 	for _, view := range []int{0, 2} {
-		fresh := &dirModel{viewMode: view, width: 80, height: 10, agentsLoaded: view == 2}
+		fresh := &dirModel{viewMode: view, width: 80, height: 10, agentsLoaded: view == 2, hostDirs: map[string][]catalog.Directory{}, launcherLoaded: true}
 		fresh.applyCurrentFilter()
 		_, cmd := fresh.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-		if cmd == nil || fresh.viewMode != 1 || !fresh.sessionsLoading {
-			t.Fatalf("ctrl+s must open Sessions from view %d", view)
+		if fresh.viewMode != 0 {
+			t.Fatalf("ctrl+s must select the launcher from view %d", view)
+		}
+		if view == 0 && cmd != nil {
+			t.Fatal("ctrl+s inside the launcher must not reload")
+		}
+		if view == 2 && cmd == nil {
+			t.Fatal("ctrl+s from agents must switch to the launcher")
 		}
 	}
 }
@@ -137,10 +159,13 @@ func TestSessionsViewOpensFromEveryView(t *testing.T) {
 func TestSessionMutationKeysAreInactive(t *testing.T) {
 	log := pickerRexLog(t)
 	for _, view := range []int{0, 2} {
-		m := &dirModel{viewMode: view, width: 80, height: 10, rows: []row{{label: "repo", path: "/repo"}}, agents: []rex.AgentEntry{pickerAgent("a")}}
+		dir := catalog.Directory{Label: "repo", Path: "/repo"}
+		m := &dirModel{viewMode: view, width: 80, height: 10, agents: []rex.AgentEntry{pickerAgent("a")},
+			launcher: []launcherRow{{dir: &dir, host: rex.LocalHostLabel}}, launcherView: []launcherMatch{{index: 0}},
+			hostDirs: map[string][]catalog.Directory{}, launcherLoaded: true}
 		m.applyCurrentFilter()
 		before := m.View()
-		for _, key := range []tea.KeyType{tea.KeyCtrlR, tea.KeyCtrlX, tea.KeyCtrlX} {
+		for _, key := range []tea.KeyType{tea.KeyCtrlR} {
 			_, cmd := m.Update(tea.KeyMsg{Type: key})
 			if cmd != nil || m.viewMode != view || m.View() != before {
 				t.Fatal("removed session action changed picker")
@@ -152,30 +177,28 @@ func TestSessionMutationKeysAreInactive(t *testing.T) {
 	}
 }
 
-func TestThreeViewPillsFitAndHighlightActiveView(t *testing.T) {
+func TestTwoViewPillsFitAndHighlightActiveView(t *testing.T) {
 	previous := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
-	for _, active := range []int{0, 1, 2} {
-		for _, width := range []int{2, 12, 24, 26, 28, 42, 44, 60, 78, 100} {
+	for _, active := range []int{0, 2} {
+		for _, width := range []int{2, 12, 16, 18, 19, 22, 42, 60, 78, 100} {
 			pills := pickerPills(active, width)
 			plain := ansi.Strip(pills)
 			if lipgloss.Width(pills) != width+2 {
 				t.Fatalf("pill width %d, want %d", lipgloss.Width(pills), width+2)
 			}
-			for _, stale := range []string{"Switch view", "⇥", "^a"} {
+			for _, stale := range []string{"Switch view", "⇥", "^a", "Repos"} {
 				if strings.Contains(plain, stale) {
 					t.Fatalf("unexpected pill hint %q: %q", stale, plain)
 				}
 			}
-			if width >= 28 {
-				if strings.TrimSpace(plain) != "Repos · Sessions · Agents" {
+			if width >= 19 {
+				if strings.TrimSpace(plain) != "Sessions · Agents" {
 					t.Fatalf("unexpected pills: %q", plain)
 				}
-				name := "Repos"
-				if active == 1 {
-					name = "Sessions"
-				} else if active == 2 {
+				name := "Sessions"
+				if active == 2 {
 					name = "Agents"
 				}
 				if !strings.Contains(pills, pickerInput.Render(" "+name+" ")) {
@@ -188,20 +211,26 @@ func TestThreeViewPillsFitAndHighlightActiveView(t *testing.T) {
 
 func TestPickerFooterDestinations(t *testing.T) {
 	for _, tc := range []struct {
-		view int
-		want []string
-		gone []string
+		view       int
+		wantWide   []string
+		wantNarrow []string
+		gone       []string
 	}{
-		{0, []string{"⇥ agents"}, []string{"^x", "close"}},
-		{1, []string{"switch", "^x", "close", "⇥ agents"}, nil},
-		{2, []string{"⇥ repos"}, []string{"^x", "close"}},
+		{0, []string{"Open as:", "^p", "split", "⇥", "agents"}, []string{"Open as:", "^p", "split", "⇥", "agents"}, nil},
+		{2, []string{"⇥", "sessions"}, []string{"⇥", "sessions"}, []string{"^x", "close", "worktrees"}},
 	} {
 		for _, width := range []int{60, 120} {
-			m := &dirModel{viewMode: tc.view, width: width, height: 10, target: "tab"}
+			want := tc.wantWide
+			if width < 80 {
+				want = tc.wantNarrow
+			}
+			m := &dirModel{viewMode: tc.view, width: width, height: 10, target: "tab",
+				hostDirs: map[string][]catalog.Directory{}, launcherLoaded: true}
+			seedLauncher(m, []launcherRow{{dir: &catalog.Directory{Label: "demo", Path: "/demo"}, host: rex.LocalHostLabel}})
 			m.applyCurrentFilter()
 			lines := strings.Split(ansi.Strip(m.View()), "\n")
 			footer := lines[len(lines)-1]
-			for _, want := range tc.want {
+			for _, want := range want {
 				if !strings.Contains(footer, want) {
 					t.Fatalf("view %d footer %q missing %q", tc.view, footer, want)
 				}

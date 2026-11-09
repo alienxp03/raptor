@@ -118,6 +118,71 @@ func appClientOn(host, label string) string {
 	return ""
 }
 
+var (
+	localHostnameOnce sync.Once
+	localHostnameName string
+)
+
+// LocalHostname resolves the display name of this machine: Rex's local node
+// name when it can answer, else the macOS LocalHostName, else the generic
+// label. Cached for the process lifetime — badges render it on every row.
+func LocalHostname() string {
+	localHostnameOnce.Do(func() {
+		if out, err := RunOnBounded("", 2, "api", "call", "server.status"); err == nil {
+			var data struct {
+				Hostname  string `json:"hostname"`
+				Tailscale struct {
+					DNSName string `json:"dns_name"`
+				} `json:"tailscale"`
+			}
+			if json.Unmarshal([]byte(out), &data) == nil {
+				if name := strings.TrimSpace(data.Hostname); name != "" {
+					localHostnameName = name
+				} else if label := strings.SplitN(data.Tailscale.DNSName, ".", 2)[0]; label != "" {
+					localHostnameName = label
+				}
+			}
+		}
+		if localHostnameName == "" {
+			if out, err := RunOnBounded("", 2, "config", "get", "hostname"); err == nil && strings.TrimSpace(out) != "" {
+				localHostnameName = strings.TrimSpace(out)
+			}
+		}
+		if localHostnameName == "" {
+			localHostnameName = LocalHostLabel
+		}
+	})
+	return localHostnameName
+}
+
+// IsLocalHost reports whether a host label refers to the local server.
+// Rows carry the display hostname; actions must treat it as local.
+func IsLocalHost(host string) bool {
+	if host == "" || host == LocalHostLabel {
+		return true
+	}
+	return strings.EqualFold(host, LocalHostname())
+}
+
+// SameSession reports whether a session id matches an origin reference: rex
+// accepts full ids ("session:01a1...4dad8e") and the short suffix users see
+// ("4dad8e"), so origin flags compare with a suffix match.
+func SameSession(full, origin string) bool {
+	if origin == "" || full == "" {
+		return false
+	}
+	return full == origin || strings.HasSuffix(full, origin)
+}
+
+// NormalizeHost collapses a local display name to the empty host so actions
+// take the local code path.
+func NormalizeHost(host string) string {
+	if IsLocalHost(host) {
+		return ""
+	}
+	return host
+}
+
 // hostWorkers bounds concurrent rex processes across host listing.
 const hostWorkers = 4
 

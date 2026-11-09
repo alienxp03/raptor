@@ -15,7 +15,7 @@ func TestAgentsDirectStartup(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	log := pickerRexLog(t)
 	m := newDirModel(rex.Ctx{}, config.Config{Enter: "tab"}, false, 2)
-	if m.viewMode != 2 || m.launcher || m.target != "tab" {
+	if m.viewMode != 2 || len(m.launcher) > 0 || m.target != "tab" {
 		t.Fatal("direct Agents startup lost picker options")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 70, Height: 10})
@@ -99,7 +99,7 @@ func TestWorktreeFlowResumesExistingAgentsView(t *testing.T) {
 		t.Fatal("worktree flow did not resume the existing Agents view")
 	}
 	if m.viewStates[0].filter != "repo" || !m.agentsLoading || m.selectedAgent() == nil {
-		t.Fatal("resuming lost cached Agents or the Repos search")
+		t.Fatal("resuming lost cached Agents or the launcher search")
 	}
 	request := m.agentsRequest
 	if m.Init() == nil || m.agentsRequest <= request {

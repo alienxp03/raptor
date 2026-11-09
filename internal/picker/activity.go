@@ -35,8 +35,26 @@ func applyRowActivity(rows []row, agents []rex.AgentEntry) {
 	}
 }
 
+// projectActivity folds agent activity onto launcher directory rows. Session
+// rows already carry their state from the host listing.
 func (m *dirModel) projectActivity(agents []rex.AgentEntry) {
-	applyRowActivity(m.rows, agents)
+	paths := make([]string, len(m.launcher))
+	for i, r := range m.launcher {
+		if r.dir != nil {
+			paths[i] = r.dir.Path
+		}
+	}
+	items := make([]catalog.Directory, len(paths))
+	for i, path := range paths {
+		items[i] = catalog.Directory{Path: path}
+	}
+	catalog.ApplyDirectoryActivity(items, agents)
+	for i, item := range items {
+		if m.launcher[i].dir != nil {
+			m.launcher[i].dir.State = item.State
+			m.launcher[i].dir.Working = item.Working
+		}
+	}
 }
 
 // REX_REDUCED_MOTION disables animation for any nonempty value other than
@@ -73,8 +91,9 @@ func activityIndicator(state string, working bool, frame int) string {
 }
 
 func (m *dirModel) hasWorkingData() bool {
-	for _, r := range m.rows {
-		if r.working || r.state == "working" {
+	for _, r := range m.launcher {
+		if r.sessionWorking() || r.sessionState() == "working" ||
+			(r.dir != nil && (r.dir.Working || r.dir.State == "working")) {
 			return true
 		}
 	}

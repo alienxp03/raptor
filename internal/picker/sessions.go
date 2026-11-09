@@ -4,147 +4,346 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/sahilm/fuzzy"
 
 	"github.com/alienxp03/raptor/internal/catalog"
+	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/dispatch"
+	"github.com/alienxp03/raptor/internal/paths"
 	"github.com/alienxp03/raptor/internal/rex"
+	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
 
-// sessionsRow is one selectable row of the Sessions view: a session inside a
-// host group, or that group's "+ New session" action (entry -1).
-type sessionsRow struct {
-	group int
-	entry int
+// launcherRow is one selectable row of the Sessions launcher: a live session
+// on any host, or a frecency directory that would start one. One verb covers
+// both — Enter switches to the session or creates it — mirroring sesh's
+// select-or-create model.
+type launcherRow struct {
+	session  *rex.SessionEntry  // set for session rows
+	dir      *catalog.Directory // set for directory rows
+	host     string             // display host label (real hostname, all rows)
+	identity string             // action host: "" for local, remote label otherwise
+	local    bool               // true when the row belongs to this machine
+	pinned   bool               // local directory pins only
 }
 
-type sessionsLoadedMsg struct {
+// launcherMatch is one filtered row plus the runes the query matched, so the
+// view can highlight them inside the name the way sesh does.
+type launcherMatch struct {
+	index   int
+	matches []int
+}
+
+func (r launcherRow) sessionState() string {
+	if r.session != nil {
+		return r.session.State
+	}
+	return ""
+}
+
+func (r launcherRow) sessionWorking() bool {
+	if r.session != nil {
+		return r.session.Working
+	}
+	return false
+}
+
+type launcherSessionsMsg struct {
 	request uint64
 	groups  []rex.HostGroup
-	err     error
 }
 
-// sessionCreate is the in-model "+ New session" flow: pick a directory, then
-// runDirs creates and selects the session after the program exits. Keeping
-// the flow inside dirModel avoids stacking a second tea program.
-type sessionCreate struct {
-	Host    string
-	Dir     string // empty until a directory row is confirmed
-	dirs    []catalog.Directory
-	view    []int
-	filter  string
-	sel     int
-	loading bool
-	request uint64
-}
-
-type createDirsLoadedMsg struct {
+type launcherDirsMsg struct {
 	request uint64
 	host    string
 	items   []catalog.Directory
 }
 
-// loadSessions fetches every host's groups in the background. Commands capture
-// values only; all model changes happen in Update. Cached groups stay visible
-// while a refresh is pending.
-func (m *dirModel) loadSessions(force bool) tea.Cmd {
-	if m.sessionsLoading && !force {
+// captureMsg carries one live preview render. Stale requests are dropped by
+// their counter, so slow remote captures never overwrite a newer selection.
+type captureMsg struct {
+	request uint64
+	text    string
+}
+
+// previewTickMsg fires after the selection has held for the debounce window;
+// only the newest tick may start a fetch.
+type previewTickMsg struct {
+	request uint64
+}
+
+// loadLauncherSessions fetches every host's live sessions in the background.
+// Commands capture values only; all model changes happen in Update.
+func (m *dirModel) loadLauncherSessions(force bool) tea.Cmd {
+	if m.launcherSessionsLoading && !force {
 		return nil
 	}
-	m.sessionsRequest++
-	m.sessionsLoading = true
-	request, session := m.sessionsRequest, m.ctx.Session
+	m.launcherSessionsRequest++
+	m.launcherSessionsLoading = true
+	request, session := m.launcherSessionsRequest, m.ctx.Session
 	return func() tea.Msg {
-		return sessionsLoadedMsg{request: request, groups: rex.SessionGroups(session, nil)}
+		return launcherSessionsMsg{request: request, groups: rex.SessionGroups(session, nil)}
 	}
 }
 
-func (m *dirModel) applySessionFilter() {
-	m.sessionsView = nil
-	for gi, group := range m.sessions {
-		if !group.Reachable {
-			continue // Unreachable hosts render a header and error only.
+// loadLauncherDirs fetches one host's frecency directories. Local hosts answer
+// in milliseconds; remote hosts go over SSH and arrive later — the view paints
+// sessions first and appends directories per host as they land.
+func (m *dirModel) loadLauncherDirs(host string, force bool) tea.Cmd {
+	if !force {
+		if _, pending := m.launcherDirsPending[host]; pending {
+			return nil
 		}
-		matches := catalog.FilterSessions(group.Entries, m.filter)
-		if len(matches) == 0 && m.filter != "" {
-			continue // Filtered groups disappear, including their new row.
-		}
-		for _, ei := range matches {
-			m.sessionsView = append(m.sessionsView, sessionsRow{group: gi, entry: ei})
-		}
-		m.sessionsView = append(m.sessionsView, sessionsRow{group: gi, entry: -1})
 	}
-	if m.sel >= len(m.sessionsView) {
-		m.sel = len(m.sessionsView) - 1
+	if m.launcherDirsPending == nil {
+		m.launcherDirsPending = map[string]uint64{}
+	}
+	m.launcherDirsRequest++
+	request := m.launcherDirsRequest
+	// Track the request per host: replies land out of order and only the
+	// newest reply for each host is accepted.
+	m.launcherDirsPending[host] = request
+	return func() tea.Msg {
+		return launcherDirsMsg{request: request, host: host, items: catalog.DirectoriesOn(host, false)}
+	}
+}
+
+func (m *dirModel) loadAllLauncherDirs(force bool) tea.Cmd {
+	cmds := []tea.Cmd{m.loadLauncherDirs(rex.LocalHostLabel, force)}
+	for _, group := range m.sessions {
+		if group.Reachable && !group.Local {
+			cmds = append(cmds, m.loadLauncherDirs(group.Label, force))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// applyLauncher recomposes the flat row list: live sessions first — the origin
+// session pinned to the top — then each host's directories by frecency with
+// pinned local directories floating first. Directories that already have a
+// live session on the same host are skipped: selecting the session is the same
+// action, and duplicate rows only add noise.
+func (m *dirModel) applyLauncher() {
+	rows := m.composeLauncher()
+	m.launcher = rows
+	texts := launcherTexts(rows)
+	if m.filter == "" {
+		m.launcherView = make([]launcherMatch, len(rows))
+		for i := range rows {
+			m.launcherView[i] = launcherMatch{index: i}
+		}
+	} else {
+		// Unsorted fuzzy matches, ranked sesh's way: the library docks one
+		// point per unmatched character with no floor, which lets a long name
+		// lose to a short one. Capping the penalty keeps length as a
+		// tiebreaker without outweighing where the match landed.
+		matches := fuzzy.FindFromNoSort(m.filter, launcherSource(texts))
+		ranked := make([]fuzzy.Match, len(matches))
+		scored := make([]int, len(matches))
+		for i, match := range matches {
+			penalty := len(match.MatchedIndexes) - len(match.Str)
+			ranked[i] = match
+			scored[i] = match.Score - penalty + max(penalty, -5)
+		}
+		for i := 1; i < len(ranked); i++ {
+			for j := i; j > 0 && scored[j] > scored[j-1]; j-- {
+				ranked[j], ranked[j-1] = ranked[j-1], ranked[j]
+				scored[j], scored[j-1] = scored[j-1], scored[j]
+			}
+		}
+		m.launcherView = make([]launcherMatch, 0, len(ranked))
+		for _, match := range ranked {
+			m.launcherView = append(m.launcherView, launcherMatch{index: match.Index, matches: match.MatchedIndexes})
+		}
+		// The session you're in always leads, whatever the score says.
+		if len(m.launcherView) > 1 {
+			if row := m.launcher[m.launcherView[0].index]; !(row.session != nil && row.session.Active) {
+				for position, match := range m.launcherView[1:] {
+					if row := m.launcher[match.index]; row.session != nil && row.session.Active {
+						pinnedMatch := m.launcherView[position+1]
+						copy(m.launcherView[1:position+2], m.launcherView[1:position+1])
+						m.launcherView[1] = pinnedMatch
+						break
+					}
+				}
+			}
+		}
+	}
+	if m.sel >= len(m.launcherView) {
+		m.sel = len(m.launcherView) - 1
 	}
 	if m.sel < 0 {
 		m.sel = 0
 	}
 }
 
-func (m *dirModel) selectedSession() *sessionsRow {
-	if m.sel < 0 || m.sel >= len(m.sessionsView) {
-		return nil
+// launcherSource adapts row texts to fuzzy.Source.
+type launcherSource []string
+
+func (l launcherSource) String(i int) string { return l[i] }
+func (l launcherSource) Len() int            { return len(l) }
+
+func launcherTexts(rows []launcherRow) []string {
+	texts := make([]string, len(rows))
+	for i, r := range rows {
+		texts[i] = launcherRowText(r)
 	}
-	r := m.sessionsView[m.sel]
-	return &r
+	return texts
 }
 
-func (m *dirModel) selectedSessionEntry() *rex.SessionEntry {
-	r := m.selectedSession()
-	if r == nil || r.entry < 0 {
-		return nil
+func launcherRowText(r launcherRow) string {
+	if r.session != nil {
+		return r.session.Label + " " + r.host
 	}
-	return &m.sessions[r.group].Entries[r.entry]
+	if r.dir != nil {
+		return r.dir.Label + " " + paths.HomeRelative(r.dir.Path) + " " + r.host
+	}
+	return ""
 }
 
-// acceptSessions refreshes the cache without disturbing the active view.
-// Keep the selected session identity when entries change order.
-func (m *dirModel) acceptSessions(msg sessionsLoadedMsg) {
-	if msg.request != m.sessionsRequest || !m.sessionsLoading {
-		return
-	}
-	m.sessionsLoading = false
-	m.sessionsLoaded = true
-	if msg.err != nil {
-		m.err = msg.err.Error()
-		return // A failed refresh keeps the cache.
-	}
-	active := dirViewState{m.filter, m.sel}
-	if m.viewMode != 1 {
-		m.filter, m.sel = m.viewStates[1].filter, m.viewStates[1].sel
-	}
-	type selection struct{ group, id string }
-	var selected selection
-	had := false
-	if r := m.selectedSession(); r != nil && r.entry >= 0 {
-		entry := m.sessions[r.group].Entries[r.entry]
-		selected = selection{m.sessions[r.group].Label, entry.ID}
-		had = true
-	}
-	m.sessions = msg.groups
-	m.applySessionFilter()
-	if had {
-		for position, row := range m.sessionsView {
-			if row.entry < 0 {
-				continue
+func (m *dirModel) composeLauncher() []launcherRow {
+	rows := make([]launcherRow, 0, 16)
+	// Live sessions: the origin session leads, then each host's sessions in
+	// sidebar order (local first, remote hosts in the server's host order).
+	origin := -1
+	for _, group := range m.sessions {
+		if !group.Reachable {
+			continue
+		}
+		display := group.Label
+		if group.Local {
+			display = rex.LocalHostname()
+		}
+		for ei, entry := range group.Entries {
+			if entry.Active {
+				origin = len(rows)
 			}
-			entry := m.sessions[row.group].Entries[row.entry]
-			if m.sessions[row.group].Label == selected.group && entry.ID == selected.id {
-				m.sel = position
-				break
+			rows = append(rows, launcherRow{session: &group.Entries[ei], host: display, identity: group.Label, local: group.Local})
+		}
+	}
+	if origin > 0 {
+		active := rows[origin]
+		copy(rows[1:origin+1], rows[0:origin])
+		rows[0] = active
+	}
+	// Directories per host, skipping names that already have a live session.
+	taken := map[string]bool{}
+	for _, group := range m.sessions {
+		if group.Reachable {
+			for _, entry := range group.Entries {
+				taken[group.Label+"\x00"+entry.Label] = true
 			}
 		}
 	}
-	m.viewStates[1] = dirViewState{m.filter, m.sel}
-	if m.viewMode != 1 {
-		m.filter, m.sel = active.filter, active.sel
+	for _, host := range m.hostOrder {
+		items, loaded := m.hostDirs[host]
+		if !loaded {
+			continue
+		}
+		local := host == rex.LocalHostLabel
+		pinned := make([]catalog.Directory, 0, 2)
+		rest := make([]catalog.Directory, 0, len(items))
+		for _, item := range items {
+			if taken[host+"\x00"+item.Label] {
+				continue
+			}
+			if local && m.pinned[item.Path] {
+				pinned = append(pinned, item)
+			} else {
+				rest = append(rest, item)
+			}
+		}
+		display := host
+		if local {
+			display = rex.LocalHostname()
+		}
+		for _, item := range append(pinned, rest...) {
+			dir := item
+			rows = append(rows, launcherRow{dir: &dir, host: display, identity: host, local: local, pinned: local && m.pinned[item.Path]})
+		}
 	}
+	return rows
 }
 
-func (m *dirModel) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *dirModel) acceptLauncherSessions(msg launcherSessionsMsg) {
+	if msg.request != m.launcherSessionsRequest || !m.launcherSessionsLoading {
+		return
+	}
+	m.launcherSessionsLoading = false
+	m.launcherLoaded = true
+	m.sessions = msg.groups
+	seen := map[string]bool{rex.LocalHostLabel: true}
+	m.hostOrder = []string{rex.LocalHostLabel}
+	for _, group := range msg.groups {
+		if !group.Local {
+			m.hostOrder = append(m.hostOrder, group.Label)
+			seen[group.Label] = true
+		}
+	}
+	// Directories can land before the sessions response; keep their hosts.
+	for host := range m.hostDirs {
+		if !seen[host] {
+			m.hostOrder = append(m.hostOrder, host)
+			seen[host] = true
+		}
+	}
+	m.applyLauncher()
+	m.loadAllLauncherDirs(true)
+}
+
+func (m *dirModel) acceptLauncherDirs(msg launcherDirsMsg) {
+	if m.launcherDirsPending[msg.host] != msg.request {
+		return
+	}
+	delete(m.launcherDirsPending, msg.host)
+	known := false
+	for _, listed := range m.hostOrder {
+		if listed == msg.host {
+			known = true
+			break
+		}
+	}
+	if !known {
+		m.hostOrder = append(m.hostOrder, msg.host)
+	}
+	m.hostDirs[msg.host] = msg.items
+	m.applyLauncher()
+}
+
+func (m *dirModel) selectedLauncher() *launcherRow {
+	if m.sel < 0 || m.sel >= len(m.launcherView) {
+		return nil
+	}
+	r := m.launcher[m.launcherView[m.sel].index]
+	return &r
+}
+
+func (m *dirModel) updateLauncher(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.splitMode {
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc", "ctrl+p":
+			m.splitMode = false
+			return m, nil
+		}
+		target := map[string]string{
+			"j": "pane_below", "down": "pane_below",
+			"l": "pane_right", "right": "pane_right",
+		}[msg.String()]
+		if target != "" {
+			if r := m.selectedLauncher(); r != nil && r.dir != nil && r.local {
+				m.target, m.picked = target, &row{kind: "dir", label: r.dir.Label, path: r.dir.Path}
+				return m, tea.Quit
+			}
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "ctrl+c", "esc":
 		return m, tea.Quit
@@ -152,12 +351,12 @@ func (m *dirModel) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.filter != "" {
 			r := []rune(m.filter)
 			m.filter = string(r[:len(r)-1])
-			m.applySessionFilter()
+			m.applyLauncher()
 		}
 		return m, nil
 	case "ctrl+u":
 		m.filter = ""
-		m.applySessionFilter()
+		m.applyLauncher()
 		return m, nil
 	case "up", "ctrl+k":
 		if m.sel > 0 {
@@ -165,313 +364,532 @@ func (m *dirModel) updateSessions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "down", "ctrl+j":
-		if m.sel < len(m.sessionsView)-1 {
+		if m.sel < len(m.launcherView)-1 {
 			m.sel++
 		}
 		return m, nil
 	case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
 		number := int(msg.String()[len(msg.String())-1] - '0')
-		if number >= 1 && number <= len(m.sessionsView) {
+		if number >= 1 && number <= len(m.launcherView) {
 			m.sel = number - 1
-			return m.activateSession()
+			return m.activateLauncher()
 		}
 		return m, nil
-	case "enter":
-		return m.activateSession()
+	case "ctrl+o":
+		targets := m.cfg
+		targets.Targets = targets.AvailableTargets(m.ctx.Block != "")
+		m.target = dispatch.NextTarget(targets, m.target, true)
+		return m, nil
 	case "ctrl+x":
-		entry := m.selectedSessionEntry()
-		if entry == nil {
+		r := m.selectedLauncher()
+		if r == nil || r.session == nil {
 			return m, nil
 		}
+		entry := *r.session
 		if entry.Host == rex.LocalHostLabel && entry.ID == m.ctx.Session {
 			// The backend guards API clients; the TUI repeats the check.
 			m.err = "cannot close this session"
 			return m, nil
 		}
-		copied := *entry
-		m.closeSession = &copied
+		m.closeSession = &entry
 		return m, tea.Quit
+	case "ctrl+g":
+		r := m.selectedLauncher()
+		if r == nil || r.dir == nil || !r.local {
+			return m, nil
+		}
+		pinned, err := config.TogglePin(r.dir.Path)
+		if err != nil {
+			m.err = err.Error()
+			return m, nil
+		}
+		m.loadPins()
+		m.applyLauncher()
+		if pinned {
+			for position, match := range m.launcherView {
+				if row := m.launcher[match.index]; row.dir != nil && row.dir.Path == r.dir.Path {
+					m.sel = position
+					break
+				}
+			}
+		}
+		return m, nil
+	case "ctrl+p":
+		r := m.selectedLauncher()
+		if r == nil || r.dir == nil || !r.local {
+			return m, nil
+		}
+		if m.ctx.Block == "" {
+			m.err = "no block context"
+			return m, nil
+		}
+		m.splitMode = true
+		return m, nil
+	case "ctrl+t", "ctrl+n", "f2":
+		r := m.selectedLauncher()
+		if r == nil || r.dir == nil {
+			return m, nil
+		}
+		if worktreepkg.IsGitRepo(r.dir.Path) {
+			m.next = "wt"
+			if msg.String() != "ctrl+t" {
+				m.next = "wt-create"
+			}
+			m.nextRepo = worktreepkg.RepoRoot(r.dir.Path)
+			return m, tea.Quit
+		}
+		m.err = "not a git repo"
+		return m, nil
+	case "enter":
+		return m.activateLauncher()
 	default:
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 			m.filter += string(msg.Runes)
-			m.applySessionFilter()
+			m.applyLauncher()
 			return m, nil
 		}
 	}
 	return m, nil
 }
 
-// activateSession jumps to the selected session, or opens the create flow
-// when the "+ New session" row of a reachable group is chosen.
-func (m *dirModel) activateSession() (tea.Model, tea.Cmd) {
-	r := m.selectedSession()
+// activateLauncher is the single verb: switch to a live session, or select-or-
+// create one at the chosen directory. Local directories can also honor an
+// overridden open target (tab, pane, here) chosen with ctrl+o.
+func (m *dirModel) activateLauncher() (tea.Model, tea.Cmd) {
+	r := m.selectedLauncher()
 	if r == nil {
 		return m, nil
 	}
-	if r.entry < 0 {
-		m.createSession = &sessionCreate{Host: m.sessions[r.group].Label}
-		return m, m.loadCreateDirs()
+	if m.launcherMode {
+		// The experimental launcher keeps its path → action preview flow.
+		if r.dir != nil {
+			m.openLauncherActions(r.dir.Path)
+		}
+		return m, nil
 	}
-	copied := m.sessions[r.group].Entries[r.entry]
-	m.jumpSession = &copied
+	if r.session != nil {
+		entry := *r.session
+		m.jumpSession = &entry
+		return m, tea.Quit
+	}
+	if !r.local || m.target == "session" {
+		m.launchDir = &dirLaunch{Host: r.identity, Path: r.dir.Path}
+		return m, tea.Quit
+	}
+	m.picked = &row{kind: "dir", label: r.dir.Label, path: r.dir.Path}
 	return m, tea.Quit
 }
 
-// Capture values only: Rex and zoxide calls never run inside Update.
-func (m *dirModel) loadCreateDirs() tea.Cmd {
-	c := m.createSession
-	if c == nil || c.loading {
+// previewDebounce is how long a selection must hold before its capture starts;
+// holding a movement key would otherwise shell out to rex for every row passed.
+const previewDebounce = 60 * time.Millisecond
+
+func (m *dirModel) schedulePreview() tea.Cmd {
+	if m.width < previewMinWidth {
+		m.previewRequest++
+		m.previewKey = ""
 		return nil
 	}
-	c.loading = true
-	c.request++
-	request, host := c.request, c.Host
+	r := m.selectedLauncher()
+	if r == nil || r.session == nil {
+		if m.previewKey != "" || m.previewText != "" {
+			m.previewRequest++
+			m.previewKey = ""
+			m.previewText = ""
+		}
+		return nil
+	}
+	key := fmt.Sprintf("%d\x00%s\x00%s", m.width, r.host, r.session.ID)
+	if key == m.previewKey || m.previewPending {
+		return nil // Same row, same geometry: the capture is already fresh.
+	}
+	m.previewKey = key
+	m.previewRequest++
+	m.previewPending = true
+	request := m.previewRequest
+	return tea.Tick(previewDebounce, func(time.Time) tea.Msg {
+		return previewTickMsg{request: request}
+	})
+}
+
+func (m *dirModel) fetchPreview(request uint64) tea.Cmd {
+	r := m.selectedLauncher()
+	if r == nil || r.session == nil {
+		return nil
+	}
+	entry := *r.session
 	return func() tea.Msg {
-		return createDirsLoadedMsg{request: request, host: host, items: catalog.DirectoriesOn(host, false)}
+		out, err := rex.RunOnBounded(entry.Host, 2, "capture", "-s", entry.ID, "--trim")
+		if err != nil {
+			return captureMsg{request: request, text: ""}
+		}
+		return captureMsg{request: request, text: out}
 	}
 }
 
-func (m *dirModel) acceptCreateDirs(msg createDirsLoadedMsg) {
-	c := m.createSession
-	if c == nil || !c.loading || msg.request != c.request || msg.host != c.Host {
+func (m *dirModel) acceptPreviewTick(msg previewTickMsg) tea.Cmd {
+	if msg.request != m.previewRequest {
+		return nil
+	}
+	return m.fetchPreview(msg.request)
+}
+
+func (m *dirModel) acceptCapture(msg captureMsg) {
+	if msg.request != m.previewRequest {
 		return
 	}
-	c.loading = false
-	c.dirs = msg.items
-	c.applyFilter()
+	m.previewPending = false
+	m.previewText = msg.text
 }
 
-func (c *sessionCreate) applyFilter() {
-	c.view = catalog.FilterDirectories(c.dirs, c.filter)
-	if c.sel >= len(c.view) {
-		c.sel = len(c.view) - 1
+// previewMinWidth is the narrowest full width that shows the live preview
+// column; narrower palettes (iPhones) render rows only.
+const previewMinWidth = 100
+
+// sessionRow is one rendered line: a selectable row index (-1 for filler) or
+// the rule/footer markers.
+type sessionRow struct{ view int }
+
+// Launcher geometry, sesh's split rules: the list caps at 60 columns beside
+// the preview, never drops below 40, and the preview takes the rest.
+const (
+	maxListWidth  = 60
+	minListWidth  = 40
+	previewShare  = 60 // percent of the width the preview is guaranteed
+	previewGutter = 1  // the divider column
+)
+
+// pointerGutter is the two-cell column before every row: the highlight marker
+// on the selected row, blank elsewhere. Names stay in one column.
+const pointerGutter = 2
+
+func padding(n int) string {
+	if n <= 0 {
+		return ""
 	}
-	if c.sel < 0 {
-		c.sel = 0
-	}
+	return strings.Repeat(" ", n)
 }
 
-func (m *dirModel) updateCreateSession(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	c := m.createSession
-	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc":
-		// Back to the sessions list inside the same program.
-		m.createSession = nil
-		m.err = ""
-		return m, nil
-	case "backspace":
-		if c.filter != "" {
-			r := []rune(c.filter)
-			c.filter = string(r[:len(r)-1])
-			c.applyFilter()
-		}
-		return m, nil
-	case "ctrl+u":
-		c.filter = ""
-		c.applyFilter()
-		return m, nil
-	case "up", "ctrl+k":
-		if c.sel > 0 {
-			c.sel--
-		}
-		return m, nil
-	case "down", "ctrl+j":
-		if c.sel < len(c.view)-1 {
-			c.sel++
-		}
-		return m, nil
-	case "enter":
-		if c.sel >= 0 && c.sel < len(c.view) {
-			c.Dir = c.dirs[c.view[c.sel]].Path
-			return m, tea.Quit
-		}
-		return m, nil
-	default:
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			c.filter += string(msg.Runes)
-			c.applyFilter()
-			return m, nil
-		}
+func minInt(a, b int) int {
+	if a < b {
+		return a
 	}
-	return m, nil
+	return b
 }
 
-// sessionDisplay is one rendered line of the Sessions view: a host header, an
-// unreachable note, or a selectable row indexed into sessionsView.
-type sessionDisplay struct {
-	header     bool
-	label      string
-	errMessage string
-	view       int // index into sessionsView; -1 for non-selectable rows
+// previewCols is how many columns the preview pane occupies, divider included.
+func previewCols(width int) int {
+	if width < previewMinWidth {
+		return 0
+	}
+	cols := width * previewShare / 100
+	if rest := width - maxListWidth; rest > cols {
+		cols = rest
+	}
+	if limit := width - minListWidth; cols > limit {
+		cols = limit
+	}
+	if cols <= previewGutter {
+		return 0
+	}
+	return cols
 }
 
-func (m *dirModel) sessionDisplayRows() []sessionDisplay {
-	display := make([]sessionDisplay, 0, len(m.sessions)*2)
-	next := 0
-	for gi, group := range m.sessions {
-		present := next < len(m.sessionsView) && m.sessionsView[next].group == gi
-		if !present && m.filter != "" {
-			continue // Filtered-out groups disappear entirely.
-		}
-		display = append(display, sessionDisplay{header: true, label: group.Label, view: -1})
-		if !group.Reachable {
-			display = append(display, sessionDisplay{errMessage: group.Error, view: -1})
-			continue
-		}
-		for next < len(m.sessionsView) && m.sessionsView[next].group == gi {
-			display = append(display, sessionDisplay{view: next})
-			next++
-		}
+func listWidth(width int) int {
+	w := width - previewCols(width)
+	if previewCols(width) > 0 && w > maxListWidth {
+		w = maxListWidth
 	}
-	return display
+	if w < 1 {
+		w = 1
+	}
+	return w
 }
 
-func (m *dirModel) viewSessions() string {
-	width := m.width - 2
-	blank := pickerLine("", width)
-	lines := []string{pickerSearch(m.filter, width, "session")}
-	if m.height >= 8 {
-		// Compact palettes keep every line for results.
-		lines = append(lines, pickerPills(1, width))
+// viewLauncher renders the sesh-style launcher: a bare filter line, a pointer
+// list with green match highlighting, a faint group rule, and — on wide
+// terminals — a divider plus live preview column. No boxes, no footer rule.
+func (m *dirModel) viewLauncher() string {
+	cols := previewCols(m.width)
+	width := listWidth(m.width)
+	if cols == 0 {
+		// pickerLine chrome (leading space + trailing pad) adds two columns.
+		width = m.width - 2
 	}
-	lines = append(lines, blank)
-	maxRows := maxInt(m.height-len(lines)-2, 0)
-	display := m.sessionDisplayRows()
-	selected := -1
-	for i, d := range display {
-		if d.view == m.sel && m.sel >= 0 {
-			selected = i
-			break
+	// The faint rule between live sessions and directories only means
+	// something while the compose order is showing; a query reorders rows and
+	// the boundary stops being a place.
+	ruleAt := -1
+	if m.filter == "" {
+		for i, match := range m.launcherView {
+			if i > 0 && m.launcher[match.index].dir != nil {
+				ruleAt = i
+				break
+			}
 		}
 	}
+
+	visible := m.height - 3 // filter line, blank line, faint footer line
+	if visible < 1 {
+		visible = 5
+	}
+
+	var b strings.Builder
+	// Filter line: prompt, typed query or faint placeholder, cursor.
+	b.WriteString(padding(pointerGutter))
+	b.WriteString(pickerAccent.Render("❯ "))
+	b.WriteString(m.launcherFilterView(width - pointerGutter - 2))
+	b.WriteString("\n")
+	if m.err != "" {
+		b.WriteString(ansi.Truncate(padding(pointerGutter)+styErr.Render(m.err), m.width, "") + "\n")
+	} else if !m.launcherLoaded {
+		b.WriteString(ansi.Truncate(lipgloss.NewStyle().Faint(true).Render(padding(pointerGutter)+"Loading sessions..."), m.width, "") + "\n")
+	} else {
+		b.WriteString("\n")
+	}
+
 	start := 0
-	if selected >= 0 {
-		start = maxInt(selected-maxRows+1, 0)
+	if m.sel >= 0 && len(m.launcherView) > 0 {
+		start = minInt(maxInt(m.sel-visible+1, 0), maxInt(len(m.launcherView)-1, 0))
 	}
-	for n := 0; n < maxRows; n++ {
-		i := start + n
-		if i >= len(display) {
-			if n == 0 {
-				message := " No matching sessions"
-				if !m.sessionsLoaded {
-					message = " Loading sessions…"
-				}
-				lines = append(lines, pickerLine(pickerMuted.Render(message), width))
-			} else {
-				lines = append(lines, blank)
+	end := minInt(start+visible, len(m.launcherView))
+
+	pointer := pickerAccent.Bold(true).Render("❯" + padding(pointerGutter-1))
+	blank := padding(pointerGutter)
+	matchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
+
+	drawn := 0
+	for i := start; i < end && drawn < visible; i++ {
+		if i == ruleAt {
+			b.WriteString(padding(pointerGutter) + pickerRail.Render(strings.Repeat("─", maxInt(width-pointerGutter, 1))) + "\n")
+			drawn++
+			if drawn == visible {
+				break
 			}
-			continue
 		}
-		d := display[i]
-		switch {
-		case d.header:
-			lines = append(lines, pickerLine(pickerMuted.Render(" ▸ "+d.label), width))
-		case d.errMessage != "":
-			lines = append(lines, pickerLine(pickerMuted.Render(" unreachable"), width))
-		case m.sessionsView[d.view].entry < 0:
-			lines = append(lines, pickerNewSessionRow(d.view+1, width, d.view == m.sel))
-		default:
-			entry := m.sessions[m.sessionsView[d.view].group].Entries[m.sessionsView[d.view].entry]
-			indicator := activityIndicator(entry.State, entry.Working, m.activityFrame)
-			lines = append(lines, pickerGroupSessionRow(entry, d.view+1, width, d.view == m.sel, indicator))
-		}
+		match := m.launcherView[i]
+		b.WriteString(launcherRowLine(m.launcher[match.index], match, width, i == m.sel, pointer, blank, matchStyle))
+		b.WriteString("\n")
+		drawn++
 	}
-	lines = append(lines, pickerRule(width))
+	if drawn == 0 && drawn < visible && m.launcherLoaded && m.err == "" {
+		b.WriteString(lipgloss.NewStyle().Faint(true).Render(padding(pointerGutter)+"No matching sessions or directories") + "\n")
+		drawn++
+	}
+	for ; drawn < visible; drawn++ {
+		b.WriteString("\n")
+	}
+
+	list := b.String()
+
+	if cols == 0 {
+		return strings.TrimSuffix(list, "\n") + "\n" + m.launcherFooter(width)
+	}
+	preview := m.viewPreview(cols, visible)
+	joined := joinPreview(list, preview, cols)
+	return joined + "\n" + m.launcherFooter(m.width)
+}
+
+// launcherFilterView renders the typed query or the faint placeholder, with
+// the cursor at the end of whatever is showing.
+func (m *dirModel) launcherFilterView(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	cursor := styTarget.Render("│")
+	if m.filter == "" {
+		placeholder := lipgloss.NewStyle().Faint(true).Render("Filter sessions and directories...")
+		return ansi.Truncate(placeholder, width-1, "") + cursor
+	}
+	content := pickerText.Render(m.filter) + cursor
+	if lipgloss.Width(content) > width {
+		content = ansi.TruncateLeft(content, lipgloss.Width(content)-width+1, "")
+	}
+	return content
+}
+
+func (m *dirModel) launcherFooter(width int) string {
+	r := m.selectedLauncher()
 	left := pickerText.Render("↵") + pickerMuted.Render(" switch")
-	right := pickerText.Render("^x") + pickerMuted.Render(" close") + "  " + pickerText.Render("⇥") + pickerMuted.Render(" agents")
-	footer := pickerFooter(left, right, left, width)
-	if m.err != "" {
-		footer = pickerLine(styErr.Render(m.err), width)
+	if r != nil && r.dir != nil {
+		target := pickerAccent.Bold(true).Render(dispatch.TargetLabel(m.target))
+		left = pickerMuted.Render("Open as: ") + target
+		if lipgloss.Width(left)+3 <= width {
+			left += pickerMuted.Render(" ^o")
+		}
+		if lipgloss.Width(left) > width {
+			left = target
+		}
 	}
-	return strings.Join(append(lines, footer), "\n")
+	splitHint := pickerText.Render("^p") + pickerMuted.Render(" split")
+	right := pickerText.Render("^x") + pickerMuted.Render(" close") + "  " + pickerText.Render("^t") + pickerMuted.Render(" worktrees") + "  " + splitHint + "  " + pickerText.Render("⇥") + pickerMuted.Render(" agents")
+	if width-lipgloss.Width(left)-lipgloss.Width(right) < 2 {
+		right = splitHint + "  " + pickerText.Render("⇥") + pickerMuted.Render(" agents")
+	}
+	if width-lipgloss.Width(left)-lipgloss.Width(right) < 2 {
+		right = pickerText.Render("⇥") + pickerMuted.Render(" agents")
+	}
+	if m.launcherMode {
+		return pickerMuted.Render(ansi.Truncate(ansi.Strip("enter Actions · esc Back/close"), width, ""))
+	}
+	if m.splitMode {
+		directions := pickerAccent.Bold(true).Render("j↓ l→")
+		return pickerMuted.Render(ansi.Truncate(ansi.Strip("Split: "+directions+" · esc cancel"), width, ""))
+	}
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 0 {
+		gap = 0
+	}
+	line := ansi.Strip(left) + padding(gap) + ansi.Strip(right)
+	if lipgloss.Width(line) > width {
+		line = ansi.Truncate(line, width, "")
+	}
+	return pickerMuted.Render(line)
 }
 
-func (m *dirModel) viewCreateSession() string {
-	width := m.width - 2
-	c := m.createSession
-	lines := []string{pickerSearch(c.filter, width, "directory")}
-	if m.height >= 8 {
-		lines = append(lines, pickerPills(1, width))
+// viewPreview renders the right column for the selected row: a live capture
+// for sessions, the path and create context for directories. The first line
+// is the divider column so both halves span the same height.
+func (m *dirModel) viewPreview(cols int, rows int) []string {
+	div := pickerRail.Render("│")
+	lines := []string{div}
+	inner := cols - previewGutter - 1
+	if rows > 0 {
+		rows--
 	}
-	lines = append(lines, pickerLine(pickerMuted.Render("New session on "+c.Host), width))
-	maxRows := maxInt(m.height-len(lines)-2, 0)
-	start := maxInt(c.sel-maxRows+1, 0)
-	for n := 0; n < maxRows; n++ {
-		i := start + n
-		if i >= len(c.view) {
-			if n == 0 {
-				message := " No matching directories"
-				if c.loading {
-					message = " Loading directories…"
-				}
-				lines = append(lines, pickerLine(pickerMuted.Render(message), width))
-			} else {
-				lines = append(lines, pickerLine("", width))
+	if inner < 1 {
+		inner = 1
+	}
+	r := m.selectedLauncher()
+	if r != nil && r.dir != nil {
+		body := []string{
+			pickerMuted.Render("session: ") + pickerText.Render(r.dir.Label),
+			pickerMuted.Render("host:    ") + pickerText.Render(r.host),
+			pickerMuted.Render("↵ open · ^o target · ^t worktrees"),
+		}
+		for _, line := range body {
+			if len(lines)-1 >= rows {
+				break
 			}
-			continue
+			lines = append(lines, div+padding(previewGutter)+pickerTail(line, inner))
 		}
-		item := c.dirs[c.view[i]]
-		lines = append(lines, pickerDirectory(item.Path, width, i == c.sel))
+	} else if r != nil {
+		header := "● " + r.session.Label
+		if !r.local {
+			header += " @" + r.host
+		}
+		lines = append(lines, div+padding(previewGutter)+pickerAccent.Render(pickerTail(header, inner)))
+		text := m.previewText
+		if m.previewPending {
+			text = "" // Keep the last capture until the new one lands.
+		}
+		for _, line := range previewLines(text, inner, rows-1) {
+			lines = append(lines, div+padding(previewGutter)+pickerMuted.Render(line))
+		}
 	}
-	lines = append(lines, pickerRule(width))
-	footer := pickerFooter(pickerText.Render("↵")+pickerMuted.Render(" create"), pickerMuted.Render("esc back"), "↵ create · esc back", width)
-	if m.err != "" {
-		footer = pickerLine(styErr.Render(m.err), width)
+	for len(lines) < rows+1 {
+		lines = append(lines, div)
 	}
-	return strings.Join(append(lines, footer), "\n")
+	return lines
 }
 
-// pickerGroupSessionRow renders one session row of a host group. Numbered
-// positions cover selectable rows only; the activity glyph sits right-aligned.
-func pickerGroupSessionRow(entry rex.SessionEntry, position, width int, selected bool, indicator string) string {
-	style := pickerText
-	if selected {
-		style = pickerSelected.Bold(true)
+// previewLines keeps the tail of a capture: the screen, not the scrollback.
+func previewLines(text string, width, count int) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
 	}
-	prefix := ""
-	if position >= 1 && position <= 9 && width >= 24 {
-		label := fmt.Sprintf("%d ", position)
-		if selected {
-			prefix = style.Render(label)
-		} else {
-			prefix = pickerRail.Render(label)
-		}
+	wrapped := strings.Split(ansi.Hardwrap(strings.TrimRight(text, "\n"), width, true), "\n")
+	if len(wrapped) > count {
+		wrapped = wrapped[len(wrapped)-count:]
 	}
-	if entry.Active {
-		if selected {
-			prefix += style.Render("● ")
-		} else {
-			prefix += pickerAccent.Render("● ")
-		}
-	}
-	name := ansi.Truncate(entry.Label, maxInt(width-3-lipgloss.Width(prefix)-lipgloss.Width(indicator), 1), "…")
-	return pickerRow(prefix+style.Bold(true).Render(name)+indicator, width, selected)
+	return wrapped
 }
 
-// pickerNewSessionRow renders a group's "+ New session" action row.
-func pickerNewSessionRow(position, width int, selected bool) string {
-	style := pickerText
-	if selected {
-		style = pickerSelected.Bold(true)
-	}
-	prefix := ""
-	if position >= 1 && position <= 9 && width >= 24 {
-		label := fmt.Sprintf("%d ", position)
-		if selected {
-			prefix = style.Render(label)
-		} else {
-			prefix = pickerRail.Render(label)
+// joinPreview pads the list to its width and appends the preview column.
+func joinPreview(list string, preview []string, cols int) string {
+	lines := strings.Split(list, "\n")
+	for i := range lines {
+		line := ansi.Truncate(lines[i], cols-previewGutter, "")
+		lines[i] = line + padding(cols-previewGutter-lipgloss.Width(line)) + " "
+		if i < len(preview) {
+			lines[i] += preview[i]
 		}
 	}
-	content := prefix + pickerAccent.Render("+ ") + pickerMuted.Render("New session")
+	for i := len(lines); i < len(preview); i++ {
+		lines = append(lines, padding(cols-previewGutter)+" "+preview[i])
+	}
+	return strings.Join(lines, "\n")
+}
+
+// launcherRowLine renders one flat launcher row: pointer gutter, green match
+// highlighting inside the displayed text, faint trailing metadata. Sessions
+// lead with the active dot; directories show their home-relative path with
+// the pin star; remote rows carry a faint @host badge.
+func launcherRowLine(r launcherRow, match launcherMatch, width int, selected bool, pointer, blank string, matchStyle lipgloss.Style) string {
+	prefix := blank
+	if selected {
+		prefix = pointer
+	}
+	// Remote rows carry the only tag: the eye flags what's elsewhere.
+	badge := ""
+	if !r.local {
+		badge = pickerMuted.Render(" · " + r.host)
+	}
+	indicator := activityIndicator(r.sessionState(), r.sessionWorking(), 0)
+
+	var highlight func(text string, offset int) string
+	highlight = func(text string, offset int) string {
+		runes := []rune(text)
+		inPath := false
+		var out strings.Builder
+		for i, char := range runes {
+			if i == 0 && r.dir != nil {
+				// Directory display paths carry the label twice (as the tail);
+				// matches in the label region also light the path's copy.
+				inPath = len(runes) > len(r.dir.Label)
+			}
+			_ = inPath
+			hit := false
+			for _, idx := range match.matches {
+				if idx == offset+i || (r.dir != nil && idx < len(r.dir.Label) && offset+i == len(runes)-len(r.dir.Label)+idx) {
+					hit = true
+					break
+				}
+			}
+			if hit {
+				out.WriteString(matchStyle.Render(string(char)))
+			} else {
+				out.WriteString(string(char))
+			}
+		}
+		return out.String()
+	}
+
+	var content string
+	if r.session != nil {
+		dot := ""
+		if r.session.Active {
+			dot = pickerAccent.Render("● ")
+		}
+		name := r.session.Label
+		content = prefix + dot + highlight(name, 0) + indicator + badge
+	} else {
+		display := paths.HomeRelative(r.dir.Path)
+		star := ""
+		if r.pinned {
+			star = pickerAccent.Render("★ ")
+		}
+		content = prefix + star + highlight(display, len(r.dir.Label)+1) + indicator + badge
+	}
+	if lipgloss.Width(content) > width {
+		content = ansi.Truncate(content, width, "")
+	}
 	return pickerRow(content, width, selected)
 }
 
-// finishSessionsResult performs the session action chosen in the picker after
-// the program exits: jump, close, or create+select. done reports whether the
-// interaction ended with a session result.
+// finishSessionsResult performs the launcher action chosen in the picker after
+// the program exits: jump, close, or select-or-create at a directory. done
+// reports whether the interaction ended with a session result.
 func finishSessionsResult(ctx rex.Ctx, dm *dirModel) (code int, done bool) {
 	if entry := dm.jumpSession; entry != nil {
 		if err := rex.JumpOnHost(entry.Host, *entry, ctx.Client); err != nil {
@@ -487,13 +905,13 @@ func finishSessionsResult(ctx rex.Ctx, dm *dirModel) (code int, done bool) {
 		}
 		return 0, true
 	}
-	if c := dm.createSession; c != nil && c.Dir != "" {
-		sessionID, _, err := rex.CreateSessionOn(c.Host, c.Dir)
+	if launch := dm.launchDir; launch != nil {
+		sessionID, _, err := rex.CreateSessionOn(launch.Host, launch.Path)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1, true
 		}
-		if err := rex.SelectOnHost(c.Host, sessionID, ctx.Client); err != nil {
+		if err := rex.SelectOnHost(launch.Host, sessionID, ctx.Client); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1, true
 		}

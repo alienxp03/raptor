@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/rex"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -178,13 +179,16 @@ func TestActivityProjectionAllTabs(t *testing.T) {
 	blocked := e
 	blocked.AgentID = "b"
 	blocked.State = "blocked"
-	m := &dirModel{rows: []row{{path: "/repo"}, {path: "/other"}}}
+	m := &dirModel{launcher: []launcherRow{
+		{dir: &catalog.Directory{Label: "repo", Path: "/repo"}, host: rex.LocalHostLabel},
+		{dir: &catalog.Directory{Label: "other", Path: "/other"}, host: rex.LocalHostLabel},
+	}}
 	// Keep coverage of shared session metadata without a Sessions picker view.
 	tabs := []rex.SessionEntry{{Kind: "session", ID: "s", SessionID: "s"}, {Kind: "window", ID: "w", SessionID: "s"}, {Kind: "window", ID: "else", SessionID: "s"}}
 	m.projectActivity([]rex.AgentEntry{e, blocked})
 	rex.ApplySessionActivity(tabs, []rex.AgentEntry{e, blocked})
-	if m.rows[0].state != "blocked" || !m.rows[0].working || m.rows[1].working {
-		t.Fatalf("repos: %+v", m.rows)
+	if m.launcher[0].dir.State != "blocked" || !m.launcher[0].dir.Working || m.launcher[1].dir.Working {
+		t.Fatalf("launcher dirs: %+v", m.launcher)
 	}
 	for _, i := range []int{0, 1} {
 		if tabs[i].State != "blocked" || !tabs[i].Working {
@@ -194,7 +198,7 @@ func TestActivityProjectionAllTabs(t *testing.T) {
 	if tabs[2].Working {
 		t.Fatal("unrelated tab marked working")
 	}
-	for _, indicator := range []string{activityIndicator(m.rows[0].state, m.rows[0].working, 0), activityIndicator(tabs[0].State, tabs[0].Working, 0)} {
+	for _, indicator := range []string{activityIndicator(m.launcher[0].dir.State, m.launcher[0].dir.Working, 0), activityIndicator(tabs[0].State, tabs[0].Working, 0)} {
 		plain := ansi.Strip(indicator)
 		if !strings.HasPrefix(plain, " ! ") || !strings.ContainsAny(plain, "•∙·") {
 			t.Fatal("mixed activity must show Blocked and Working together")
@@ -202,7 +206,7 @@ func TestActivityProjectionAllTabs(t *testing.T) {
 	}
 	m.projectActivity(nil)
 	rex.ApplySessionActivity(tabs, nil)
-	if m.hasWorkingData() || m.rows[0].state != "" || tabs[0].State != "" {
+	if m.hasWorkingData() || m.launcher[0].dir.State != "" || tabs[0].State != "" {
 		t.Fatal("activity not cleared")
 	}
 }
@@ -216,7 +220,8 @@ func TestActivityTickStartsStopsAndNoIdleTimer(t *testing.T) {
 		}
 		switch view {
 		case 0:
-			m.rows = []row{{working: true}}
+			m.launcher = []launcherRow{{dir: &catalog.Directory{Label: "repo", Path: "/repo"}, host: rex.LocalHostLabel}}
+			m.launcher[0].dir.Working = true
 		case 2:
 			m.agents = []rex.AgentEntry{pickerAgent("a")}
 		}
@@ -231,7 +236,7 @@ func TestActivityTickStartsStopsAndNoIdleTimer(t *testing.T) {
 		if cmd == nil || m.activityFrame == before {
 			t.Fatal("working timer did not continue")
 		}
-		m.rows = nil
+		m.launcher = nil
 		m.agents = nil
 		_, cmd = m.Update(activityTickMsg{m.activityTickID})
 		if cmd != nil || m.activityTickPending {

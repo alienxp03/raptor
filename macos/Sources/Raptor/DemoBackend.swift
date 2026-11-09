@@ -7,7 +7,7 @@ actor DemoBackend: BackendClient {
         PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/native-picker", branch: "feat/native-picker", isMain: false, state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date())),
         PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/fix-focus", branch: "fix/focus", isMain: false, state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()))
     ]
-    private var pinned: Set<String> = []
+    private var pinned: Set<String> = ["/Users/demo/Workspace/Projects/raptor"]
     private var contextUpdates = 0
     private var calls: [String] = []
     private var lastParams: [String: [String: APIValue]] = [:]
@@ -17,9 +17,9 @@ actor DemoBackend: BackendClient {
         PickerItem(path: "agent:demo-3", label: "Review tests", kind: "agent", sessionID: "session:demo-2", sessionLabel: "castty", app: "Claude", state: "idle", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)), windowID: "window:demo-2a", windowLabel: "research", blockID: "block:demo-review")
     ]
     private var sessionEntries: [PickerItem] = [
-        PickerItem(path: "session:demo-1", label: "dotfiles", kind: "session", sessionID: "session:demo-1", sessionLabel: "dotfiles", state: "blocked", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), active: true, host: "This Mac"),
+        PickerItem(path: "session:demo-1", label: "dotfiles", kind: "session", sessionID: "session:demo-1", sessionLabel: "dotfiles", state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), active: true, host: "This Mac"),
         PickerItem(path: "session:demo-2", label: "castty", kind: "session", sessionID: "session:demo-2", sessionLabel: "castty", state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), host: "This Mac"),
-        PickerItem(path: "session:demo-3", label: "research", kind: "session", sessionID: "session:demo-3", sessionLabel: "research", state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), host: "Demo Host")
+        PickerItem(path: "session:demo-3", label: "demo-app", kind: "session", sessionID: "session:demo-3", sessionLabel: "demo-app", state: "blocked", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), host: "Demo Host")
     ]
     private let sessionHosts: [HostHeader] = [
         HostHeader(label: "This Mac", local: true, reachable: true, error: nil),
@@ -44,34 +44,35 @@ actor DemoBackend: BackendClient {
         let branches = ["main", "develop", "feat/native-picker", "fix/focus"]
         switch method {
         case "directories":
-            let host = text("host")
-            if host.isEmpty {
-                let items = [repo, "/Users/demo/Projects/sample-console", "/Users/demo/Projects/demo-sandbox", "/Users/demo/Work/demo-studio", "/Users/demo/Work/sample-notes"]
-                    .filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) }
-                    .map { path in
-                        PickerItem(path: path, state: path == repo ? "blocked" : "working", working: true,
-                                   updatedAt: ISO8601DateFormatter().string(from: Date()), isPinned: pinned.contains(path))
-                    }
-                let sorted = items.sorted { ($0.isPinned ?? false) && !($1.isPinned ?? false) }
-                return APIResult(items: sorted, targets: targets, target: "tab")
-            }
-            // Host-scoped listing for the New Session flow.
-            let items = ["/Users/demo/Projects/x", "/Users/demo/Projects/demo-sandbox", "/Users/demo/Work/demo-studio"]
+            let items = [repo, "/Users/demo/Projects/sample-console", "/Users/demo/Projects/demo-sandbox", "/Users/demo/Work/demo-studio", "/Users/demo/Work/sample-notes"]
                 .filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) }
-                .map { PickerItem(path: $0) }
-            return APIResult(items: items)
+                .map { path in
+                    PickerItem(path: path, state: path == repo ? "blocked" : "working", working: true,
+                               updatedAt: ISO8601DateFormatter().string(from: Date()), isPinned: pinned.contains(path))
+                }
+            let sorted = items.sorted { ($0.isPinned ?? false) && !($1.isPinned ?? false) }
+            return APIResult(items: sorted, targets: targets, target: "tab")
         case "sessions":
+            // The flat unified launcher, mirroring catalog.LauncherItems: live
+            // sessions first (origin session on top), then directories per host
+            // ("This Mac" first). Unreachable hosts contribute no rows but stay
+            // in hosts so their error remains visible.
             let query = text("query")
-            let filtered = sessionEntries.filter {
-                query.isEmpty || ($0.label ?? "").localizedCaseInsensitiveContains(query)
-                    || ($0.sessionLabel ?? "").localizedCaseInsensitiveContains(query)
+            let localDirs: [PickerItem] = [
+                PickerItem(path: "/Users/demo/.dotfiles", label: ".dotfiles", kind: "dir",
+                           isPinned: pinned.contains("/Users/demo/.dotfiles"), host: "This Mac"),
+                PickerItem(path: "/Users/demo/Workspace/Projects/raptor", label: "raptor", kind: "dir", state: "working", working: true,
+                           isPinned: pinned.contains("/Users/demo/Workspace/Projects/raptor"), host: "This Mac"),
+            ]
+            let remoteDirs: [PickerItem] = [
+                PickerItem(path: "/Volumes/Demo/Projects/demo-app", label: "demo-app", kind: "dir", host: "Demo Host"),
+            ]
+            let rows = sessionEntries + localDirs + remoteDirs
+            let filtered = rows.filter {
+                query.isEmpty || [$0.label ?? "", $0.sessionLabel ?? "", $0.path, $0.host ?? ""]
+                    .contains { $0.localizedCaseInsensitiveContains(query) }
             }
-            // Match Go: groups with no matching rows are omitted; unreachable
-            // hosts stay listed so their error remains visible.
-            let hosts = sessionHosts.filter { header in
-                !header.reachable || filtered.contains { $0.host == header.label }
-            }
-            return APIResult(items: filtered, hosts: hosts)
+            return APIResult(items: filtered, hosts: sessionHosts, targets: targets, target: "tab")
         case "agents":
             let query = text("query")
             let ordered = agents.sorted { lhs, rhs in

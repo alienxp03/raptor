@@ -507,13 +507,14 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if model.canSubmitForm { model.create() }
             return true
         }
-        if model.view == .repos && (command || control) && !option && key == "n" && (model.page == .worktrees || model.page == .directories) {
+        if model.page == .worktrees && (command || control) && !option && key == "n" {
             model.beginCreate(); return true
         }
-        if model.view == .repos && model.page == .worktrees && ((command && event.keyCode == 51) || (control && key == "x")) {
+        if model.page == .worktrees && ((command && event.keyCode == 51) || (control && key == "x")) {
             model.askRemove(); return true
         }
-        if model.view == .sessions && model.page == .directories && control && !command && !option && key == "x" {
+        if control && !command && !option && key == "x" {
+            // askCloseSession only acts on a selected session row of the launcher.
             model.askCloseSession(); return true
         }
         if control && !command && !option {

@@ -8,16 +8,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
+	"github.com/alienxp03/raptor/internal/paths"
 	"github.com/alienxp03/raptor/internal/picker"
 	"github.com/alienxp03/raptor/internal/rex"
 	"github.com/alienxp03/raptor/internal/worktree"
 )
+
+// launcherDirWorkers bounds the concurrent per-host directory fetches.
+const launcherDirWorkers = 4
 
 // MaxRequestSize bounds one request, excluding its newline. Oversized lines are
 // drained without growing memory, then the next request can be processed.
@@ -178,10 +184,55 @@ type agentsResult struct {
 }
 
 type sessionsResult struct {
-	Items   []rex.SessionEntry `json:"items"`
-	Hosts   []hostHeader       `json:"hosts"`
-	Targets []string           `json:"targets"`
-	Target  string             `json:"target"`
+	Items   []catalog.LauncherItem `json:"items"`
+	Hosts   []hostHeader           `json:"hosts"`
+	Targets []string               `json:"targets"`
+	Target  string                 `json:"target"`
+}
+
+// launcherCacheEntry is the on-disk stale-while-revalidate payload: the full
+// unfiltered composition plus its host headers, stamped when fetched.
+type launcherCacheEntry struct {
+	Timestamp time.Time              `json:"timestamp"`
+	Items     []catalog.LauncherItem `json:"items"`
+	Hosts     []hostHeader           `json:"hosts"`
+}
+
+// launcherSoftTTL is sesh's stale-while-revalidate window: within it the
+// cache answers instantly; past it the cache still answers instantly while a
+// background fetch refreshes the file for the next open.
+const launcherSoftTTL = 5 * time.Second
+
+func (h *Handler) launcherCachePath() string {
+	return filepath.Join(paths.CacheDir(), "launcher-cache.json")
+}
+
+func (h *Handler) readLauncherCache() (launcherCacheEntry, bool) {
+	data, err := os.ReadFile(h.launcherCachePath())
+	if err != nil {
+		return launcherCacheEntry{}, false
+	}
+	var entry launcherCacheEntry
+	if json.Unmarshal(data, &entry) != nil || entry.Items == nil {
+		return launcherCacheEntry{}, false
+	}
+	return entry, true
+}
+
+// writeLauncherCache replaces the cache atomically so a crashed write never
+// leaves a truncated file behind.
+func (h *Handler) writeLauncherCache(items []catalog.LauncherItem, hosts []hostHeader) {
+	entry := launcherCacheEntry{Timestamp: time.Now(), Items: items, Hosts: hosts}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	path := h.launcherCachePath()
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, data, 0o644) != nil {
+		return
+	}
+	_ = os.Rename(tmp, path)
 }
 
 // hostHeader tells native clients which group headers to render, including
@@ -226,6 +277,72 @@ func decodeSessionAction(params json.RawMessage) (struct {
 		entry.ID = p.SessionID
 	}
 	return p, entry, nil
+}
+
+// fetchLauncher composes the full unfiltered launcher payload: sessions and
+// directories per host in parallel, with activity folded in. This is the slow
+// path — remote hosts answer over SSH within their own bounds.
+func (h *Handler) fetchLauncher(localAgents []rex.AgentEntry) ([]catalog.LauncherItem, []hostHeader) {
+	groups := rex.SessionGroups(h.ctx.Session, localAgents)
+	hostOrder := []string{rex.LocalHostLabel}
+	for _, group := range groups {
+		if !group.Local {
+			hostOrder = append(hostOrder, group.Label)
+		}
+	}
+	pins := map[string]bool{}
+	for _, pin := range config.LoadPins() {
+		pins[paths.Canonical(pin)] = true
+	}
+	hostDirs := make(map[string][]catalog.Directory, len(hostOrder))
+	var mu sync.Mutex
+	var workers sync.WaitGroup
+	jobs := make(chan string)
+	for range min(launcherDirWorkers, len(hostOrder)) {
+		workers.Go(func() {
+			for host := range jobs {
+				items := catalog.DirectoriesOn(host, false)
+				if host == rex.LocalHostLabel {
+					for i := range items {
+						items[i].Pinned = pins[paths.Canonical(items[i].Path)]
+					}
+				}
+				mu.Lock()
+				hostDirs[host] = items
+				mu.Unlock()
+			}
+		})
+	}
+	for _, host := range hostOrder {
+		jobs <- host
+	}
+	close(jobs)
+	workers.Wait()
+
+	localDisplay := rex.LocalHostname()
+	items := catalog.LauncherItems(groups, hostOrder, hostDirs, "", localAgents, localDisplay)
+	catalog.PinLauncherOrigin(items, h.ctx.Session)
+	catalog.ApplyLauncherDirActivity(items, rex.LocalHostLabel, localAgents)
+	hosts := make([]hostHeader, 0, len(groups))
+	for _, group := range groups {
+		label := group.Label
+		if group.Local {
+			label = localDisplay
+		}
+		hosts = append(hosts, hostHeader{Label: label, Local: group.Local, Reachable: group.Reachable, Error: group.Error})
+	}
+	return items, hosts
+}
+
+// revalidateLauncher refreshes the launcher cache in the background after a
+// stale response went out.
+func (h *Handler) revalidateLauncher() {
+	localAgents, err := rex.AgentEntries(h.ctx.Session)
+	if err != nil {
+		localAgents = nil
+	}
+	items, hosts := h.fetchLauncher(localAgents)
+	h.writeLauncherCache(items, hosts)
 }
 
 func (h *Handler) call(method string, params json.RawMessage) (any, error) {
@@ -299,37 +416,27 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		result := sessionsResult{Items: []rex.SessionEntry{}, Hosts: []hostHeader{}, Targets: []string{}, Target: h.cfg.Enter}
+		// sesh's stale-while-revalidate: fresh cache answers instantly, stale
+		// cache answers instantly while a background fetch refreshes it for
+		// the next open, and a cold start fetches live.
+		if cached, ok := h.readLauncherCache(); ok {
+			age := time.Since(cached.Timestamp)
+			items := catalog.FilterLauncherItems(cached.Items, p.Query, h.ctx.Session)
+			if age >= launcherSoftTTL {
+				go h.revalidateLauncher()
+			}
+			return sessionsResult{Items: items, Hosts: cached.Hosts, Targets: h.targets(), Target: "session"}, nil
+		}
 		localAgents, _ := h.activitySnapshot(false)
-		for _, group := range rex.SessionGroups(h.ctx.Session, localAgents) {
-			result.Hosts = append(result.Hosts, hostHeader{Label: group.Label, Local: group.Local, Reachable: group.Reachable, Error: group.Error})
-			if !group.Reachable {
-				continue
-			}
-			for _, i := range catalog.FilterSessions(group.Entries, p.Query) {
-				result.Items = append(result.Items, group.Entries[i])
-			}
-		}
-		// While filtering, groups without matching rows only add noise.
-		if p.Query != "" {
-			matched := map[string]bool{}
-			for _, item := range result.Items {
-				matched[item.Host] = true
-			}
-			hosts := result.Hosts[:0]
-			for _, header := range result.Hosts {
-				if matched[header.Label] {
-					hosts = append(hosts, header)
-				}
-			}
-			result.Hosts = hosts
-		}
-		return result, nil
+		items, hosts := h.fetchLauncher(localAgents)
+		h.writeLauncherCache(items, hosts)
+		return sessionsResult{Items: catalog.FilterLauncherItems(items, p.Query, h.ctx.Session), Hosts: hosts, Targets: h.targets(), Target: "session"}, nil
 	case "sessions.jump":
 		_, entry, err := decodeSessionAction(params)
 		if err != nil {
 			return nil, err
 		}
+		entry.Host = rex.NormalizeHost(entry.Host)
 		if err := rex.JumpOnHost(entry.Host, entry, h.ctx.Client); err != nil {
 			return nil, err
 		}
@@ -345,6 +452,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if p.Dir == "" {
 			return nil, fmt.Errorf("dir is required")
 		}
+		p.Host = rex.NormalizeHost(p.Host)
 		sid, existing, err := rex.CreateSessionOn(p.Host, p.Dir)
 		if err != nil {
 			return nil, err
@@ -361,6 +469,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if entry.Kind == "session" && (entry.Host == "" || entry.Host == rex.LocalHostLabel) && entry.SessionID == h.ctx.Session {
 			return nil, fmt.Errorf("refusing to close the session this picker opened from")
 		}
+		entry.Host = rex.NormalizeHost(entry.Host)
 		if entry.Kind == "session" {
 			err = rex.CloseSession(entry.Host, entry.SessionID)
 		} else {
@@ -378,6 +487,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if p.Label == "" {
 			return nil, fmt.Errorf("label is required")
 		}
+		entry.Host = rex.NormalizeHost(entry.Host)
 		if entry.Kind == "session" {
 			err = rex.SetSessionLabel(entry.Host, entry.SessionID, p.Label)
 		} else {

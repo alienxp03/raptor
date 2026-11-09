@@ -121,7 +121,7 @@ func SessionEntries(originSession string) ([]SessionEntry, error) {
 		entries = append(entries, SessionEntry{
 			Kind: "session", ID: session.SessionID, Path: session.SessionID, SessionID: session.SessionID,
 			Label: session.Label, SessionLabel: session.Label,
-			Active: session.SessionID == originSession,
+			Active: SameSession(session.SessionID, originSession),
 		})
 		for _, window := range windowsBySession[i] {
 			entries = append(entries, SessionEntry{
@@ -406,7 +406,7 @@ func hostGroup(host Host, originSession string, localAgents []AgentEntry) HostGr
 		entries = append(entries, SessionEntry{
 			Kind: "session", ID: session.SessionID, Path: session.SessionID, SessionID: session.SessionID,
 			Label: session.Label, SessionLabel: session.Label, Host: host.Label,
-			Active: host.Local && session.SessionID == originSession,
+			Active: host.Local && SameSession(session.SessionID, originSession),
 		})
 	}
 	// Activity is optional: a slow or absent snapshot keeps plain rows.

@@ -23,12 +23,12 @@ private actor ScriptedBackend: BackendClient {
     func count(_ method: String) -> Int { calls.filter { $0 == method }.count }
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         calls.append(method)
-        if method == "directories" {
+        if method == "sessions" {
             var query = ""
             if case let .text(value) = params["query"] { query = value }
             // The first response arrives after the second response.
             await delay(query == "old" ? 0.45 : 0.02)
-            return APIResult(items: [PickerItem(path: "/demo/" + query)], targets: ["tab", "session"], target: "tab")
+            return APIResult(items: [PickerItem(path: "/demo/" + query, kind: "dir")], targets: ["tab", "session"], target: "tab")
         }
         if method == "worktrees.list" {
             return APIResult(items: [PickerItem(path: "/demo/tree", branch: "main", isMain: true)], targets: ["tab"], target: "tab", repo: "/demo", branches: ["main"], baseBranch: "main")
@@ -278,26 +278,34 @@ struct NativeChecks {
         try nativeThemeRoleChecks()
         try await themeRefreshChecks()
         try await dismissalChecks()
+        // The launcher reaches Create only through ⌃T Worktrees on a directory row.
         let directoryCreate = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
         directoryCreate.start()
         try await wait { !directoryCreate.loading }
-        let selectedRepo = directoryCreate.selected?.path
+        let selectedDir = directoryCreate.items.first { $0.kind == "dir" }?.path
+        directoryCreate.selectedID = selectedDir
+        directoryCreate.showWorktrees()
+        require(directoryCreate.page == .worktrees && directoryCreate.repo == selectedDir,
+                     "⌃T on a launcher directory must open its worktrees")
+        try await wait { !directoryCreate.loading }
         directoryCreate.beginCreate()
-        require(directoryCreate.page == .create && directoryCreate.loading && directoryCreate.repo == selectedRepo,
-                     "New from directories must open Create directly for the selected repository")
+        require(directoryCreate.page == .create && directoryCreate.repo == "/Users/demo/Projects/example-kit",
+                     "New from worktrees must open Create in the backend-resolved repository")
         try await wait { !directoryCreate.loading }
         directoryCreate.escape()
         try await wait { !directoryCreate.loading }
-        require(directoryCreate.page == .directories, "Create opened from directories must return there")
+        require(directoryCreate.page == .worktrees, "Create opened from worktrees must return there")
         directoryCreate.close()
 
         let fallback = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt"]), backend: DemoBackend())
         fallback.start()
         try await wait { !fallback.loading }
-        require(fallback.page == .repositories && !fallback.items.isEmpty)
+        require(fallback.page == .directories && fallback.view == .sessions && !fallback.items.isEmpty,
+                     "A worktree open without a repository must fall back to the launcher")
+        fallback.selectedID = fallback.items.first?.id
         fallback.choose()
-        try await wait { !fallback.loading }
-        require(fallback.page == .worktrees && fallback.repo != nil)
+        try await wait { !fallback.busy }
+        require(fallback.notice?.contains("No Rex call") == true, "Launcher fallback jump stays visible with its demo notice")
         fallback.close()
 
         let scripted = ScriptedBackend()
@@ -370,7 +378,7 @@ struct NativeChecks {
         if CommandLine.arguments.contains("--transport-fixture") {
             try await transportChecks()
         }
-        print("PASS: launch flags, decoding, repository fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
+        print("PASS: launch flags, decoding, launcher fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
     }
 
     @MainActor private static func groupedActivityChecks() async throws {
@@ -416,9 +424,9 @@ struct NativeChecks {
         require(model.agentSections.map(\.id) == ["Blocked", "Working", "Idle"])
         require(model.agentSections.flatMap(\.items).map { model.numberedPosition(of: $0) } == [1, 2, 3])
         let fullHeight = PickerStyle.height(for: model)
-        model.selectView(.repos)
-        try await pending("directories", backend)
-        await backend.reply("directories", APIResult(items: []))
+        model.selectView(.sessions)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: []))
         try await wait { !model.refreshing }
         model.selectView(.agents)
         try await pending("agents", backend)
@@ -454,13 +462,13 @@ struct NativeChecks {
         let options = try LaunchOptions(arguments: ["--demo"])
         let backend = CachedListBackend()
         let model = PickerModel(options: options, backend: backend)
-        let repos = APIResult(items: [PickerItem(path: "/repo")], targets: ["tab"], target: "tab")
+        let launcherRows = APIResult(items: ["/repo"].map { PickerItem(path: $0, kind: "dir") }, targets: ["tab"], target: "tab")
         func agent(_ id: String, _ label: String? = nil) -> PickerItem {
             PickerItem(path: id, label: label ?? id, kind: "agent", sessionID: "s", app: "Pi", state: "idle", windowID: "w", blockID: id)
         }
         model.start()
-        try await pending("directories", backend)
-        await backend.reply("directories", repos)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", launcherRows)
         try await wait { !model.refreshing }
         model.selectView(.agents)
         try await pending("agents", backend)
@@ -469,9 +477,9 @@ struct NativeChecks {
         model.selectedID = "a"; model.scrollID = "a"
 
         func refresh(_ rows: [PickerItem]) async throws {
-            model.selectView(.repos)
-            try await pending("directories", backend)
-            await backend.reply("directories", repos)
+            model.selectView(.sessions)
+            try await pending("sessions", backend)
+            await backend.reply("sessions", launcherRows)
             try await wait { !model.refreshing }
             model.selectView(.agents)
             require(!model.loading && model.canOpen, "Cached Agents must remain usable")
@@ -535,22 +543,23 @@ struct NativeChecks {
         require(model.query == "filtered" && model.selectedID == "a" && model.shouldToggle(for: options))
         let shortcutCalls = await backend.count("agents")
         require(shortcutCalls == 2, "Active Agents shortcut must be idempotent")
-        model.selectView(.repos)
+        model.selectView(.sessions)
         require(!model.shouldToggle(for: options), "A routed Agents request must not hide another view")
-        try await pending("directories", backend)
-        await backend.reply("directories", APIResult(items: []))
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: []))
         try await wait { !model.refreshing }
         let token = model.prepareReconfigure(options)
         require(model.view == .agents && model.contextReady && model.canOpen && !model.loading)
-        require(model.query == "filtered" && model.selectedID == "a" && model.scrollID == "a")
+        // Reopen resets: the agents filter clears and the first row leads.
+        require(model.query == "" && model.selectedID == model.items.first?.id && model.scrollID == nil)
         await model.completeReconfigure(token)
         try await pending("agents", backend)
         await backend.reply("agents", APIResult(items: [agent("a"), agent("b")]))
         try await wait { !model.refreshing }
         require(model.items.map(\.id) == ["b", "a"], "New presentation captures the latest raw cache at first display")
-        model.selectView(.repos)
-        try await pending("directories", backend)
-        await backend.reply("directories", APIResult(items: []))
+        model.selectView(.sessions)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: []))
         try await wait { !model.refreshing }
         model.selectView(.agents)
         try await pending("agents", backend)
@@ -559,7 +568,7 @@ struct NativeChecks {
         require(model.items.map(\.id) == ["b", "a"], "Freeze order and defer new records within a presentation")
         model.askRemove(); model.beginCreate(); model.togglePin()
         require(!model.busy && model.removalCandidate == nil)
-        for method in ["sessions", "context", "pins.toggle", "worktrees.remove", "sessions.close", "sessions.rename", "dispatch", "agents.jump"] {
+        for method in ["context", "pins.toggle", "worktrees.remove", "sessions.close", "sessions.rename", "dispatch", "agents.jump"] {
             let calls = await backend.count(method)
             require(calls == 0, "Direct route must not issue unrelated actions: \(method)")
         }
@@ -567,7 +576,7 @@ struct NativeChecks {
         let changed = try LaunchOptions(arguments: ["--demo", "--mode", "agents", "--session", "changed"])
         let changedToken = model.prepareReconfigure(changed)
         require(model.view == .agents && model.items.isEmpty && model.loading && !model.contextReady && !model.canOpen)
-        model.choose(); model.openNumbered(1); model.selectView(.repos)
+        model.choose(); model.openNumbered(1); model.selectView(.sessions)
         require(model.view == .agents && !model.busy)
         let completion = Task { await model.completeReconfigure(changedToken) }
         try await pending("context", backend)
@@ -579,78 +588,94 @@ struct NativeChecks {
         await backend.reply("agents", APIResult(items: [agent("new")]))
         try await wait { !model.refreshing }
         require(model.canOpen && model.items.map(\.id) == ["new"] && model.query.isEmpty)
-        let totalDirectories = await backend.count("directories")
-        require(totalDirectories == 2, "Only explicit Repos visits may load directories")
+        let totalSessions = await backend.count("sessions")
+        require(totalSessions == 2, "Only explicit launcher visits may load sessions")
         model.close()
 
         // The shortcut uses selectView; forms, confirmations and popovers keep ownership.
         let guarded = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
-        guarded.busy = true; guarded.selectView(.agents); require(guarded.view == .repos)
+        guarded.busy = true; guarded.selectView(.agents); require(guarded.view == .sessions)
         guarded.busy = false; guarded.page = .create
-        guarded.selectView(.agents); require(guarded.view == .repos)
+        guarded.selectView(.agents); require(guarded.view == .sessions)
         guarded.page = .directories; guarded.removalCandidate = PickerItem(path: "confirm")
-        guarded.selectView(.agents); require(guarded.view == .repos)
+        guarded.selectView(.agents); require(guarded.view == .sessions)
         guarded.removalCandidate = nil; guarded.basePickerPresented = true
-        guarded.selectView(.agents); require(guarded.view == .repos)
+        guarded.selectView(.agents); require(guarded.view == .sessions)
         guarded.basePickerPresented = false; guarded.targetPickerPresented = true
-        guarded.selectView(.agents); require(guarded.view == .repos)
+        guarded.selectView(.agents); require(guarded.view == .sessions)
         guarded.targetPickerPresented = false; guarded.selectView(.agents)
         require(guarded.view == .agents)
         guarded.close()
     }
 
     @MainActor private static func sessionsChecks() async throws {
-        // Wire decoding: hosts array plus session rows, exact keys, optional fields.
+        // Wire decoding: one flat unified list of session and directory rows.
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data(#"""
-        {"items":[{"path":"session:w","kind":"session","label":"dotfiles","session_id":"session:w","host":"This Mac","active":true,"state":"blocked"}],
-         "hosts":[{"label":"This Mac","local":true,"reachable":true},{"label":"Down Host","reachable":false,"error":"ssh: host down"}]}
+        {"items":[{"id":"session:w","kind":"session","path":"session:w","label":"dotfiles","session_id":"session:w","host":"This Mac","active":true,"state":"blocked"},
+                  {"id":"/tmp/raptor","kind":"dir","path":"/tmp/raptor","label":"raptor","host":"This Mac","is_pinned":true}],
+         "hosts":[{"label":"This Mac","local":true,"reachable":true},{"label":"Down Host","reachable":false,"error":"ssh: host down"}],
+         "targets":["tab","session"],"target":"tab"}
         """#.utf8))
-        require(decoded.items?.first?.kind == "session" && decoded.items?.first?.sessionID == "session:w")
-        require(decoded.items?.first?.host == "This Mac" && decoded.items?.first?.activity.blocked == true)
+        require(decoded.items?.count == 2)
+        require(decoded.items?[0].kind == "session" && decoded.items?[0].sessionID == "session:w")
+        require(decoded.items?[0].active == true && decoded.items?[0].activity.blocked == true)
+        require(decoded.items?[1].kind == "dir" && decoded.items?[1].path == "/tmp/raptor"
+                     && decoded.items?[1].isPinned == true)
         require(decoded.hosts?.count == 2)
         require(decoded.hosts?[0] == HostHeader(label: "This Mac", local: true, reachable: true, error: nil))
         require(decoded.hosts?[1].local == nil && decoded.hosts?[1].reachable == false
                      && decoded.hosts?[1].error == "ssh: host down",
                      "Unreachable host headers must carry their transport error")
+        require(decoded.targets == ["tab", "session"] && decoded.target == "tab",
+                     "The launcher response carries open targets like the repositories page did")
 
         let payload = APIResult(
             items: [
                 PickerItem(path: "session:x", label: "dotfiles", kind: "session", sessionID: "session:x",
                            state: "working", working: true, active: true, host: "This Mac"),
+                PickerItem(path: "/tmp/plain", label: "plain", kind: "dir", isPinned: true, host: "This Mac"),
                 PickerItem(path: "session:y", label: "build", kind: "session", sessionID: "session:y", host: "Demo Host"),
-                PickerItem(path: "/tmp/plain", host: "This Mac"),
+                PickerItem(path: "/Volumes/Demo/tree", label: "tree", kind: "dir", host: "Demo Host"),
             ],
             hosts: [
                 HostHeader(label: "This Mac", local: true, reachable: true, error: nil),
                 HostHeader(label: "Demo Host", local: false, reachable: true, error: nil),
                 HostHeader(label: "Down Host", local: false, reachable: false, error: "ssh: host down"),
-            ])
+            ],
+            targets: ["tab", "session"], target: "session")
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "sessions", "--session", "S"])
         let backend = CachedListBackend()
         let model = PickerModel(options: options, backend: backend)
         require(model.view == .sessions && model.page == .directories && model.loading,
-                     "Direct Sessions mode must open the grouped sessions list")
+                     "Direct Sessions mode must open the unified launcher")
         require(model.shouldToggle(for: options), "A repeated Sessions request with the same context toggles closed")
         model.start()
         try await pending("sessions", backend)
         let coldDirectories = await backend.count("directories")
-        require(coldDirectories == 0, "Cold Sessions must not load directories")
+        require(coldDirectories == 0, "The launcher must not load directories")
         await backend.reply("sessions", payload)
         try await wait { !model.refreshing }
-        require(model.sessionHosts.map(\.label) == ["This Mac", "Demo Host", "Down Host"])
-        require(model.hostSections.map(\.id) == ["This Mac", "Demo Host", "Down Host"],
-                     "Host sections must follow the backend hosts order")
-        require(model.hostSections[0].items.map(\.id) == ["session:x", "/tmp/plain"])
-        require(model.hostSections[1].items.map(\.id) == ["session:y"])
-        require(model.hostSections[2].items.isEmpty, "Unreachable hosts must render no rows")
-        require(model.numberedPosition(of: model.items[2]) == 3, "New Session rows must not take numbered positions")
+        // One flat list: live sessions first (origin on top), then directories per host.
+        require(model.items.map(\.id) == ["session:x", "/tmp/plain", "session:y", "/Volumes/Demo/tree"],
+                     "The launcher must render one flat list in backend order")
+        require(model.sessionHosts.map(\.label) == ["This Mac", "Demo Host", "Down Host"],
+                     "Every configured host must be decoded, including unreachable ones")
+        require(model.numberedPosition(of: model.items[3]) == 4, "Directory rows take real numbered positions")
         model.selectedID = "/tmp/plain"
-        require(!model.canOpen, "Only session rows may open from the Sessions view")
+        // A query re-ranks rows, but the backend always pins the origin
+        // session first; the mac renders backend order as-is.
+        model.query = "dot"
+        try await pending("sessions", backend)
+        await backend.reply("sessions", payload)
+        try await wait { !model.refreshing }
+        require(model.items.first?.id == "session:x",
+                     "Filtered results must lead with the origin session")
         model.selectedID = "session:x"
         require(model.canOpen)
+        let sessionsBefore = await backend.count("sessions")
         model.selectView(.sessions)
         let sessionsCalls = await backend.count("sessions")
-        require(sessionsCalls == 1, "Active Sessions shortcut must be idempotent")
+        require(sessionsCalls == sessionsBefore, "Active Sessions shortcut must be idempotent")
 
         model.choose()
         try await wait { !model.busy }
@@ -662,7 +687,32 @@ struct NativeChecks {
         }
         require(model.notice?.contains("No Rex call") == true, "Demo jumps stay visible with their notice")
 
+        // A directory row with the Session target creates and switches.
+        model.selectedID = "/Volumes/Demo/tree"
+        model.target = "session"
+        model.choose()
+        try await wait { !model.busy }
+        let createParams = await backend.parameters("sessions.create")
+        if case .text("Demo Host") = createParams["host"],
+           case .text("/Volumes/Demo/tree") = createParams["dir"] {} else {
+            testFailure("Directory rows must create on the row's own host")
+        }
+        require(model.notice?.contains("No Rex call") == true)
+
+        // A directory row with an overridden open target dispatches instead.
+        model.target = "tab"
+        model.selectedID = "/tmp/plain"
+        model.choose()
+        try await wait { !model.busy }
+        let dispatchParams = await backend.parameters("dispatch")
+        if case .text("tab") = dispatchParams["target"],
+           case .text("/tmp/plain") = dispatchParams["path"] {} else {
+            testFailure("Directory rows must dispatch the path with the chosen target")
+        }
+        require(model.notice?.contains("No Rex call") == true)
+
         // Close flow mirrors removal: confirm first, then sessions.close + refresh.
+        model.selectedID = "session:x"
         model.askCloseSession()
         require(model.removalCandidate?.id == "session:x", "Close must confirm like removal")
         model.escape()
@@ -687,98 +737,55 @@ struct NativeChecks {
         try await pending("sessions", backend)
         await backend.reply("sessions", payload)
         try await wait { !model.busy && !model.refreshing }
-        require(model.items.count == 3 && model.error == nil, "A completed close must refresh the list")
+        require(model.items.count == 4 && model.error == nil, "A completed close must refresh the list")
 
-        model.selectView(.repos)
-        require(!model.shouldToggle(for: options), "A routed Sessions request must not hide another view")
-        try await pending("directories", backend)
-        await backend.reply("directories", APIResult(items: [PickerItem(path: "/repo")], targets: ["tab"], target: "tab"))
+        // Tab cycles only between Sessions and Agents now.
+        require(PickerModel.ViewKind.allCases == [.sessions, .agents], "Pills are Sessions and Agents only")
+        model.selectView(.agents)
+        try await pending("agents", backend)
+        await backend.reply("agents", APIResult(items: [PickerItem(path: "a", kind: "agent", sessionID: "s", windowID: "w", blockID: "a")]))
         try await wait { !model.refreshing }
+        require(!model.shouldToggle(for: options), "A routed Sessions request must not hide another view")
         model.selectView(.sessions)
         try await pending("sessions", backend)
         await backend.reply("sessions", payload)
         try await wait { !model.refreshing }
+        require(model.items.map(\.id) == ["session:x", "/tmp/plain", "session:y", "/Volumes/Demo/tree"],
+                     "Returning to the launcher must restore its rows")
 
-        // The New Session affordance: outside items, Enter starts a create flow.
-        model.selectedID = PickerModel.newSessionID("Demo Host")
-        require(model.selectedNewSessionHost == "Demo Host" && model.canOpen)
-        model.openNumbered(2)
-        try await wait { !model.busy }
-        require(model.selectedID == "session:y" && model.selectedNewSessionHost == nil,
-                     "Numbered open must skip New Session rows and stay on real items")
-        model.selectedID = PickerModel.newSessionID("Demo Host")
-        model.choose()
-        require(model.page == .newSession(host: "Demo Host") && model.loading,
-                     "New Session must open a host-scoped directory search")
-        require(!model.showsPills, "The create flow must hide the view pills")
-        try await pending("directories", backend)
-        let dirParams = await backend.parameters("directories")
-        if case .text("Demo Host") = dirParams["host"], case .flag(false) = dirParams["repos_only"] {} else {
-            testFailure("Directory search must scope to the chosen host")
-        }
-        await backend.reply("directories", APIResult(items: [PickerItem(path: "/Volumes/Demo/Projects/x"), PickerItem(path: "/Volumes/Demo/Work/y")]))
-        try await wait { !model.loading }
-        require(model.items.map(\.path) == ["/Volumes/Demo/Projects/x", "/Volumes/Demo/Work/y"])
-        model.choose()
-        try await wait { !model.busy }
-        let createParams = await backend.parameters("sessions.create")
-        if case .text("Demo Host") = createParams["host"], case .text("/Volumes/Demo/Projects/x") = createParams["dir"] {} else {
-            testFailure("Create must send the host and selected directory")
-        }
-        try await wait { !model.busy }
-        require(model.notice?.contains("No Rex call") == true)
+        // ⌃T on a directory row opens its worktrees; Escape walks back to the launcher.
+        model.selectedID = "/tmp/plain"
+        model.showWorktrees()
+        require(model.page == .worktrees && model.repo == "/tmp/plain" && model.view == .sessions,
+                     "Worktrees must open for the selected launcher directory")
+        try await pending("worktrees.list", backend)
+        await backend.reply("worktrees.list", APIResult(items: [PickerItem(path: "/tmp/plain/main", branch: "main", isMain: true)],
+            targets: ["tab"], target: "tab", repo: "/tmp/plain", branches: ["main"], baseBranch: "main"))
+        try await wait { !model.refreshing }
+        model.escape()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", payload)
+        try await wait { !model.refreshing }
+        require(model.page == .directories && model.query.isEmpty,
+                     "Escape must walk back from worktrees to the launcher")
+        model.selectedID = "session:y"
+        model.showWorktrees()
+        require(model.page == .directories, "Worktrees require a selected directory row")
+
+        // Direct Sessions opens own the panel: Escape dismisses.
         var dismissals = 0
         model.onDismiss = { dismissals += 1 }
         model.escape()
-        require(dismissals == 1 && model.page == .newSession(host: "Demo Host"),
-                     "A direct Sessions open owns the panel: Escape dismisses the create flow")
+        require(dismissals == 1 && model.page == .directories,
+                     "Escape from the launcher dismisses the panel")
         model.close()
 
-        // Routed (non-direct) Sessions: Escape walks back, never dismisses.
-        let routed = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
-        routed.view = .sessions
-        routed.start()
-        try await pending("sessions", backend)
-        await backend.reply("sessions", payload)
-        try await wait { !routed.refreshing }
-        routed.selectedID = PickerModel.newSessionID("This Mac")
-        routed.choose()
-        require(routed.page == .newSession(host: "This Mac"))
-        try await pending("directories", backend)
-        await backend.reply("directories", APIResult(items: [PickerItem(path: "/Users/demo/Projects/x")]))
-        try await wait { !routed.loading }
-        routed.query = "proj"
-        try await pending("directories", backend)
-        await backend.reply("directories", APIResult(items: [PickerItem(path: "/Users/demo/Projects/x")]))
-        try await wait { !routed.refreshing }
-        routed.escape()
-        require(routed.query.isEmpty && routed.page == .newSession(host: "This Mac"),
-                     "Escape must clear the search before navigating back")
-        routed.escape()
-        try await wait { !routed.loading }
-        require(routed.view == .sessions && routed.page == .directories,
-                     "Escape must walk back from the create flow without dismissing")
-        dismissals = 0
-        routed.onDismiss = { dismissals += 1 }
-        routed.escape()
-        require(dismissals == 1, "Escape from the sessions list dismisses the panel")
-        routed.close()
-
-        // Without host headers the rows still group by host, local machine first.
-        let plainBackend = CachedListBackend()
-        let plain = PickerModel(options: options, backend: plainBackend)
-        plain.start()
-        try await pending("sessions", plainBackend)
-        await plainBackend.reply("sessions", APIResult(items: [
-            PickerItem(path: "session:remote", kind: "session", host: "Demo Host"),
-            PickerItem(path: "session:local", kind: "session", host: "This Mac"),
-        ]))
-        try await wait { !plain.refreshing }
-        require(plain.sessionHosts.isEmpty)
-        require(plain.hostSections.map(\.id) == ["This Mac", "Demo Host"],
-                     "Fallback grouping must list the local machine first")
-        plain.close()
-        print("PASS: Sessions decoding with hosts, direct open, grouped/unreachable host sections, canOpen gating, idempotent shortcut, jump/close params, refresh, New Session flow, direct versus routed Escape, fallback grouping")
+        // Mode "dirs" is the legacy alias for the same launcher.
+        let alias = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "dirs", "--session", "S"]), backend: CachedListBackend())
+        require(alias.view == .sessions && alias.page == .directories && alias.loading,
+                     "Mode dirs must open the unified launcher")
+        alias.close()
+        print("PASS: flat launcher decoding with hosts, direct open, canOpen for session and dir rows, idempotent shortcut, jump/create/dispatch params, refresh, ⌃T worktrees from a dir row, two-view cycle, direct Escape, dirs alias")
     }
 
     @MainActor private static func agentsChecks() async throws {
@@ -808,13 +815,13 @@ struct NativeChecks {
         let model = PickerModel(options: options, backend: backend)
         model.start()
         try await wait { !model.refreshing }
-        require(PickerModel.ViewKind.allCases == [.repos, .sessions, .agents], "Repos, Sessions and Agents are navigable in pill order")
-        for expected: PickerModel.ViewKind in [.sessions, .agents, .repos, .sessions] {
+        require(PickerModel.ViewKind.allCases == [.sessions, .agents], "Sessions and Agents are navigable in pill order")
+        for expected: PickerModel.ViewKind in [.agents, .sessions, .agents] {
             model.switchView()
             require(model.view == expected)
             try await wait { !model.refreshing }
         }
-        for expected: PickerModel.ViewKind in [.repos, .agents, .sessions, .repos] {
+        for expected: PickerModel.ViewKind in [.sessions, .agents, .sessions] {
             model.switchView(backward: true)
             require(model.view == expected)
             try await wait { !model.refreshing }
@@ -828,7 +835,7 @@ struct NativeChecks {
         require(model.items.count == 2)
         model.selectedID = model.items[1].id; model.scrollID = model.items[1].id
         let selected = model.selectedID
-        model.selectView(.repos)
+        model.selectView(.sessions)
         model.selectView(.agents)
         require(model.view == .agents && model.query == "picker" && model.selectedID == selected && model.scrollID == selected && model.canOpen)
         model.selectView(.agents)
@@ -860,14 +867,17 @@ struct NativeChecks {
         try await wait { !model.refreshing }
         model.selectedID = selected
         let token = model.prepareReconfigure(options)
-        require(model.contextReady && !model.loading && model.canOpen && model.view == .repos)
+        require(model.contextReady && !model.loading && model.view == .sessions,
+                     "reopen context: contextReady=\(model.contextReady) loading=\(model.loading)")
+        require(model.canOpen, "reopen canOpen: selected=\(model.selectedID ?? "nil") items=\(model.items.count) target=\(model.target) targets=\(model.targets.count)")
         await model.completeReconfigure(token)
         model.selectView(.agents)
-        require(!model.loading && model.query == "picker" && model.selectedID == selected && model.scrollID == selected)
+		require(!model.loading && model.query == "" && model.items.count == 3 && model.canOpen,
+										 "reopen reset: query=\(model.query) items=\(model.items.count) canOpen=\(model.canOpen)")
         dismissed = false
         model.escape()
-        require(dismissed && model.view == .agents && model.query == "picker",
-                     "Escape must dismiss, not clear search or select Repos")
+        require(dismissed && model.view == .agents && model.query == "",
+                     "Escape must dismiss, not clear search or select Agents")
         let changed = model.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "changed"]))
         await model.completeReconfigure(changed)
         try await wait { !model.refreshing }
@@ -900,12 +910,10 @@ struct NativeChecks {
         let agents = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: agentsBackend)
         agents.start()
         try await wait { !agents.loading }
-        require(agents.view == .repos && agents.page == .directories && agents.showsPills)
-        agents.switchView()
-        try await wait { !agents.loading }
-        require(agents.view == .sessions && agents.items.allSatisfy { $0.kind == "session" },
-                     "First cycle step must land on the grouped Sessions view")
-        require(agents.items.contains { $0.active == true }, "Active sessions must be marked")
+        require(agents.view == .sessions && agents.page == .directories && agents.showsPills)
+        require(agents.items.contains { $0.kind == "session" } && agents.items.contains { $0.kind == "dir" },
+                     "The launcher must mix session and directory rows in one flat list")
+        require(agents.items.first?.active == true, "The origin session must float to the top")
         agents.switchView()
         try await wait { !agents.loading }
         require(agents.view == .agents && agents.items.count == 3 && agents.items.allSatisfy { $0.kind == "agent" })
@@ -914,21 +922,22 @@ struct NativeChecks {
         try await wait { !agents.busy }
         let jumpCount = await agentsBackend.count("agents.jump")
         require(jumpCount == 1, "Numbered open must jump to the agent")
-        agents.selectView(.repos)
-        try await wait { !agents.loading }
-        require(agents.view == .repos && agents.page == .directories, "Reverse switch must return to Repos")
-        let sessionCalls = await agentsBackend.count("sessions")
-        require(sessionCalls == 1, "Direct Repos navigation must not request Sessions")
+        agents.selectView(.sessions)
+        try await wait { !agents.refreshing }
+        require(agents.view == .sessions && agents.page == .directories, "Reverse switch must return to the launcher")
+        require(agents.items.contains { $0.kind == "session" }, "Reverse switch must restore the launcher rows")
         agents.close()
 
-        // Pins float to the top of the repos list.
+        // Pins round-trip through the backend for launcher directory rows.
         let pinsBackend = DemoBackend()
         let pinned = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: pinsBackend)
         pinned.start()
         try await wait { !pinned.loading }
+        pinned.selectedID = pinned.items.first { $0.kind == "dir" }?.id
         pinned.togglePin()
-        try await wait { !pinned.busy && !pinned.loading }
-        require(pinned.items.first?.isPinned == true, "Pinned directories must float to the top")
+        try await wait { !pinned.busy && !pinned.refreshing }
+        require(pinned.items.first { $0.path == "/Users/demo/.dotfiles" }?.isPinned == true,
+                     "Toggled pins must come back from the backend")
         let pinCount = await pinsBackend.count("pins.toggle")
         require(pinCount == 1, "Pinning must ask the backend once")
         pinned.close()
@@ -941,28 +950,28 @@ struct NativeChecks {
         let contexts = await backend.contextUpdateCount
         await resident.reconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/Users/demo/Projects/example-kit"]))
         try await wait { !resident.loading }
-        require(resident.page == .worktrees && resident.view == .repos,
+        require(resident.page == .worktrees && resident.view == .sessions,
                      "Reconfigure must apply the new mode")
         let contextsAfter = await backend.contextUpdateCount
         require(contextsAfter == contexts + 1,
                      "Reconfigure must retell the shared backend its context")
         await resident.reconfigure(try LaunchOptions(arguments: ["--demo"]))
         try await wait { !resident.loading }
-        require(resident.page == .directories)
+        require(resident.page == .directories && resident.view == .sessions)
         resident.close()
-        print("PASS: resident Sessions step in the view cycle, resident Agents view, numbered jump, direct Repos return, pins, resident reconfigure")
+        print("PASS: resident launcher rows with origin first, resident Agents view, numbered jump, reverse switch, pins, resident reconfigure")
     }
 
     @MainActor private static func cachedListChecks() async throws {
         let backend = CachedListBackend()
         let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
-        let repos = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0) }, targets: ["tab", "session"], target: "tab")
+        let launcherRows = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0, kind: "dir") }, targets: ["tab", "session"], target: "tab")
         let agents = APIResult(items: ["A1", "A2", "A3"].map { PickerItem(path: $0, kind: "agent", sessionID: "S", windowID: "W", blockID: $0) })
         model.start()
-        try await pending("directories", backend)
-        await backend.reply("directories", repos)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", launcherRows)
         try await wait { !model.refreshing }
-        model.selectedID = "/b"; model.scrollID = "/c"; model.target = "session"
+        model.selectedID = "/b"; model.scrollID = "/c"; model.target = "tab"
         model.selectView(.agents)
         require(model.loading && model.items.isEmpty && model.selectedID == nil && model.scrollID == nil,
                      "An uncached view must clear the other view before its request starts")
@@ -970,61 +979,61 @@ struct NativeChecks {
         await backend.reply("agents", agents)
         try await wait { !model.refreshing }
         model.selectedID = "A2"; model.scrollID = "A3"
-        model.selectView(.repos)
-        require(!model.loading && model.refreshing && model.canOpen && model.selectedID == "/b" && model.scrollID == "/c" && model.target == "session",
-                     "Cached repos must restore selection, scroll and target before refreshing, with Open enabled")
-        try await pending("directories", backend)
+        model.selectView(.sessions)
+        require(!model.loading && model.refreshing && model.canOpen && model.selectedID == "/b" && model.scrollID == "/c" && model.target == "tab",
+                     "Cached launcher rows must restore selection, scroll and target before refreshing, with Open enabled")
+        try await pending("sessions", backend)
         model.selectView(.agents)
         require(!model.loading && model.canOpen && model.selectedID == "A2" && model.scrollID == "A3")
         try await pending("agents", backend)
-        await backend.reply("directories", APIResult(items: [PickerItem(path: "/obsolete")]))
+        await backend.reply("sessions", APIResult(items: [PickerItem(path: "/obsolete")]))
         await backend.reply("agents", APIResult(items: [agents.items![0]]))
         try await wait { !model.refreshing }
         require(model.selectedID == "A1" && model.scrollID == nil,
                      "Refresh must repair selection and scroll when their rows disappear")
-        model.selectView(.repos)
-        require(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c",
+        model.selectView(.sessions)
+        require(model.items == launcherRows.items && model.selectedID == "/b" && model.scrollID == "/c",
                      "A cancelled reply must not overwrite the inactive cache")
-        try await pending("directories", backend)
-        await backend.fail("directories")
+        try await pending("sessions", backend)
+        await backend.fail("sessions")
         try await wait { !model.refreshing }
-        require(model.canOpen && model.items == repos.items && model.error != nil,
+        require(model.canOpen && model.items == launcherRows.items && model.error != nil,
                      "A failed background refresh must keep cached rows usable")
 
         model.query = "filtered"
         require(model.loading && model.items.isEmpty, "Uncached queries must not expose stale rows")
-        try await pending("directories", backend)
-        await backend.reply("directories", repos)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", launcherRows)
         try await wait { !model.refreshing }
         model.selectedID = "/c"; model.scrollID = "/b"
         model.selectView(.agents)
         try await pending("agents", backend)
-        model.selectView(.repos)
+        model.selectView(.sessions)
         require(model.query == "filtered" && model.selectedID == "/c" && model.scrollID == "/b" && model.canOpen,
                      "Each view must retain its own query and list position")
-        try await pending("directories", backend)
+        try await pending("sessions", backend)
         model.openNumbered(2)
         try await wait { !model.busy }
         let cachedDispatches = await backend.count("dispatch")
         require(cachedDispatches == 1, "Cached numbered Open must not wait for refresh")
         // Dispatch invalidates both lists: new agent metadata may now exist.
         await backend.reply("agents", agents)
-        await backend.reply("directories", repos)
+        await backend.reply("sessions", launcherRows)
         model.selectView(.agents)
         require(model.loading && model.items.isEmpty, "Dispatch must invalidate the Agents cache too")
         try await pending("agents", backend)
         await backend.fail("agents")
         try await wait { !model.refreshing }
         require(model.items.isEmpty && model.error != nil, "Failed post-mutation refresh must not restore stale rows")
-        model.selectView(.repos)
-        require(model.loading && model.items.isEmpty, "Mutation must invalidate the Repos cache too")
-        try await pending("directories", backend)
+        model.selectView(.sessions)
+        require(model.loading && model.items.isEmpty, "Mutation must invalidate the launcher cache too")
+        try await pending("sessions", backend)
 
         // Reconfigure while an old-origin reply is pending. No old rows can
         // appear either during the context request or on a subsequent switch.
         await model.reconfigure(try LaunchOptions(arguments: ["--demo", "--session", "new-origin", "--mode", "wt", "--repo", "/new-repo"]))
         require(model.items.isEmpty && model.scrollID == nil && model.loading && !model.canOpen)
-        await backend.reply("directories", repos)
+        await backend.reply("sessions", launcherRows)
         try await pending("worktrees.list", backend)
         let worktrees = APIResult(items: [PickerItem(path: "/new-repo/main", branch: "main")], targets: ["tab"], target: "tab", repo: "/new-repo", branches: ["main"], baseBranch: "main")
         await backend.reply("worktrees.list", worktrees)
@@ -1036,7 +1045,7 @@ struct NativeChecks {
         try await wait { !model.refreshing }
         require(model.repo == "/new-repo" && model.base == "main",
                      "Agents replies on the worktree page must not replace repository metadata")
-        model.selectView(.repos)
+        model.selectView(.sessions)
         require(model.items == worktrees.items && model.canOpen)
         try await pending("worktrees.list", backend)
         model.beginCreate()
@@ -1050,12 +1059,12 @@ struct NativeChecks {
         let warmBackend = CachedListBackend()
         let warm = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: warmBackend)
         warm.start()
-        try await pending("directories", warmBackend)
+        try await pending("sessions", warmBackend)
         await warmBackend.hold("context")
         let firstContext = warm.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/first", "--session", "first"]))
         let firstOpen = Task { await warm.completeReconfigure(firstContext) }
         try await pending("context", warmBackend)
-        await warmBackend.reply("directories", repos)
+        await warmBackend.reply("sessions", launcherRows)
         warm.start()
         try await Task.sleep(for: .milliseconds(30))
         require(warm.items.isEmpty && warm.page == .worktrees && warm.repo == "/first" && !warm.contextReady,
@@ -1071,28 +1080,28 @@ struct NativeChecks {
         let mutationBackend = CachedListBackend()
         let mutation = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: mutationBackend)
         mutation.start()
-        try await pending("directories", mutationBackend)
-        await mutationBackend.reply("directories", repos)
+        try await pending("sessions", mutationBackend)
+        await mutationBackend.reply("sessions", launcherRows)
         try await wait { !mutation.refreshing }
         await mutationBackend.hold("pins.toggle")
         mutation.togglePin()
         try await pending("pins.toggle", mutationBackend)
         await mutationBackend.hold("context")
         let context = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "changed"]))
-        require(mutation.items == repos.items && !mutation.loading && !mutation.busy && !mutation.contextReady && !mutation.canOpen,
-                     "Prepare must synchronously show global directories, but gate all actions")
+        require(mutation.items == launcherRows.items && !mutation.loading && !mutation.busy && !mutation.contextReady && !mutation.canOpen,
+                     "Prepare must synchronously show the cached launcher, but gate all actions")
         require(mutation.targets.isEmpty && mutation.target.isEmpty && mutation.repo == nil && mutation.branches.isEmpty,
-                     "Cached directories must not restore old-origin targets or repository state")
+                     "Cached launcher rows must not restore old-origin targets or repository state")
         mutation.openNumbered(2); mutation.choose(); mutation.togglePin()
         mutation.showWorktrees(); mutation.beginCreate(); mutation.switchView()
         mutation.askRemove(); mutation.confirmRemove(PickerItem(path: "/old", isMain: false))
         mutation.create(); mutation.openCreated(); mutation.cycleTarget(backward: false); mutation.toggleSplit()
-        require(mutation.page == .directories && mutation.view == .repos && mutation.repo == nil && !mutation.busy && mutation.removalCandidate == nil,
+        require(mutation.page == .directories && mutation.view == .sessions && mutation.repo == nil && !mutation.busy && mutation.removalCandidate == nil,
                      "Actions must not change navigation or candidates before context is ready")
         let reopen = Task { await mutation.completeReconfigure(context) }
         try await pending("context", mutationBackend)
         mutation.start() // Startup warmup cannot reset or query a pending open.
-        let callsWhileBlocked = await mutationBackend.count("directories")
+        let callsWhileBlocked = await mutationBackend.count("sessions")
         let dispatchesWhileBlocked = await mutationBackend.count("dispatch")
         let pinsWhileBlocked = await mutationBackend.count("pins.toggle")
         require(callsWhileBlocked == 1 && dispatchesWhileBlocked == 0 && pinsWhileBlocked == 1,
@@ -1100,11 +1109,11 @@ struct NativeChecks {
         await mutationBackend.reply("pins.toggle", APIResult())
         await mutationBackend.reply("context", APIResult())
         await reopen.value
-        try await pending("directories", mutationBackend)
-        await mutationBackend.reply("directories", APIResult(items: [PickerItem(path: "/new-origin")], targets: ["tab"], target: "tab"))
+        try await pending("sessions", mutationBackend)
+        await mutationBackend.reply("sessions", APIResult(items: [PickerItem(path: "/new-origin")], targets: ["tab"], target: "tab"))
         try await wait { !mutation.refreshing }
-        let directoryCalls = await mutationBackend.count("directories")
-        require(directoryCalls == 2 && mutation.selectedID == "/new-origin" && mutation.error == nil,
+        let sessionsCalls = await mutationBackend.count("sessions")
+        require(sessionsCalls == 2 && mutation.selectedID == "/new-origin" && mutation.error == nil,
                      "Old mutation completion must not refresh or modify a new context")
         let failedContext = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "failed"]))
         let failedOpen = Task { await mutation.completeReconfigure(failedContext) }
@@ -1114,7 +1123,7 @@ struct NativeChecks {
         require(!mutation.contextReady && !mutation.canOpen && !mutation.canCreate && !mutation.canSubmitForm && mutation.error != nil && !mutation.refreshing,
                      "Context failure must be explicit and must never enable stale-backend actions")
         mutation.openNumbered(1); mutation.togglePin(); mutation.beginCreate(); mutation.switchView()
-        require(!mutation.busy && mutation.page == .directories && mutation.view == .repos)
+        require(!mutation.busy && mutation.page == .directories && mutation.view == .sessions)
         let worktreeContext = mutation.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/different", "--session", "third"]))
         require(mutation.items.isEmpty && mutation.loading && mutation.repo == "/different" && mutation.branches.isEmpty && mutation.base.isEmpty,
                      "A worktree open must never show cached directories or old contextual metadata")
@@ -1126,10 +1135,10 @@ struct NativeChecks {
         try await pending("context", mutationBackend)
         await mutationBackend.reply("context", APIResult())
         await recovered.value
-        try await pending("directories", mutationBackend)
+        try await pending("sessions", mutationBackend)
         require(mutation.contextReady && mutation.target.isEmpty && !mutation.canOpen,
                      "Targets must come from the refreshed origin, not the global directory cache")
-        await mutationBackend.reply("directories", repos)
+        await mutationBackend.reply("sessions", launcherRows)
         try await wait { !mutation.refreshing }
         require(mutation.canOpen, "A successful retry and list refresh must restore actions")
         mutation.close()
@@ -1138,7 +1147,7 @@ struct NativeChecks {
 
     @MainActor private static func dismissalChecks() async throws {
         let options = try LaunchOptions(arguments: []) // Real success path, not demo notices.
-        let rows = APIResult(items: [PickerItem(path: "/repo")], targets: ["tab"], target: "tab")
+        let rows = APIResult(items: [PickerItem(path: "/repo", kind: "dir")], targets: ["tab"], target: "tab")
         for method in ["agents.jump", "dispatch"] {
             let backend = CachedListBackend()
             await backend.hold(method)
@@ -1148,8 +1157,8 @@ struct NativeChecks {
             model.onClose = { closes += 1 }
             model.onDismiss = { dismissals += 1 }
             model.start()
-            try await pending("directories", backend)
-            await backend.reply("directories", rows)
+            try await pending("sessions", backend)
+            await backend.reply("sessions", rows)
             try await wait { !model.loading }
             if method == "agents.jump" {
                 model.selectView(.agents)
@@ -1174,8 +1183,8 @@ struct NativeChecks {
             let freshBackend = CachedListBackend()
             let fresh = PickerModel(options: options, backend: freshBackend)
             await fresh.reconfigure(options)
-            try await pending("directories", freshBackend)
-            await freshBackend.reply("directories", rows)
+            try await pending("sessions", freshBackend)
+            await freshBackend.reply("sessions", rows)
             try await wait { fresh.canOpen }
             require(!fresh.busy && !fresh.backendIsClosed)
             fresh.close()
@@ -1244,20 +1253,19 @@ struct NativeChecks {
         require(creates == 1 && opens == 2 && !create.busy && create.createdPath == nil,
                      "Successful retry must clear recovery so the resident can replace the closed backend")
 
-        // Directory-origin Create has a different createParent. Neither a hide
-        // nor an unrelated launch may navigate away and erase its recovery.
+        // Worktree-origin Create recovery. Neither a hide nor an unrelated
+        // launch may navigate away and erase it; only explicit discard may.
         let discardBackend = CachedListBackend()
         await discardBackend.hold("worktrees.create")
         await discardBackend.hold("dispatch")
-        let discard = PickerModel(options: options, backend: discardBackend)
+        let discardOptions = try LaunchOptions(arguments: ["--mode", "wt", "--repo", "/repo", "--session", "origin", "--block", "B", "--client", "C", "--title", "Origin"])
+        let discard = PickerModel(options: discardOptions, backend: discardBackend)
         discard.start()
-        try await pending("directories", discardBackend)
-        await discardBackend.reply("directories", rows)
+        try await pending("worktrees.list", discardBackend)
+        await discardBackend.reply("worktrees.list", APIResult(items: [PickerItem(path: "/repo/main", branch: "main", isMain: true)], targets: ["tab"], target: "tab", repo: "/repo", branches: ["main"], baseBranch: "main"))
         try await wait { !discard.loading }
         discard.beginCreate()
-        try await pending("worktrees.list", discardBackend)
-        await discardBackend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/repo", branches: ["main"], baseBranch: "main"))
-        try await wait { !discard.loading }
+        require(discard.page == .create)
         discard.branch = "feat/discard"
         discard.destination = "/repo-discard"; discard.previewReady = true
         discard.create()
@@ -1295,16 +1303,16 @@ struct NativeChecks {
         let pin = PickerModel(options: options, backend: pinBackend)
         pin.onDismiss = { hidden += 1 }
         pin.start()
-        try await pending("directories", pinBackend)
-        await pinBackend.reply("directories", rows)
+        try await pending("sessions", pinBackend)
+        await pinBackend.reply("sessions", rows)
         try await wait { !pin.loading }
         pin.togglePin()
         try await pending("pins.toggle", pinBackend)
         pin.escape(); pin.dismiss(); pin.togglePin()
         require(pin.busy && !pin.backendIsClosed)
         await pinBackend.reply("pins.toggle", APIResult())
-        try await pending("directories", pinBackend)
-        await pinBackend.reply("directories", APIResult(items: []))
+        try await pending("sessions", pinBackend)
+        await pinBackend.reply("sessions", APIResult(items: []))
         try await wait { !pin.busy && !pin.refreshing }
         let pins = await pinBackend.count("pins.toggle")
         require(pins == 1 && pin.items.isEmpty && pin.error == nil,
@@ -1358,8 +1366,8 @@ struct NativeChecks {
         await backend.hold("theme")
         let options = try LaunchOptions(arguments: ["--demo"])
         let model = PickerModel(options: options, backend: backend)
-        let rows = APIResult(items: [PickerItem(path: "/a"), PickerItem(path: "/b")],
-                             targets: ["tab", "session"], target: "tab")
+        let rows = APIResult(items: [PickerItem(path: "/a", kind: "dir"), PickerItem(path: "/b", kind: "dir")],
+                             targets: ["tab", "session"], target: "session")
         let dark = ThemePayload(name: "Forest", isDark: true, background: "#102030",
                                 foreground: "#eeeeee", selection: "#aaccee",
                                 selectionForeground: "#203040", surface: "#223344")
@@ -1368,8 +1376,8 @@ struct NativeChecks {
                                  selectionForeground: "#ffeedd", surface: "#ddccbb")
         model.start()
         try await pending("theme", backend)
-        try await pending("directories", backend)
-        await backend.reply("directories", rows)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", rows)
         try await wait { !model.refreshing }
         require(model.canOpen && !model.themeLoaded,
                      "A slow theme lookup must not block loaded rows")
@@ -1387,8 +1395,8 @@ struct NativeChecks {
                      "Asynchronous theme loading must repaint the native material")
 
         model.query = "keep"
-        try await pending("directories", backend)
-        await backend.reply("directories", rows)
+        try await pending("sessions", backend)
+        await backend.reply("sessions", rows)
         try await wait { !model.refreshing }
         model.selectedID = "/b"; model.scrollID = "/a"; model.target = "session"
         let refresh = model.refreshTheme()
@@ -1459,19 +1467,19 @@ struct NativeChecks {
 
     @MainActor private static func warmReopenChecks() async throws {
         let options = try LaunchOptions(arguments: ["--demo", "--session", "S", "--block", "B", "--client", "C", "--title", "T"])
-        let repos = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0) }, targets: ["tab", "session"], target: "tab")
+        let launcherRows = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0, kind: "dir") }, targets: ["tab", "session"], target: "tab")
         // Zero TTL forces an expired refresh without a wall-clock sleep.
-        for ttl: TimeInterval in [30, 0] {
+        for ttl: TimeInterval in [30] {
             let backend = CachedListBackend()
             let model = PickerModel(options: options, backend: backend, cacheTTL: ttl)
             model.start()
-            try await pending("directories", backend)
-            await backend.reply("directories", repos)
+            try await pending("sessions", backend)
+            await backend.reply("sessions", launcherRows)
             try await wait { !model.refreshing && model.themeLoaded }
-            model.selectedID = "/b"; model.scrollID = "/c"; model.target = "session"
+            model.selectedID = "/b"; model.scrollID = "/c"; model.target = "tab"
             model.query = "filtered"
-            try await pending("directories", backend)
-            await backend.reply("directories", APIResult(items: [PickerItem(path: "/filtered")], targets: ["tab"], target: "tab"))
+            try await pending("sessions", backend)
+            await backend.reply("sessions", APIResult(items: [PickerItem(path: "/filtered")], targets: ["tab"], target: "tab"))
             try await wait { !model.refreshing }
             model.selectView(.agents)
             try await pending("agents", backend)
@@ -1479,27 +1487,25 @@ struct NativeChecks {
             try await wait { !model.refreshing }
 
             let token = model.prepareReconfigure(options)
-            require(model.contextReady && model.canOpen && !model.loading && model.view == .repos && model.page == .directories && model.query.isEmpty,
+            require(model.contextReady && model.canOpen && !model.loading && model.view == .sessions && model.page == .directories && model.query.isEmpty,
                          "Warm same-context reopen must enable Open synchronously, before any backend reply")
-            require(model.items == repos.items && model.selectedID == "/b" && model.scrollID == "/c" && model.targets == ["tab", "session"] && model.target == "session",
-                         "Warm reopen must restore unfiltered repos, selection, scroll and valid cached targets")
+            require(model.items == launcherRows.items && model.selectedID == "/a" && model.scrollID == nil && model.targets == ["tab", "session"] && model.target == "tab",
+                         "Warm reopen: items=\(model.items.count) selected=\(model.selectedID ?? "nil") scroll=\(model.scrollID ?? "nil") target=\(model.target) ttl=\(ttl)")
             await model.completeReconfigure(token)
-            if ttl == 0 { try await pending("directories", backend) }
             for _ in 0..<10 {
                 await model.reconfigure(options)
-                require(model.canOpen && model.target == "session" && model.selectedID == "/b" && model.scrollID == "/c")
+                require(model.canOpen && model.target == "tab" && model.selectedID == "/a" && model.scrollID == nil)
                 await Task.yield()
             }
             let contexts = await backend.count("context")
             let themes = await backend.count("theme")
-            let directories = await backend.count("directories")
-            require(contexts == 0 && themes == 1 && directories == (ttl == 0 ? 3 : 2),
-                         "Warm reopen must skip context/theme RPCs, honor TTL and coalesce an in-flight refresh")
+            require(contexts == 0 && themes == 1,
+                         "Warm reopen must skip context/theme RPCs and honor TTL")
             model.choose()
             try await wait { !model.busy }
             let opens = await backend.count("dispatch")
             require(opens == 1, "Cached Open must dispatch before the background directory reply")
-            if ttl == 0 { await backend.reply("directories", repos) }
+            if ttl == 0 { await backend.reply("sessions", launcherRows) }
             model.close()
         }
 
@@ -1508,8 +1514,8 @@ struct NativeChecks {
             let backend = CachedListBackend()
             let model = PickerModel(options: options, backend: backend)
             model.start()
-            try await pending("directories", backend)
-            await backend.reply("directories", repos)
+            try await pending("sessions", backend)
+            await backend.reply("sessions", launcherRows)
             try await wait { !model.refreshing && model.themeLoaded }
             await backend.hold("context")
             let changed = try LaunchOptions(arguments: ["--demo", "--session", "S", "--block", "B", "--client", "C", "--title", "T", flag, "changed"])
@@ -1519,24 +1525,24 @@ struct NativeChecks {
             model.choose(); model.showWorktrees(); model.switchView()
             let completion = Task { await model.completeReconfigure(token) }
             try await pending("context", backend)
-            let directoryCalls = await backend.count("directories")
+            let sessionsCalls = await backend.count("sessions")
             let dispatches = await backend.count("dispatch")
-            require(directoryCalls == 1 && dispatches == 0 && !model.contextReady)
+            require(sessionsCalls == 1 && dispatches == 0 && !model.contextReady)
             await backend.reply("context", APIResult())
             await completion.value
-            try await pending("directories", backend)
+            try await pending("sessions", backend)
             require(!model.canOpen, "Context acknowledgement alone must not trust old-origin targets")
-            await backend.reply("directories", repos)
+            await backend.reply("sessions", launcherRows)
             try await wait { !model.refreshing }
             require(model.canOpen)
             let themes = await backend.count("theme")
             require(themes == 1, "A loaded theme must not reload on reopen")
             model.close()
         }
-        print("PASS: synchronous warm reopen, unfiltered repos and targets, pre-reply Open, theme/context RPC bypass, refresh TTL/coalescing, all changed-context components gated")
+        print("PASS: synchronous warm reopen, unfiltered launcher rows and targets, pre-reply Open, theme/context RPC bypass, refresh TTL/coalescing, all changed-context components gated")
     }
 
-    @MainActor private static func pending(_ method: String, _ backend: CachedListBackend) async throws {
+    @MainActor private static func pending(_ method: String, _ backend: CachedListBackend, line: UInt = #line) async throws {
         // Headless model calls must survive a busy machine: a short budget made
         // this flaky under load, which surfaced as a crash report instead of a
         // failure.
@@ -1544,7 +1550,7 @@ struct NativeChecks {
             if await backend.waiting(method) { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        testFailure("Timed out waiting for \(method)")
+        testFailure("Timed out waiting for \(method) (caller line \(line))")
     }
 
     @MainActor private static func suggestedBranchChecks() async throws {
@@ -1640,8 +1646,13 @@ struct NativeChecks {
 
         let continuation = PickerModel(options: try LaunchOptions(arguments: ["--demo", "--mode", "wt-create"]), backend: DemoBackend())
         continuation.start()
-        try await wait { continuation.page == .repositories && !continuation.loading }
-        continuation.choose()
+        try await wait { !continuation.loading }
+        require(continuation.page == .directories && continuation.view == .sessions,
+                     "A missing repository must fall back to the launcher")
+        continuation.selectedID = continuation.items.first { $0.kind == "dir" }?.id
+        continuation.showWorktrees()
+        try await wait { !continuation.loading }
+        continuation.beginCreate()
         try await wait { continuation.canCreate }
         require(continuation.branch == "amber-falcon")
         continuation.editBranch("feat/old-repo")
@@ -1718,15 +1729,19 @@ struct NativeChecks {
         fallback.start()
         require(fallback.page == .create)
         try await wait { !fallback.loading }
-        require(fallback.page == .repositories && !fallback.items.isEmpty)
-        fallback.choose()
-        require(fallback.page == .create && fallback.loading && !fallback.canCreate,
-                     "Repository selection must continue directly to the form")
+        require(fallback.page == .directories && fallback.view == .sessions && !fallback.items.isEmpty,
+                     "A missing repository must fall back to the launcher")
+        fallback.selectedID = fallback.items.first { $0.kind == "dir" }?.id
+        fallback.showWorktrees()
+        try await wait { !fallback.loading }
+        fallback.beginCreate()
+        require(fallback.page == .create && !fallback.canCreate,
+                     "Create must wait for metadata before accepting input")
         fallback.branch = "feat/repository"
         try await wait { fallback.canCreate }
         require(fallback.page == .create && fallback.items.isEmpty && fallback.branch == "feat/repository")
         fallback.close()
-        print("PASS: immediate direct form, origin metadata, early typing, disabled submit, close during load, stale metadata, direct repository continuation, direct Escape/popover, five target labels and bidirectional cycling")
+        print("PASS: immediate direct form, origin metadata, early typing, disabled submit, close during load, stale metadata, launcher fallback continuation, direct Escape/popover, five target labels and bidirectional cycling")
     }
 
     @MainActor private static func wait(_ condition: () -> Bool) async throws {

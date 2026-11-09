@@ -1,8 +1,10 @@
 # Sessions
 
-Use **Repos · Sessions · Agents** to switch views. Tab moves forward; Shift+Tab moves back; Ctrl+S selects Sessions from any view. In the Mac picker, Cmd+Shift+S selects Sessions directly. Escape dismisses the launcher from any of these views.
+The Sessions view is the launcher: one flat list where you pick where to work, and Enter always gets you there — sesh-style select-or-create.
 
-To open Sessions directly from Rex, add this to your Rex config and reload it:
+Use **Sessions · Agents** to switch views. Tab moves between them; Shift+Tab goes back; Ctrl+S selects Sessions from any view. In the Mac picker, Cmd+Shift+S does the same. Escape dismisses the launcher.
+
+To open the launcher directly from Rex, bind the action:
 
 ```lua
 rex.bind("cmd+shift+s", function()
@@ -10,30 +12,31 @@ rex.bind("cmd+shift+s", function()
 end)
 ```
 
-The `raptor_sessions` action supports both the Mac and terminal pickers. From an open terminal directory or worktree list, it selects Sessions without opening another layer.
+## The list
 
-## Hosts
+Two row types, one verb:
 
-Sessions are grouped by host: **This Mac** first, then every remote host the server knows (`hosts.list`). Each host answers in parallel; a host that is down keeps its header with an "unreachable" note instead of silently disappearing. While filtering, groups without matching sessions hide.
+- **Live sessions** on every connected host. The session you came from is pinned to the top. Remote rows carry an `@host` badge; activity (working/blocked) shows right-aligned. Enter switches to the session — through the host's own copy of the app, so it works across hosts and Tailscale.
+- **Frecency directories** (zoxide) from every host that do not already have a same-name live session. Enter creates the session — named after the directory — and switches to it. An existing session with the same label is reused, never duplicated. Remote directories read the host's zoxide over SSH.
 
-Every row is a session; tabs stay inside the session. The origin session carries a dot. Sessions show agent activity (working/blocked) when the host reports it.
+Pinned local directories float to the top of the directory block (Ctrl+G toggles). The origin pane context is kept when refreshing.
 
-## Switch
+## Open-target override
 
-Enter jumps to the selected session. The app keeps one client per server, so a remote session is selected through that host's copy of the app (matched by client label); server-side focus is the fallback. This works from both the Mac and terminal pickers, including over Tailscale.
+Local directory rows can skip session creation: Ctrl+O cycles the open target (session → tab → split → here), and Enter dispatches with it, exactly like the old directory picker. Remote rows always launch sessions on their host.
 
-## Create
+## Worktrees
 
-Each reachable host group ends with a **New Session** row. It lists that host's frecency directories — the same zoxide order as Repos. Local hosts read the local database; remote hosts are queried over SSH (batch mode, short connect timeout, common install paths tried when zoxide is not on the non-interactive PATH).
-
-Enter creates a session named after the directory and switches to it. An existing session with the same label is reused, never duplicated. Create failures keep the picker open with the error so you can retry.
+Ctrl+T opens the worktree browser for the selected Git repository; Ctrl+N opens the create-worktree form directly.
 
 ## Close
 
-Ctrl+X (terminal) or ⌘X / the Close button (Mac) closes the selected session after you confirm on the Mac. Raptor refuses to close the session the picker opened from. Renames and window-level actions stay in Rex itself for now.
+Ctrl+X closes the selected session. Raptor refuses to close the session the picker opened from.
 
-## Remote requirements
+## Preview
 
-- The remote host runs a reachable Rex server (`rex -S <host> ls` answers).
-- SSH access matching the host label for directory search (`ssh <host>`), with BatchMode.
-- zoxide on the remote host for directory suggestions; without it, only switching, closing, and manual paths work.
+With a terminal at least 100 columns wide, the right side shows a live capture of the selected session (polled while the selection stays put; remote hosts are captured over their connection with a short timeout). Directory rows preview the full path and the session name that Enter would create. Narrower terminals — including phones — render rows only.
+
+## Hosts
+
+Hosts come from the Rex server's host list with This Mac first. A host that is down keeps its sessions if they were fetched recently and explains itself rather than vanishing; its directories simply don't appear until it answers.

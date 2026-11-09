@@ -8,6 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/rex"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -23,10 +24,10 @@ func TestPickerCyclesThreeViewsBothDirections(t *testing.T) {
 		key  tea.KeyType
 		want []int
 	}{
-		{tea.KeyTab, []int{1, 2, 0, 1}},
-		{tea.KeyShiftTab, []int{2, 1, 0, 2}},
+		{tea.KeyTab, []int{2, 0, 2, 0}},
+		{tea.KeyShiftTab, []int{2, 0, 2, 0}},
 	} {
-		m := &dirModel{}
+		m := &dirModel{hostDirs: map[string][]catalog.Directory{}}
 		for _, want := range tc.want {
 			m.Update(tea.KeyMsg{Type: tc.key})
 			if m.viewMode != want {
@@ -64,22 +65,22 @@ func TestAgentFirstLoadIsAsyncAndKeepsPendingInput(t *testing.T) {
 }
 
 func TestAgentsRestoreSearchSelectionAndScroll(t *testing.T) {
-	m := &dirModel{width: 80, height: 8, agentsLoaded: true, filter: "repo"}
-	m.rows = []row{{label: "repo", path: "/repo"}}
+	m := &dirModel{width: 80, height: 8, agentsLoaded: true, filter: "repo", hostDirs: map[string][]catalog.Directory{}}
+	m.launcher = []launcherRow{{dir: &catalog.Directory{Label: "repo", Path: "/repo"}, host: rex.LocalHostLabel}}
+	m.applyLauncher()
 	for i := 0; i < 12; i++ {
 		m.agents = append(m.agents, pickerAgent(fmt.Sprint(i)))
 	}
-	m.applyFilter()
-	repos := m.View()
+	launcher := m.View()
 	if m.switchView(2) == nil || len(m.agentsView) != 12 {
 		t.Fatal("cache not immediately available")
 	}
 	m.filter, m.sel = "Agent", 9
 	m.applyAgentFilter()
 	agents := m.View()
-	m.switchToRepos()
-	if m.View() != repos {
-		t.Fatal("repos state changed")
+	m.switchView(0)
+	if m.View() != launcher {
+		t.Fatal("launcher state changed")
 	}
 	if m.switchView(2) != nil {
 		t.Fatal("duplicate pending refresh")
@@ -110,7 +111,7 @@ func TestAgentRefreshIsolationAndIdentity(t *testing.T) {
 	if !m.agentsLoading || len(m.agents) != 2 || m.err != "" {
 		t.Fatal("accepted stale response")
 	}
-	m.switchToRepos()
+	m.switchView(0)
 	m.filter = "repo query"
 	m.Update(agentsLoadedMsg{request: latest, entries: []rex.AgentEntry{b, a}})
 	if m.viewMode != 0 || m.filter != "repo query" || m.sel != 0 {
@@ -136,13 +137,14 @@ func TestAgentRefreshIsolationAndIdentity(t *testing.T) {
 
 func TestOtherRepliesDoNotChangeAgentViewState(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	m := &dirModel{width: 80, height: 10, agents: []rex.AgentEntry{pickerAgent("a")}}
-	m.refreshRepos()
+	m := &dirModel{width: 80, height: 10, agents: []rex.AgentEntry{pickerAgent("a")}, hostDirs: map[string][]catalog.Directory{}}
+	m.launcher = []launcherRow{{dir: &catalog.Directory{Label: "repo", Path: "/repo"}, host: rex.LocalHostLabel}}
+	m.applyLauncher()
 	m.switchView(2)
 	m.filter = "Agent"
 	m.applyAgentFilter()
 	before := m.View()
-	m.Update(reposLoadedMsg{request: m.reposRequest, rows: []row{{label: "repo", path: "/repo"}}})
+	m.Update(launcherDirsMsg{request: m.launcherDirsRequest + 1, host: rex.LocalHostLabel, items: []catalog.Directory{{Label: "repo", Path: "/repo"}}})
 	if m.filter != "Agent" || m.viewMode != 2 || m.sel != 0 || before != m.View() {
 		t.Fatal("inactive reply changed agents")
 	}
@@ -213,7 +215,7 @@ func TestAgentRenderingFitsViewport(t *testing.T) {
 		}
 	}
 	pills := ansi.Strip(pickerPills(2, 60))
-	for _, name := range []string{"Repos", "Sessions", "Agents"} {
+	for _, name := range []string{"Sessions", "Agents"} {
 		if !strings.Contains(pills, name) {
 			t.Fatalf("missing %s pill: %q", name, pills)
 		}

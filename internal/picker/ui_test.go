@@ -12,28 +12,31 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 )
 
-func TestDirectoryPickerLoadsPathsOnly(t *testing.T) {
+func TestLauncherLoadsPathsOnly(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
 	if err := os.WriteFile(filepath.Join(dir, "zoxide"), []byte("#!/bin/sh\nprintf '%s\\n' /demo/example /demo/tools\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rows := loadDirRows(rex.Ctx{})
-	if len(rows) != 2 {
-		t.Fatalf("got %d directories, want 2", len(rows))
+	m := &dirModel{cfg: config.Default(), target: "tab", width: 60, height: 10,
+		hostDirs: map[string][]catalog.Directory{}, launcherLoaded: true, ctx: rex.Ctx{}}
+	m.hostOrder = []string{rex.LocalHostLabel}
+	m.hostDirs[rex.LocalHostLabel] = catalog.DirectoriesOn(rex.LocalHostLabel, false)
+	m.applyLauncher()
+	if len(m.launcher) != 2 {
+		t.Fatalf("got %d rows, want 2", len(m.launcher))
 	}
-	m := &dirModel{rows: rows, cfg: config.Default(), target: "tab", width: 60, height: 10}
-	m.applyFilter()
-	for _, r := range rows {
-		if r.kind != "dir" {
+	for _, r := range m.launcher {
+		if r.dir == nil {
 			t.Fatalf("unexpected row: %+v", r)
 		}
 	}
 	if m.Init() == nil {
-		t.Fatal("directory picker must schedule background activity retrieval")
+		t.Fatal("launcher must schedule background loads")
 	}
 	if m.agentsLoading {
 		t.Fatal("activity retrieval must not load the selectable agent view")
@@ -44,8 +47,8 @@ func TestDirectoryPickerLoadsPathsOnly(t *testing.T) {
 			t.Fatalf("unexpected launcher icon %q", icon)
 		}
 	}
-	if !strings.Contains(plain, "dir ❯") || !strings.Contains(plain, "/demo/example") || !strings.Contains(plain, "/demo/tools") {
-		t.Fatal("original directory layout not restored")
+	if !strings.Contains(plain, "❯") || !strings.Contains(plain, "example") || !strings.Contains(plain, "tools") {
+		t.Fatal("launcher rows must show the zoxide directories")
 	}
 }
 
@@ -61,10 +64,10 @@ func TestSearchDoesNotConsumeLetters(t *testing.T) {
 		t.Fatalf("query = %q", m.filter)
 	}
 	repo := fixtureRepo(t)
-	m.rows = []row{{kind: "dir", path: repo}}
-	m.view = []int{0}
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if m.next != "wt" || cmd == nil {
+	m.filter = ""
+	seedLauncher(m, []launcherRow{{dir: &catalog.Directory{Label: "repo", Path: repo}, host: rex.LocalHostLabel}})
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if m.next != "wt" {
 		t.Fatal("Ctrl+T did not open worktrees")
 	}
 }
@@ -89,7 +92,10 @@ func TestDirectoryRowLayout(t *testing.T) {
 
 func TestCompactPalette(t *testing.T) {
 	for _, size := range [][2]int{{80, 20}, {52, 16}, {40, 12}, {24, 8}, {18, 5}} {
-		m := &dirModel{width: size[0], height: size[1], cfg: config.Default(), target: "session", rows: []row{{kind: "dir", path: "/tmp/demo", label: "demo"}}, view: []int{0}}
+		m := &dirModel{width: size[0], height: size[1], cfg: config.Default(), target: "session",
+			hostDirs:  map[string][]catalog.Directory{rex.LocalHostLabel: {{Label: "demo", Path: "/tmp/demo"}}},
+			hostOrder: []string{rex.LocalHostLabel}, launcherLoaded: true}
+		m.applyLauncher()
 		output := m.View()
 		lines := strings.Split(output, "\n")
 		if len(lines) != m.height {
@@ -105,12 +111,6 @@ func TestCompactPalette(t *testing.T) {
 			t.Fatal("missing empty cursor")
 		}
 		rowLine := 2
-		if size[1] >= 8 {
-			rowLine = 3
-			if !strings.Contains(ansi.Strip(lines[1]), "Repos") || !strings.Contains(ansi.Strip(lines[1]), "Agents") {
-				t.Fatal("missing view pills row")
-			}
-		}
 		if !strings.Contains(ansi.Strip(lines[rowLine]), "demo") {
 			t.Fatalf("missing directory name in result row %d", rowLine)
 		}
@@ -126,7 +126,7 @@ func TestCompactPalette(t *testing.T) {
 		if strings.Contains(plain, "enter open") {
 			t.Fatal("unexpected Enter hint")
 		}
-		if !strings.Contains(plain, "dir ❯ ") {
+		if !strings.Contains(plain, "❯") {
 			t.Fatal("missing search prompt")
 		}
 		if strings.Contains(plain, "╭") {

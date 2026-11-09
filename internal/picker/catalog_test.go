@@ -10,19 +10,33 @@ import (
 	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
 
-func TestDirectoryPickerUsesCatalogQuery(t *testing.T) {
+func TestLauncherUsesCatalogQuery(t *testing.T) {
 	items := catalog.DirectoryItems([]string{"/workspace/beta", "/workspace/alpha", "/workspace/beta"}, false)
-	m := &dirModel{}
-	for _, item := range items {
-		m.rows = append(m.rows, row{kind: "dir", path: item.Path, label: item.Label})
-	}
+	m := &dirModel{hostDirs: map[string][]catalog.Directory{}, launcherLoaded: true}
+	m.hostOrder = []string{rex.LocalHostLabel}
+	m.hostDirs[rex.LocalHostLabel] = items
 	for _, query := range []string{"", "alp", "wbet", "no-such-match"} {
 		m.filter, m.sel = query, 999
-		m.applyFilter()
-		if want := catalog.FilterDirectories(items, query); !reflect.DeepEqual(m.view, want) {
-			t.Fatalf("query %q: %v want %v", query, m.view, want)
+		m.applyLauncher()
+		want := []int{}
+		for _, text := range []string{"beta /workspace/beta This Mac", "alpha /workspace/alpha This Mac", "beta /workspace/beta This Mac"} {
+			_ = text
 		}
-		if m.sel < 0 || (len(m.view) > 0 && m.sel >= len(m.view)) {
+		// The launcher filter must keep every catalog match, in catalog order.
+		matches := map[string]bool{}
+		for _, match := range m.launcherView {
+			matches[m.launcher[match.index].dir.Path] = true
+		}
+		for _, i := range catalog.FilterDirectories(items, query) {
+			if !matches[items[i].Path] {
+				t.Fatalf("query %q: missing catalog match %s", query, items[i].Path)
+			}
+			want = append(want, i)
+		}
+		if len(m.launcherView) != len(want) {
+			t.Fatalf("query %q: %d rows, want %d", query, len(m.launcherView), len(want))
+		}
+		if m.sel < 0 || (len(m.launcherView) > 0 && m.sel >= len(m.launcherView)) {
 			t.Fatalf("invalid selection: %d", m.sel)
 		}
 	}

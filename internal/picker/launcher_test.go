@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/rex"
 	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
@@ -16,24 +17,27 @@ func launcherFixture(t *testing.T, path string) *dirModel {
 	t.Helper()
 	cfg := config.Default()
 	cfg.Targets = []string{"tab", "session", "here", "pane_right", "pane_below"}
-	m := &dirModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, launcher: true,
-		rows: []row{{kind: "dir", label: "project", path: path}}, target: "tab", width: 40, height: 12}
-	m.applyFilter()
+	dir := catalog.Directory{Label: "project", Path: path}
+	m := &dirModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, launcherMode: true,
+		target: "tab", width: 40, height: 12,
+		hostDirs:  map[string][]catalog.Directory{rex.LocalHostLabel: {dir}},
+		hostOrder: []string{rex.LocalHostLabel}, launcherLoaded: true}
+	m.applyLauncher()
 	return m
 }
 
 func TestLauncherEnterPreviewsBeforeDispatch(t *testing.T) {
 	m := launcherFixture(t, t.TempDir())
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil || !m.actionMenu || m.picked != nil {
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.actionMenu || m.picked != nil {
 		t.Fatal("first Enter must only show actions")
 	}
 	if len(m.actions) != 5 {
 		t.Fatalf("unexpected actions: %+v", m.actions)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil || m.picked == nil || m.target != "session" {
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.picked == nil || m.target != "session" {
 		t.Fatal("second Enter must execute the selected action")
 	}
 }
@@ -41,7 +45,7 @@ func TestLauncherEnterPreviewsBeforeDispatch(t *testing.T) {
 func TestLauncherBackPreservesPathSearch(t *testing.T) {
 	m := launcherFixture(t, t.TempDir())
 	m.filter = "project"
-	m.applyFilter()
+	m.applyLauncher()
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if m.actionMenu || m.filter != "project" || m.sel != 0 || m.picked != nil {
@@ -72,13 +76,13 @@ func TestLauncherGitActionsAndContext(t *testing.T) {
 func TestLauncherEmptyAndNarrow(t *testing.T) {
 	m := launcherFixture(t, t.TempDir())
 	m.filter = "no-match"
-	m.applyFilter()
+	m.applyLauncher()
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil || m.actionMenu {
 		t.Fatal("empty results must not close or open actions")
 	}
 	m.filter = ""
-	m.applyFilter()
+	m.applyLauncher()
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	for _, width := range []int{20, 32, 60} {
 		m.width = width

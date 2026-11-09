@@ -7,17 +7,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/rex"
 )
 
 func splitFixture() *dirModel {
-	return &dirModel{
+	m := &dirModel{
 		ctx: rex.Ctx{Block: "origin-pane"}, target: "tab", filter: "project",
-		rows: []row{{kind: "dir", path: "/tmp/project"}}, view: []int{0},
-		width: 80, height: 16,
+		width: 80, height: 16, hostDirs: map[string][]catalog.Directory{}, launcherLoaded: true,
 	}
+	seedLauncher(m, []launcherRow{{dir: &catalog.Directory{Label: "project", Path: "/tmp/project"}, host: rex.LocalHostLabel}})
+	return m
 }
 
 func TestSplitModeDirections(t *testing.T) {
@@ -37,7 +39,7 @@ func TestSplitModeDirections(t *testing.T) {
 				t.Fatal("Ctrl+P must enter split mode without submitting")
 			}
 			_, cmd = m.Update(key)
-			if cmd == nil || m.picked != &m.rows[0] || m.target != tt.target || m.filter != "project" {
+			if cmd == nil || m.picked == nil || m.picked.path != "/tmp/project" || m.target != tt.target || m.filter != "project" {
 				t.Fatalf("%s did not select the direction without changing search", key.String())
 			}
 			if _, ok := cmd().(tea.QuitMsg); !ok {
@@ -52,9 +54,16 @@ func TestSplitModeDirections(t *testing.T) {
 
 func TestSplitModeWithoutSelectionOrOrigin(t *testing.T) {
 	for _, m := range []*dirModel{
-		{ctx: rex.Ctx{Block: "origin-pane"}, target: "tab"},
-		{target: "tab", rows: []row{{kind: "dir", path: "/tmp/project"}}, view: []int{0}},
-		{ctx: rex.Ctx{Block: "origin-pane"}, target: "tab", rows: []row{{kind: "session"}}, view: []int{0}},
+		func() *dirModel {
+			m := &dirModel{ctx: rex.Ctx{Block: "origin-pane"}, target: "tab"}
+			seedLauncher(m, nil) // No selection: nothing to split.
+			return m
+		}(),
+		func() *dirModel {
+			m := &dirModel{target: "tab"}
+			seedLauncher(m, []launcherRow{{session: &rex.SessionEntry{Kind: "session"}, host: rex.LocalHostLabel}})
+			return m
+		}(),
 	} {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 		if cmd != nil || m.splitMode || m.picked != nil || m.target != "tab" {
@@ -112,7 +121,11 @@ func TestSplitModeHints(t *testing.T) {
 }
 
 func TestPlainArrowsStillNavigate(t *testing.T) {
-	m := &dirModel{target: "tab", rows: []row{{kind: "dir"}, {kind: "dir"}}, view: []int{0, 1}}
+	m := &dirModel{target: "tab"}
+	seedLauncher(m, []launcherRow{
+		{dir: &catalog.Directory{Label: "a", Path: "/a"}, host: rex.LocalHostLabel},
+		{dir: &catalog.Directory{Label: "b", Path: "/b"}, host: rex.LocalHostLabel},
+	})
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	if cmd != nil || m.sel != 1 || m.picked != nil {
 		t.Fatal("Down must navigate, not split")

@@ -24,8 +24,6 @@ enum PickerStyle {
     static let rowHeight: CGFloat = 32
     static let agentRowHeight: CGFloat = 32
     static let agentGroupHeight: CGFloat = 22
-    /// Quiet per-host rows: the New Session hint and the unreachable note.
-    static let sessionAuxRowHeight: CGFloat = 26
     static let agentGroupSpacing: CGFloat = 8
     static let worktreeRowHeight: CGFloat = 28
     static let selectedPathHeight: CGFloat = 32
@@ -77,31 +75,17 @@ enum PickerStyle {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
             return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 32)
         }
-        let rowHeight = model.view == .agents ? Self.agentRowHeight : (model.page == .worktrees && model.view == .repos ? Self.worktreeRowHeight : Self.rowHeight)
+        let rowHeight = model.view == .agents ? Self.agentRowHeight : (model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight)
         // Reserve the list footprint before the first backend response arrives.
-        let showGroups = model.view == .agents
-            || (model.view == .sessions && model.page == .directories)
-        let extraRows: Int
-        if model.view == .sessions && model.page == .directories {
-            extraRows = model.hostSections.filter { $0.host.reachable }.count
-                + model.hostSections.filter { !$0.host.reachable }.count
-        } else { extraRows = 0 }
-        let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count + extraRows, 2), 8)
+        let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count, 2), 8)
         let rows = CGFloat(rowCount)
         let status: CGFloat = model.error == nil && model.notice == nil ? 0 : 32
         let pills: CGFloat = model.showsPills ? pillsHeight : 0
-        let detail = model.page == .worktrees && model.view == .repos ? selectedPathHeight : 0
-        let wrappedRow = model.page == .worktrees && model.view == .repos && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
-        let groupCount = showGroups
-            ? (model.view == .agents ? model.agentSections.count : model.hostSections.count)
-            : 0
+        let detail = model.view == .sessions && model.page == .worktrees ? selectedPathHeight : 0
+        let wrappedRow = model.view == .sessions && model.page == .worktrees && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
+        let groupCount = model.view == .agents ? model.agentSections.count : 0
         let groups = CGFloat(groupCount) * agentGroupHeight + CGFloat(max(groupCount - 1, 0)) * agentGroupSpacing
-        // Quiet per-host rows (New Session hints, unreachable notes) are shorter
-        // than session rows; the count above must match the view's rows.
-        let auxRows: CGFloat = model.view == .sessions && model.page == .directories
-            ? CGFloat(extraRows) * (sessionAuxRowHeight - rowHeight)
-            : 0
-        let content = searchHeight + pills + rows * rowHeight + groups + auxRows + wrappedRow + 8 + detail + footerHeight + status
+        let content = searchHeight + pills + rows * rowHeight + groups + wrappedRow + 8 + detail + footerHeight + status
         let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
         return min(content, max(available, 180))
     }

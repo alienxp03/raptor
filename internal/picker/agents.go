@@ -19,23 +19,19 @@ type agentsLoadedMsg struct {
 }
 
 func (m *dirModel) switchView(view int) tea.Cmd {
-	if view != 0 && view != 1 && view != 2 {
+	if view != 0 && view != 2 {
 		return nil
 	}
 	m.viewStates[m.viewMode] = dirViewState{m.filter, m.sel}
 	m.viewMode = view
 	m.filter, m.sel = m.viewStates[view].filter, m.viewStates[view].sel
 	m.splitMode = false
-	m.createSession = nil
 	m.applyCurrentFilter()
-	switch view {
-	case 2:
+	if view == 2 {
 		return m.loadAgents(false)
-	case 1:
-		return m.loadSessions(false)
-	default:
-		return m.refreshRepos()
 	}
+	// Revalidate the launcher cache in the background; rows stay visible.
+	return m.loadLauncherSessions(false)
 }
 
 // Capture values only: Rex calls never run inside Update.
@@ -305,7 +301,7 @@ func (m *dirModel) viewAgents() string {
 		}
 	}
 	lines = append(lines, pickerRule(width))
-	footer := pickerFooter(pickerText.Render("enter")+pickerMuted.Render(" jump"), pickerMuted.Render("⇥ repos · esc dismiss"), "enter jump · esc dismiss", width)
+	footer := pickerFooter(pickerText.Render("enter")+pickerMuted.Render(" jump"), pickerMuted.Render("⇥ sessions · esc dismiss"), "enter jump · esc dismiss", width)
 	if m.err != "" {
 		footer = pickerLine(styErr.Render(m.err), width)
 	}

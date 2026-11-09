@@ -14,29 +14,39 @@ import (
 )
 
 func TestSessionsGroupedListingAndSearch(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ssh := "#!/bin/sh\ncase \"$*\" in\n  *'zoxide query -l'*) printf '%s\\n' /home/azuan/workspace/hnhiring ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(ssh), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	script := `#!/bin/sh
 case "$*" in
   'api call hosts.list') echo '{"hosts":[{"id":"host:1","label":"hades"}]}' ;;
   '-S hades --timeout 3s ls --json') echo '{"sessions":[{"session_id":"r1","label":"wispy-brook"}]}' ;;
   'ls --json') echo '{"sessions":[{"session_id":"a","label":"Project"},{"session_id":"b","label":"Tools"}]}' ;;
-  'do'*) echo '{}' ;;
-  *) exit 1 ;;
+  'do'*) echo '{"sessions":[]}' ;;
+  '-S hades --timeout 4s do'*) echo '{"sessions":[]}' ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	zoxide := "#!/bin/sh\nprintf '%s\\n' /Users/azuan/Workspace/Projects\nprintf '%s\\n' /Users/azuan/.dotfiles\n"
+	if err := os.WriteFile(filepath.Join(dir, "zoxide"), []byte(zoxide), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	h := New(rex.Ctx{Session: "a"}, config.Default())
 	for _, tt := range []struct {
 		query string
+		kinds []string
 		ids   []string
-		hosts []string
 	}{
-		{"", []string{"a", "b", "r1"}, []string{rex.LocalHostLabel, "hades"}},
-		{"project", []string{"a"}, []string{rex.LocalHostLabel}},
-		{"wispy", []string{"r1"}, []string{"hades"}},
+		{"", []string{"session", "session", "session", "dir", "dir", "dir"},
+			[]string{"a", "b", "r1", "/Users/azuan/Workspace/Projects", "/Users/azuan/.dotfiles", "/home/azuan/workspace/hnhiring"}},
+		{"project", []string{"session", "dir"}, []string{"a", "/Users/azuan/Workspace/Projects"}},
+		{"wispy", []string{"session"}, []string{"r1"}},
 		{"zzzz", []string{}, []string{}},
 	} {
 		t.Run("query="+tt.query, func(t *testing.T) {
@@ -58,28 +68,34 @@ esac
 				t.Fatal(err)
 			}
 			ids := make([]string, 0, len(result.Items))
+			kinds := make([]string, 0, len(result.Items))
 			for _, item := range result.Items {
 				ids = append(ids, item.ID)
-				if item.Kind != "session" {
-					t.Fatalf("sessions view lists sessions only, got %+v", item)
-				}
-				if item.Path != item.ID || item.SessionID == "" || item.SessionLabel == "" || item.Host == "" {
-					t.Fatalf("incomplete row shape: %+v", item)
+				kinds = append(kinds, item.Kind)
+				if item.Kind == "session" {
+					if item.Path != item.ID || item.SessionID == "" || item.SessionLabel == "" || item.Host == "" {
+						t.Fatalf("incomplete session row shape: %+v", item)
+					}
+				} else {
+					if item.Kind != "dir" || item.Path == "" || item.Label == "" || item.Host == "" {
+						t.Fatalf("incomplete directory row shape: %+v", item)
+					}
 				}
 			}
 			labels := make([]string, 0, len(result.Hosts))
 			for _, host := range result.Hosts {
 				labels = append(labels, host.Label)
 			}
-			if !reflect.DeepEqual(ids, tt.ids) || !reflect.DeepEqual(labels, tt.hosts) ||
-				result.Items == nil || result.Targets == nil || len(result.Targets) != 0 || result.Target != config.Default().Enter {
-				t.Fatalf("result = %+v, want IDs %v hosts %v", result, tt.ids, tt.hosts)
+			if !reflect.DeepEqual(ids, tt.ids) || !reflect.DeepEqual(kinds, tt.kinds) ||
+				len(labels) != 2 || result.Items == nil || result.Targets == nil || result.Target != "session" {
+				t.Fatalf("result ids = %v kinds = %v hosts = %v, want ids %v", ids, kinds, labels, tt.ids)
 			}
 		})
 	}
 }
 
 func TestSessionsKeepUnreachableHostHeaderWithoutRows(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	script := `#!/bin/sh
@@ -91,6 +107,10 @@ case "$*" in
   *) exit 1 ;;
 esac
 `
+	zoxide := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(dir, "zoxide"), []byte(zoxide), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +141,7 @@ esac
 }
 
 func TestSessionsJumpRoutesRowKinds(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -145,6 +166,7 @@ func TestSessionsJumpRoutesRowKinds(t *testing.T) {
 }
 
 func TestSessionsJumpOnHostSelectsThroughRemoteAppClient(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -176,6 +198,7 @@ esac
 }
 
 func TestSessionsCreateReusesLabelAndSelects(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -214,6 +237,7 @@ esac
 }
 
 func TestSessionsCreateOnRemoteHost(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

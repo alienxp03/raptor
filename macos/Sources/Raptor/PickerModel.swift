@@ -2,11 +2,11 @@ import SwiftUI
 
 @MainActor
 final class PickerModel: ObservableObject {
-    enum Page: Hashable { case directories, repositories, worktrees, create, newSession(host: String) }
-    enum ViewKind: Hashable, CaseIterable { case repos, sessions, agents }
+    enum Page: Hashable { case directories, worktrees, create }
+    enum ViewKind: Hashable, CaseIterable { case sessions, agents }
     private(set) var options: LaunchOptions
     private let backend: any BackendClient
-    @Published var view: ViewKind = .repos
+    @Published var view: ViewKind = .sessions
     @Published var page: Page
     @Published var query = "" {
         didSet {
@@ -118,42 +118,6 @@ final class PickerModel: ObservableObject {
         }
     }
 
-    static let newSessionIDPrefix = "new-session:"
-    static func newSessionID(_ host: String) -> String { newSessionIDPrefix + host }
-
-    /// The “New Session” affordance lives outside items so it never takes a
-    /// numbered position; selection stores its host under a dedicated id.
-    var selectedNewSessionHost: String? {
-        guard view == .sessions, page == .directories,
-              let selectedID, selectedID.hasPrefix(Self.newSessionIDPrefix) else { return nil }
-        return String(selectedID.dropFirst(Self.newSessionIDPrefix.count))
-    }
-
-    struct HostSection: Identifiable {
-        let host: HostHeader
-        let items: [PickerItem]
-        var id: String { host.label }
-    }
-
-    var hostSections: [HostSection] {
-        if !sessionHosts.isEmpty {
-            return sessionHosts.map { host in
-                HostSection(host: host, items: host.reachable ? items.filter { $0.host == host.label } : [])
-            }
-        }
-        // No headers yet: group raw rows by host label, local machine first.
-        var labels: [String] = []
-        for item in items {
-            let label = item.host ?? "This Mac"
-            if !labels.contains(label) { labels.append(label) }
-        }
-        let ordered = labels.filter { $0 == "This Mac" } + labels.filter { $0 != "This Mac" }
-        return ordered.map { label in
-            HostSection(host: HostHeader(label: label, local: label == "This Mac", reachable: true, error: nil),
-                        items: items.filter { $0.host == label })
-        }
-    }
-
     func numberedPosition(of item: PickerItem) -> Int {
         (items.firstIndex { $0.id == item.id } ?? -1) + 1
     }
@@ -168,22 +132,16 @@ final class PickerModel: ObservableObject {
     private var started = false
 
     private var cacheKey: CacheKey {
-        if view == .agents {
+        if view == .agents || page == .directories {
             return CacheKey(view: view, page: .directories, repo: nil, query: query)
         }
-        if view == .sessions, case let .newSession(host) = page {
-            return CacheKey(view: view, page: page, repo: host, query: query)
-        }
-        return CacheKey(view: view, page: view == .sessions ? .directories : page,
-                        repo: view == .sessions || page == .directories ? nil : repo, query: query)
+        // Worktree pages keep their repository-scoped cache.
+        return CacheKey(view: view, page: page, repo: repo, query: query)
     }
 
+    /// "dirs" is the legacy alias for the unified Sessions launcher.
     private static func initialView(for options: LaunchOptions) -> ViewKind {
-        switch options.mode {
-        case "agents": return .agents
-        case "sessions": return .sessions
-        default: return .repos
-        }
+        options.mode == "agents" ? .agents : .sessions
     }
 
     /// A direct Agents/Sessions request must route from another visible view, not hide it.
@@ -232,16 +190,16 @@ final class PickerModel: ObservableObject {
     }
 
     var selected: PickerItem? { items.first { $0.id == selectedID } }
-    var isNewSessionPage: Bool {
-        if case .newSession = page { return true }
-        return false
-    }
     /// Resident recovery: did the shared backend connection die?
     var backendIsClosed: Bool { closed || ((backend as? ProcessBackend)?.isClosed ?? false) }
     var canOpen: Bool {
         guard contextReady, !busy, !loading else { return false }
         if view == .agents { return selected?.kind == "agent" }
-        if view == .sessions { return selectedNewSessionHost != nil || selected?.kind == "session" }
+        if page == .directories {
+            // Launcher rows also need a target from their own origin's reply;
+            // display-only cached rows across origins carry no targets.
+            return !target.isEmpty && (selected?.kind == "session" || selected?.kind == "dir")
+        }
         guard selected != nil else { return false }
         return !target.isEmpty
     }
@@ -250,14 +208,11 @@ final class PickerModel: ObservableObject {
     var heading: String {
         switch view {
         case .agents: return "Agents"
-        case .sessions: return "Sessions"
-        case .repos:
+        case .sessions:
             switch page {
-            case .directories: return "Open directory"
-            case .repositories: return "Choose repository"
+            case .directories: return "Sessions"
             case .worktrees: return "Worktrees"
             case .create: return "Create worktree"
-            case .newSession: return "Sessions"
             }
         }
     }
@@ -295,7 +250,7 @@ final class PickerModel: ObservableObject {
         themeTask = task
         return task
     }
-    var showsPills: Bool { page != .create && page != .repositories && !isNewSessionPage }
+    var showsPills: Bool { page != .create }
 
 
     /// Synchronous open boundary: reset origin state before the panel is shown.
@@ -325,24 +280,35 @@ final class PickerModel: ObservableObject {
         let sameContext = self.options.session == options.session && self.options.block == options.block
             && self.options.client == options.client && self.options.title == options.title
             && self.options.demo == options.demo
-        let directories = CacheKey(view: .repos, page: .directories, repo: nil, query: "")
+        let launcher = CacheKey(view: .sessions, page: .directories, repo: nil, query: "")
         let agentsQuery = view == .agents ? query : (viewQueries[.agents] ?? "")
         let agents = CacheKey(view: .agents, page: .directories, repo: nil, query: agentsQuery)
         let warmAgents = options.mode == "agents" && cache[agents] != nil
-        let cachedDirectories = cache[directories]
-        let warmDirectories = options.mode == "dirs" && !(cachedDirectories?.result.items ?? []).isEmpty
-            && !(cachedDirectories?.target ?? "").isEmpty
-            && cachedDirectories?.result.targets?.contains(cachedDirectories?.target ?? "") == true
-        if sameContext, contextReady, !closed, !busy, warmDirectories || warmAgents {
-            // The same origin needs no context RPC. Directory opens also keep
+        let cachedLauncher = cache[launcher]
+        let warmLauncher = (options.mode == "dirs" || options.mode == "sessions")
+            && !(cachedLauncher?.result.items ?? []).isEmpty
+            && !(cachedLauncher?.target ?? "").isEmpty
+            && cachedLauncher?.result.targets?.contains(cachedLauncher?.target ?? "") == true
+        if sameContext, contextReady, !closed, !busy, warmLauncher || warmAgents {
+            // The same origin needs no context RPC. Launcher opens also keep
             // any refresh already serving this key; Agents start a new order.
             warmReconfigure = token
             changingContext = true
             self.options = options
-            viewQueries[view] = query
             view = Self.initialView(for: options); page = .directories; repo = options.repo
-            query = warmAgents ? agentsQuery : ""
-            viewQueries[view] = query
+            // Every reopen starts fresh: filters clear everywhere and the
+            // origin session (first row) becomes the selection once rows land.
+            viewQueries.removeAll()
+            query = ""
+            selectedID = nil
+            scrollID = nil
+            // The cached launcher rows remember the previous selection; drop
+            // it so the replay selects the origin session instead.
+            for viewKind in ViewKind.allCases {
+                let key = CacheKey(view: viewKind, page: .directories, repo: nil, query: "")
+                cache[key]?.selectedID = nil
+                cache[key]?.scrollID = nil
+            }
             previewGeneration += 1
             previewTask?.cancel()
             suggestedBranch = nil
@@ -363,7 +329,9 @@ final class PickerModel: ObservableObject {
         changingContext = true
         generation += 1
         queryTask?.cancel()
-        cache = cache.filter { $0.key.view == .repos && $0.key.page == .directories && $0.key.repo == nil }
+        // Launcher rows stay as display-only globals across origins; their
+        // targets belong to the previous origin and are stripped.
+        cache = cache.filter { $0.key.view == .sessions && $0.key.page == .directories && $0.key.repo == nil }
             .mapValues { entry in
                 CachedList(result: APIResult(items: entry.result.items), selectedID: entry.selectedID,
                            scrollID: entry.scrollID, target: "")
@@ -443,7 +411,7 @@ final class PickerModel: ObservableObject {
 
     func selectView(_ desired: ViewKind) {
         guard contextReady, desired != view else { return }
-        guard !busy, page != .create, page != .repositories, !isNewSessionPage,
+        guard !busy, page != .create,
               removalCandidate == nil,
               !basePickerPresented, !targetPickerPresented else { return }
         saveListPosition()
@@ -464,15 +432,13 @@ final class PickerModel: ObservableObject {
     func openNumbered(_ number: Int) {
         guard contextReady else { return }
         guard number >= 1, number <= items.count, !busy, !loading else { return }
-        guard view != .repos || page == .directories || page == .worktrees else { return }
-        if isNewSessionPage { return }
         selectedID = items[number - 1].id
         choose()
     }
 
     func togglePin() {
         guard contextReady else { return }
-        guard view == .repos, page == .directories, !busy, let selected else { return }
+        guard view == .sessions, page == .directories, !busy, let selected, selected.kind == "dir" else { return }
         let path = selected.path
         perform {
             _ = try await self.request("pins.toggle", params: ["path": .text(path)])
@@ -518,7 +484,7 @@ final class PickerModel: ObservableObject {
         if let cached {
             targets = cached.result.targets ?? []
             target = cached.target
-            if view == .repos, page == .worktrees {
+            if view == .sessions, page == .worktrees {
                 suggestedBranch = cached.result.suggestedBranch
                 destinationRoot = cached.result.destinationRoot
                 branches = cached.result.branches ?? []
@@ -547,24 +513,19 @@ final class PickerModel: ObservableObject {
                 let method: String
                 if currentView == .agents {
                     method = "agents"
-                } else if currentView == .sessions, case .directories = currentPage {
-                    method = "sessions"
-                } else if currentView == .sessions, case let .newSession(host) = currentPage {
-                    method = "directories"
-                    params["repos_only"] = .flag(false)
-                    params["host"] = .text(host)
                 } else if currentPage == .worktrees || currentPage == .create {
                     method = "worktrees.list"
                     if let currentRepo { params["repo"] = .text(currentRepo) }
                 } else {
-                    method = "directories"
-                    params["repos_only"] = .flag(currentPage == .repositories)
+                    method = "sessions"
                 }
                 let result = try await self.request(method, params: params)
                 guard !Task.isCancelled, token == self.generation, !self.closed else { return }
-                if currentView == .repos, (currentPage == .worktrees || currentPage == .create), result.needsRepo == true {
+                if currentView == .sessions, currentPage == .worktrees || currentPage == .create, result.needsRepo == true {
+                    // No repository context: fall back to the launcher, where
+                    // ⌃T on a directory row opens its worktrees.
                     self.repo = nil
-                    self.navigate(.repositories)
+                    self.navigate(.directories)
                     return
                 }
                 let previous = self.selectedID
@@ -575,7 +536,7 @@ final class PickerModel: ObservableObject {
                 }
                 if let targets = result.targets { self.targets = targets }
                 if !self.targets.contains(self.target) { self.target = result.target ?? self.targets.first ?? "" }
-                if currentView == .repos, currentPage == .worktrees || currentPage == .create {
+                if currentView == .sessions, currentPage == .worktrees || currentPage == .create {
                     self.repo = result.repo ?? currentRepo
                     self.destinationRoot = result.destinationRoot
                     self.branches = result.branches ?? []
@@ -636,7 +597,7 @@ final class PickerModel: ObservableObject {
 
     func cycleTarget(backward: Bool) {
         guard contextReady else { return }
-        guard view == .repos, !busy, page != .repositories, !targets.isEmpty else { return }
+        guard !busy, !targets.isEmpty else { return }
         let index = targets.firstIndex(of: target) ?? 0
         target = targets[(index + (backward ? targets.count - 1 : 1)) % targets.count]
     }
@@ -651,26 +612,33 @@ final class PickerModel: ObservableObject {
         return matches
     }
 
+    /// One verb, select-or-create, mirroring sesh: a session row switches to
+    /// it; a directory row starts a session when the target is Session, else
+    /// opens the path with the chosen target.
+    /// The display label of the local host; rows without one are local.
+    private static let rexLocalHostDefault = "This Mac"
+
     func choose() {
         guard contextReady else { return }
         guard !busy, !loading else { return }
-        if view == .sessions, let host = selectedNewSessionHost {
-            beginNewSession(host: host)
-            return
-        }
         guard let selected else { return }
-        if view == .sessions {
-            if case let .newSession(host) = page {
-                createSession(in: host, directory: selected.path)
-            } else if selected.kind == "session" {
-                jumpSession(selected)
-            }
-        } else if view == .agents {
+        if view == .agents {
             guard canOpen else { return }
             jumpAgent(selected)
-        } else if page == .repositories {
-            repo = selected.path
-            navigate(options.mode == "wt-create" ? .create : .worktrees)
+        } else if page == .directories {
+            if selected.kind == "session" {
+                jumpSession(selected)
+            } else if selected.kind == "dir" {
+                // Remote directories always launch a session on their host —
+                // the open target only ever applies to local rows (TUI parity).
+                // is_local is authoritative; absent decodes as local.
+                let local = selected.isLocal ?? true
+                if !local || target == "session" {
+                    createSession(in: selected.host ?? Self.rexLocalHostDefault, directory: selected.path)
+                } else if !target.isEmpty {
+                    dispatch(path: selected.path, target: target)
+                }
+            }
         } else if canOpen {
             dispatch(path: selected.path, target: target)
         }
@@ -689,13 +657,6 @@ final class PickerModel: ObservableObject {
                 self.notice = "Demo only: jumped to \(entry.label ?? entry.path). No Rex call."
             } else { self.close() }
         }
-    }
-
-    /// The “New Session” row: search directories on one host to create in.
-    func beginNewSession(host: String) {
-        guard contextReady else { return }
-        guard view == .sessions, !busy, !loading else { return }
-        navigate(.newSession(host: host))
     }
 
     private func createSession(in host: String, directory path: String) {
@@ -721,22 +682,15 @@ final class PickerModel: ObservableObject {
 
     func showWorktrees() {
         guard contextReady else { return }
-        guard view == .repos, !busy, !loading, page == .directories else { return }
-        repo = selected?.path
+        guard view == .sessions, page == .directories, !busy, !loading,
+              let selected, selected.kind == "dir" else { return }
+        repo = selected.path
         navigate(.worktrees)
     }
 
     func beginCreate() {
-        guard view == .repos, contextReady else { return }
-        guard !busy, !loading else { return }
-        if page == .directories {
-            guard let selected else { return }
-            createParent = .directories
-            repo = selected.path
-            navigate(.create)
-            return
-        }
-        guard page == .worktrees, repo != nil else { return }
+        guard page == .worktrees, contextReady else { return }
+        guard !busy, !loading, repo != nil else { return }
         createParent = .worktrees
         saveListPosition()
         generation += 1
@@ -746,6 +700,7 @@ final class PickerModel: ObservableObject {
         page = .create
         splitMode = false
         error = nil; notice = nil; createdPath = nil
+        items = []; selectedID = nil; scrollID = nil
         resetBranchDefault()
         applyBranchDefault()
         schedulePreview()
@@ -772,12 +727,7 @@ final class PickerModel: ObservableObject {
         if basePickerPresented { basePickerPresented = false; return }
         if targetPickerPresented { targetPickerPresented = false; return }
         if splitMode { splitMode = false; return }
-        if view == .sessions, case .newSession = page {
-            // Direct Sessions opens own the panel; routed ones navigate back.
-            if options.mode == "sessions" { dismiss() } else if !query.isEmpty { query = "" } else { navigate(.directories) }
-            return
-        }
-        if view != .repos || page == .directories {
+        if page == .directories {
             dismiss()
             return
         }
@@ -785,19 +735,20 @@ final class PickerModel: ObservableObject {
             if options.mode == "wt-create" { dismiss() } else { navigate(createParent) }
         } else if !query.isEmpty {
             query = ""
-        } else if page == .worktrees || page == .repositories {
+        } else if page == .worktrees {
             navigate(.directories)
         } else { dismiss() }
     }
 
     func split(_ direction: String) {
-        guard view == .repos, splitMode, canOpen, page != .repositories, let selected else { return }
+        guard view == .sessions, splitMode, canOpen, let selected, selected.kind != "session" else { return }
         splitMode = false
         dispatch(path: selected.path, target: direction)
     }
 
     func toggleSplit() {
-        guard view == .repos, canOpen, page == .directories || page == .worktrees else { return }
+        guard view == .sessions, canOpen, page == .directories || page == .worktrees else { return }
+        if page == .directories, selected?.kind != "dir" { return }
         splitMode.toggle()
     }
 
@@ -878,13 +829,13 @@ final class PickerModel: ObservableObject {
 
     func askRemove() {
         guard contextReady else { return }
-        guard view == .repos, !busy, !loading, page == .worktrees, let selected, selected.isMain == false else { return }
+        guard !busy, !loading, page == .worktrees, let selected, selected.isMain == false else { return }
         removalCandidate = selected
     }
 
     func confirmRemove(_ candidate: PickerItem) {
         guard contextReady else { return }
-        guard view == .repos, let repo, !busy, page == .worktrees, candidate.isMain == false else { return }
+        guard let repo, !busy, page == .worktrees, candidate.isMain == false else { return }
         removalCandidate = nil
         perform {
             _ = try await self.request("worktrees.remove", params: ["repo": .text(repo), "path": .text(candidate.path)])

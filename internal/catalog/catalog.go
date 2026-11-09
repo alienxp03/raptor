@@ -175,3 +175,221 @@ func ListWorktrees(repo string, cfg config.Config) Worktrees {
 	}
 	return info
 }
+
+// LauncherItem is one row of the unified Sessions launcher: a live session on
+// any host, or a frecency directory that would start one. Every field is
+// explicit — embedding the session entry would emit duplicate JSON keys.
+type LauncherItem struct {
+	Kind         string `json:"kind"` // "session" | "dir"
+	ID           string `json:"id"`
+	Path         string `json:"path,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	Label        string `json:"label"`
+	SessionLabel string `json:"session_label,omitempty"`
+	Host         string `json:"host"`
+	Active       bool   `json:"active,omitempty"`
+	Local        bool   `json:"is_local"`
+	Pinned       bool   `json:"is_pinned,omitempty"`
+	State        string `json:"state,omitempty"`
+	Working      bool   `json:"working,omitempty"`
+}
+
+// LauncherItems composes the flat launcher: live sessions first — the origin
+// session pinned to the top — then each host's directories by frecency with
+// pinned local directories floating first. Directories whose label already
+// has a live session on the same host are skipped: selecting the session is
+// the same action. A query fuzzy-ranks the composed rows over label, path,
+// and host.
+func LauncherItems(groups []rex.HostGroup, hostOrder []string, hostDirs map[string][]Directory, query string, agents []rex.AgentEntry, localDisplay string) []LauncherItem {
+	rows := make([]LauncherItem, 0, 16)
+	// Local rows carry the machine's real hostname so every badge answers
+	// "where is this" without a generic "This Mac".
+	if localDisplay == "" {
+		localDisplay = rex.LocalHostLabel
+	}
+	session := func(entry rex.SessionEntry, local bool) LauncherItem {
+		host := entry.Host
+		if host == "" || host == rex.LocalHostLabel {
+			host = localDisplay
+		}
+		return LauncherItem{
+			Kind: "session", ID: entry.ID, Path: entry.ID,
+			SessionID: entry.SessionID, Label: entry.Label, SessionLabel: entry.SessionLabel,
+			Host: host, Active: entry.Active, Local: local, State: entry.State, Working: entry.Working,
+		}
+	}
+	dir := func(host string, identityLocal bool, item Directory, pinned bool) LauncherItem {
+		if host == "" || host == rex.LocalHostLabel {
+			host = localDisplay
+		}
+		return LauncherItem{
+			Kind: "dir", ID: item.Path, Path: item.Path, Label: item.Label,
+			Host: host, Local: identityLocal, Pinned: pinned, State: item.State, Working: item.Working,
+		}
+	}
+	origin := -1
+	for _, group := range groups {
+		if !group.Reachable {
+			continue
+		}
+		for i, entry := range group.Entries {
+			if entry.Active {
+				origin = len(rows)
+			}
+			rows = append(rows, session(group.Entries[i], group.Local))
+		}
+	}
+	if origin > 0 {
+		active := rows[origin]
+		copy(rows[1:origin+1], rows[0:origin])
+		rows[0] = active
+	}
+	taken := map[string]bool{}
+	for _, group := range groups {
+		if group.Reachable {
+			for _, entry := range group.Entries {
+				taken[group.Label+"\x00"+entry.Label] = true
+			}
+		}
+	}
+	for _, host := range hostOrder {
+		items, loaded := hostDirs[host]
+		if !loaded {
+			continue
+		}
+		local := host == rex.LocalHostLabel
+		pinnedRows := make([]Directory, 0, 2)
+		rest := make([]Directory, 0, len(items))
+		for _, item := range items {
+			if taken[host+"\x00"+item.Label] {
+				continue
+			}
+			if local && item.Pinned {
+				pinnedRows = append(pinnedRows, item)
+			} else {
+				rest = append(rest, item)
+			}
+		}
+		for _, item := range append(pinnedRows, rest...) {
+			rows = append(rows, dir(host, local, item, local && item.Pinned))
+		}
+	}
+
+	if query == "" {
+		return rows
+	}
+	texts := make([]string, len(rows))
+	for i, row := range rows {
+		path := row.Path
+		if row.Kind == "session" {
+			path = ""
+		}
+		texts[i] = row.Label + " " + paths.HomeRelative(path) + " " + row.Host
+	}
+	// Unsorted fuzzy matches ranked sesh's way: the library docks one point
+	// per unmatched character with no floor, letting a long name lose to a
+	// short one; capping the penalty keeps length as a tiebreaker only.
+	matches := fuzzy.FindFromNoSort(query, launcherTexts(texts))
+	scored := make([]fuzzy.Match, len(matches))
+	scores := make([]int, len(matches))
+	for i, match := range matches {
+		penalty := len(match.MatchedIndexes) - len(match.Str)
+		scored[i] = match
+		scores[i] = match.Score - penalty + max(penalty, -5)
+	}
+	for i := 1; i < len(scored); i++ {
+		for j := i; j > 0 && scores[j] > scores[j-1]; j-- {
+			scored[j], scored[j-1] = scored[j-1], scored[j]
+			scores[j], scores[j-1] = scores[j-1], scores[j]
+		}
+	}
+	ranked := make([]LauncherItem, 0, len(scored))
+	for _, match := range scored {
+		ranked = append(ranked, rows[match.Index])
+	}
+	return ranked
+}
+
+// FilterLauncherItems applies the query to a cached (unfiltered) launcher
+// composition: everything when the query is empty, best fuzzy match first
+// otherwise.
+func FilterLauncherItems(items []LauncherItem, query, originSession string) []LauncherItem {
+	if query == "" {
+		return items
+	}
+	texts := make([]string, len(items))
+	for i, item := range items {
+		path := item.Path
+		if item.Kind == "session" {
+			path = ""
+		}
+		texts[i] = item.Label + " " + paths.HomeRelative(path) + " " + item.Host
+	}
+	matches := fuzzy.FindFromNoSort(query, launcherTexts(texts))
+	scored := make([]fuzzy.Match, len(matches))
+	scores := make([]int, len(matches))
+	for i, match := range matches {
+		penalty := len(match.MatchedIndexes) - len(match.Str)
+		scored[i] = match
+		scores[i] = match.Score - penalty + max(penalty, -5)
+	}
+	for i := 1; i < len(scored); i++ {
+		for j := i; j > 0 && scores[j] > scores[j-1]; j-- {
+			scored[j], scored[j-1] = scored[j-1], scored[j]
+			scores[j], scores[j-1] = scores[j-1], scores[j]
+		}
+	}
+	ranked := make([]LauncherItem, 0, len(scored))
+	for _, match := range scored {
+		ranked = append(ranked, items[match.Index])
+	}
+	return pinOriginFirst(ranked, originSession)
+}
+
+// PinLauncherOrigin moves the origin session to the front of already-composed
+// items (used by callers that compose without a query).
+func PinLauncherOrigin(items []LauncherItem, originSession string) []LauncherItem {
+	return pinOriginFirst(items, originSession)
+}
+
+// pinOriginFirst moves the origin session to the front of ranked results:
+// the session you're in is always the first suggestion, whatever the match
+// score says. Origin matches by the active flag or by the origin session id —
+// cached payloads may predate active flags.
+func pinOriginFirst(ranked []LauncherItem, originSession string) []LauncherItem {
+	isOrigin := func(item LauncherItem) bool {
+		return item.Kind == "session" &&
+			(item.Active || rex.SameSession(item.SessionID, originSession))
+	}
+	if len(ranked) > 1 && isOrigin(ranked[0]) {
+		return ranked
+	}
+	for i, item := range ranked {
+		if isOrigin(item) {
+			pinned := item
+			ranked = append(ranked[:i], ranked[i+1:]...)
+			return append([]LauncherItem{pinned}, ranked...)
+		}
+	}
+	return ranked
+}
+
+type launcherTexts []string
+
+func (l launcherTexts) String(i int) string { return l[i] }
+func (l launcherTexts) Len() int            { return len(l) }
+
+// ApplyLauncherDirActivity folds agent activity onto launcher directory rows
+// for one host. Session rows already carry their state from the host listing.
+func ApplyLauncherDirActivity(items []LauncherItem, host string, agents []rex.AgentEntry) {
+	if host != rex.LocalHostLabel || len(agents) == 0 {
+		return
+	}
+	for i := range items {
+		if items[i].Kind == "dir" {
+			scan := []Directory{{Path: items[i].Path}}
+			ApplyDirectoryActivity(scan, agents)
+			items[i].State, items[i].Working = scan[0].State, scan[0].Working
+		}
+	}
+}

@@ -77,12 +77,12 @@ func pickerDirectory(path string, width int, selected bool) string {
 }
 
 // pickerPills renders the view switcher under the search field:
-// 0 repos, 1 sessions, 2 agents.
+// 0 the sessions launcher, 2 agents.
 func pickerPills(active int, width int) string {
 	pills := []struct {
 		name string
 		view int
-	}{{"Repos", 0}, {"Sessions", 1}, {"Agents", 2}}
+	}{{"Sessions", 0}, {"Agents", 2}}
 	parts := make([]string, 0, len(pills))
 	for _, pill := range pills {
 		name := pill.name
@@ -253,6 +253,12 @@ func pickerRow(content string, width int, selected bool) string {
 	if selected {
 		rail = pickerMark
 	}
+	return pickerRowStyled(content, width, selected, rail)
+}
+
+// pickerRowStyled renders a row whose rail carries a custom color — the
+// launcher's live-session state bar (idle green, working accent, blocked red).
+func pickerRowStyled(content string, width int, selected bool, rail lipgloss.Style) string {
 	// Highlight the label only. Leave the column gap, detail, and padding quiet.
 	return pickerLine(rail.Render("▍")+" "+content, width)
 }

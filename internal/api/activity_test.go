@@ -13,6 +13,7 @@ import (
 )
 
 func TestActivitySnapshotViewsCacheAndFailure(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	log := filepath.Join(dir, "scans")
 	fail := filepath.Join(dir, "fail")
@@ -56,30 +57,43 @@ esac
 			t.Fatalf("scans=%d want=%d", got, want)
 		}
 	}
+	// The launcher cache is per test; legs that must hit the live fetch
+	// clear it first.
+	clearCache := func() {
+		t.Helper()
+		if err := os.Remove(h.launcherCachePath()); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
 	checkSessions := func(active bool) {
 		t.Helper()
 		result := call("sessions").(sessionsResult)
-		if len(result.Items) != 1 {
+		if len(result.Items) != 3 {
 			t.Fatalf("sessions=%+v", result)
 		}
-		for _, item := range result.Items {
+		// The session and its repo directory light up; the unrelated
+		// directory stays quiet in both cases.
+		for i, item := range result.Items[:2] {
 			if active && (item.State != "blocked" || !item.Working) {
-				t.Fatalf("session=%+v", item)
+				t.Fatalf("row %d=%+v", i, item)
 			}
 			if !active && (item.State != "" || item.Working) {
-				t.Fatalf("failed snapshot activity=%+v", item)
+				t.Fatalf("failed snapshot row %d=%+v", i, item)
 			}
 		}
+		if result.Items[2].State != "" || result.Items[2].Working {
+			t.Fatalf("unrelated directory=%+v", result.Items[2])
+		}
 	}
+
+	clearCache()
+	call("sessions") // Cold start: snapshot scan + live fetch + cache write.
 	checkSessions(true)
-	result := call("directories").(directoryResult)
-	if len(result.Items) != 2 || result.Items[0].State != "blocked" || !result.Items[0].Working || result.Items[1].State != "" {
-		t.Fatalf("dirs=%+v", result)
-	}
 	scans(1)
 	if _, err := h.call("context", json.RawMessage(`{"session":"other"}`)); err != nil {
 		t.Fatal(err)
 	}
+	// A fresh cache answers without touching the snapshot.
 	checkSessions(true)
 	scans(1)
 	agents := call("agents").(agentsResult)
@@ -89,13 +103,20 @@ esac
 	scans(2)
 	h.activityAt = time.Now().Add(-activitySnapshotTTL - time.Second)
 	checkSessions(true)
+	scans(2) // Fresh cache: the stale snapshot is never consulted.
+
+	// No cache: the stale snapshot refreshes and lights the rows.
+	clearCache()
+	checkSessions(true)
 	scans(3)
+
 	if err := os.WriteFile(fail, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
 	h.activityAt = time.Now().Add(-activitySnapshotTTL - time.Second)
+	clearCache()
 	checkSessions(false)
-	scans(5)
+	scans(5) // Failed snapshot: rows keep plain state, cache stores them.
 	// A failed fresh agent request must still fail, not return cached activity.
 	if _, err := h.call("agents", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("accepted failed agents snapshot")
@@ -104,6 +125,7 @@ esac
 	if err := os.Remove(fail); err != nil {
 		t.Fatal(err)
 	}
+	clearCache()
 	checkSessions(true)
 	scans(7)
 	// Cache is per Handler, not process-wide.
@@ -112,6 +134,7 @@ esac
 		t.Fatal(err)
 	}
 	scans(8)
+
 }
 
 func TestActivityCachesSuccessfulEmptySnapshot(t *testing.T) {

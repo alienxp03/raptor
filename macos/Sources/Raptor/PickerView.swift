@@ -13,7 +13,7 @@ struct PickerView: View {
             header
             if model.showsPills { viewPills }
             if model.page == .create { createForm } else { results }
-            if model.page == .worktrees && model.view == .repos { selectedWorktreePath }
+            if model.page == .worktrees && model.view == .sessions { selectedWorktreePath }
             status
             footer
         }
@@ -38,9 +38,9 @@ struct PickerView: View {
             field = page == .create ? .branch : .search
         }
         .alert("Remove worktree?", isPresented: Binding(
-            get: { model.removalCandidate != nil && model.view == .repos },
+            get: { model.removalCandidate != nil && model.page == .worktrees },
             set: { if !$0 { model.removalCandidate = nil } }
-        ), presenting: model.view == .repos ? model.removalCandidate : nil) { candidate in
+        ), presenting: model.page == .worktrees ? model.removalCandidate : nil) { candidate in
             Button("Cancel", role: .cancel) { model.removalCandidate = nil }
                 .keyboardShortcut(.defaultAction)
             Button("Remove", role: .destructive) { model.confirmRemove(candidate) }
@@ -49,9 +49,9 @@ struct PickerView: View {
             Text("Remove \(displayPath(candidate.path))?\nGit checks for unsaved changes. The branch is kept.")
         }
         .alert("Close session?", isPresented: Binding(
-            get: { model.removalCandidate != nil && model.view == .sessions },
+            get: { model.removalCandidate != nil && model.view == .sessions && model.page == .directories },
             set: { if !$0 { model.removalCandidate = nil } }
-        ), presenting: model.view == .sessions ? model.removalCandidate : nil) { candidate in
+        ), presenting: model.view == .sessions && model.page == .directories ? model.removalCandidate : nil) { candidate in
             Button("Cancel", role: .cancel) { model.removalCandidate = nil }
                 .keyboardShortcut(.defaultAction)
             Button("Close", role: .destructive) { model.confirmCloseSession(candidate) }
@@ -102,19 +102,12 @@ struct PickerView: View {
 
     private var searchPrompt: String {
         if model.view == .agents { return "Search agents…" }
-        if model.view == .sessions { return model.isNewSessionPage ? "Search directories…" : "Search sessions…" }
-        switch model.page {
-        case .repositories: return "Search repositories…"
-        case .worktrees: return "Search worktrees…"
-        default: return "Search directories…"
-        }
+        if model.page == .worktrees { return "Search worktrees…" }
+        return "Search sessions and directories…"
     }
 
     private var viewPills: some View {
         HStack(spacing: 6) {
-            pill("Repos", active: model.view == .repos, icon: "folder", hint: nil)
-                .accessibilityIdentifier("pill-repos")
-                .onTapGesture { model.selectView(.repos) }
             pill("Sessions", active: model.view == .sessions, icon: "tray.full", hint: nil)
                 .accessibilityIdentifier("pill-sessions")
                 .accessibilityHint("Show Sessions, Shift Command S")
@@ -166,41 +159,6 @@ struct PickerView: View {
                             row(item, position: model.numberedPosition(of: item)).id(item.id)
                         }
                     }
-                } else if model.view == .sessions, model.page == .directories {
-                    ForEach(model.hostSections) { section in
-                        HStack(spacing: 6) {
-                            Image(systemName: (section.host.local ?? false) ? "laptopcomputer" : "server.rack")
-                                .font(.system(size: 11))
-                                .foregroundStyle(PickerStyle.secondaryText)
-                                .accessibilityHidden(true)
-                            Text(section.host.label)
-                                .font(.system(size: 11))
-                                .foregroundStyle(PickerStyle.secondaryText)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, PickerStyle.rowInset)
-                        .frame(height: PickerStyle.agentGroupHeight)
-                        .padding(.top, section.id == model.hostSections.first?.id ? 0 : PickerStyle.agentGroupSpacing)
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("host-group:\(section.id)")
-                        if section.host.reachable {
-                            ForEach(section.items) { item in
-                                row(item, position: model.numberedPosition(of: item)).id(item.id)
-                            }
-                            newSessionRow(host: section.host.label)
-                        } else {
-                            Text("Unreachable")
-                                .font(.system(size: 11))
-                                .foregroundStyle(PickerStyle.secondaryText)
-                                .lineLimit(1).truncationMode(.tail)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, PickerStyle.rowInset)
-                                .frame(height: PickerStyle.sessionAuxRowHeight)
-                                .help(section.host.error ?? "The host could not be reached")
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel("Unreachable: \(section.host.label), \(section.host.error ?? "unknown error")")
-                        }
-                    }
                 } else {
                     ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
                         row(item, position: index + 1).id(item.id)
@@ -225,6 +183,7 @@ struct PickerView: View {
         let selected = model.selectedID == item.id
         let isAgent = model.view == .agents
         let isSessionRow = model.view == .sessions && item.isSessionEntry
+        let isLauncherDir = model.view == .sessions && item.kind == "dir"
         return HoverRow(selected: selected, enabled: true) {
             if position >= 1, position <= 9 {
                 Text("⌘\(position)")
@@ -261,6 +220,10 @@ struct PickerView: View {
                         .help(item.updatedAt ?? "")
                 }
             } else if isSessionRow {
+                Image(systemName: "terminal.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.secondaryText)
+                    .accessibilityHidden(true)
                 if item.active == true {
                     Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
                         .frame(width: 5, height: 5)
@@ -273,23 +236,36 @@ struct PickerView: View {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
                     .lineLimit(selected ? 2 : 1).truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if isLauncherDir {
+                Image(systemName: "folder")
+                    .font(.system(size: 11))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.secondaryText)
+                    .accessibilityHidden(true)
+                // Directory candidates read quieter than live sessions.
+                Text(displayPath(item.path))
+                    .lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.secondaryText)
             } else {
                 Text(displayPath(item.path))
                     .lineLimit(1).truncationMode(.middle)
             }
             if !isAgent { ActivityIndicator(activity: item.activity) }
-            if selected && !isAgent {
-                Spacer(minLength: 8)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .accessibilityHidden(true)
+            if !isAgent, item.isLocal == false, let host = item.host, !host.isEmpty {
+                // Never truncates: the label yields its space instead.
+                Text("· " + host)
+                    .font(.system(size: 10))
+                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .layoutPriority(2)
+                    .accessibilityLabel("On \(host)")
             }
         }
         .font(.system(size: PickerStyle.rowFontSize, weight: selected ? .medium : .regular))
         .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PickerStyle.rowInset)
-        .frame(height: isAgent ? PickerStyle.agentRowHeight : (model.page == .worktrees && model.view == .repos ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight))
+        .frame(height: isAgent ? PickerStyle.agentRowHeight : (model.page == .worktrees ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight))
         .background {
             if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground) }
         }
@@ -303,7 +279,7 @@ struct PickerView: View {
             guard !model.busy, !model.loading else { return }
             model.selectedID = item.id
         }
-        .help(isAgent ? [item.agentHelp, item.updatedAt].compactMap { $0 }.joined(separator: " · ") : item.path + (item.active == true ? " · Current pane" : ""))
+        .help(isAgent ? [item.agentHelp, item.updatedAt].compactMap { $0 }.joined(separator: " · ") : launcherRowHelp(item))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isAgent ? item.agentAccessibility
             : (isSessionRow ? item.label ?? item.path : displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? ""))
@@ -313,48 +289,6 @@ struct PickerView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("path-row:\(item.path)")
         .accessibilityAction { model.selectedID = item.id; model.choose() }
-    }
-
-    /// The per-host “New Session” affordance. It lives outside model items so
-    /// it never takes a numbered position; Enter enters the create flow.
-    /// Styled quiet: a hint, not an action button.
-    private func newSessionRow(host: String) -> some View {
-        let id = PickerModel.newSessionID(host)
-        let selected = model.selectedID == id
-        return HoverRow(selected: selected, enabled: true) {
-            Image(systemName: "plus.circle")
-                .font(.system(size: 11))
-                .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.secondaryText)
-                .accessibilityHidden(true)
-            Text("New Session")
-                .font(.system(size: 12))
-                .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.secondaryText)
-                .lineLimit(1).truncationMode(.tail).layoutPriority(1)
-            Spacer(minLength: 8)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, PickerStyle.rowInset)
-        .frame(height: PickerStyle.sessionAuxRowHeight)
-        .background {
-            if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground) }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            guard !model.busy, !model.loading else { return }
-            model.selectedID = id
-            model.choose()
-        }
-        .onTapGesture {
-            guard !model.busy, !model.loading else { return }
-            model.selectedID = id
-        }
-        .help("Create a new session on \(host)")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("New Session on \(host)")
-        .accessibilityValue(selected ? "Selected" : "")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("new-session:\(host)")
-        .accessibilityAction { model.selectedID = id; model.choose() }
     }
 
     private var selectedWorktreePath: some View {
@@ -530,8 +464,6 @@ struct PickerView: View {
         }
     }
 
-    private var isListPage: Bool { model.page == .directories || model.page == .worktrees }
-
     private var footer: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
@@ -539,12 +471,6 @@ struct PickerView: View {
                     Text("Split ⌃P   j↓  l→").accessibilityIdentifier("keyboard-hint")
                 } else if model.view == .agents {
                     EmptyView()
-                } else if model.view == .sessions && model.isNewSessionPage {
-                    Text("⎋ Back").foregroundStyle(PickerStyle.secondaryText)
-                } else if model.view == .sessions {
-                    EmptyView()
-                } else if model.page == .repositories {
-                    Text("Choose repository").foregroundStyle(PickerStyle.secondaryText)
                 } else if model.page == .create {
                     if model.createdPath != nil {
                         Button("Discard recovery") { model.discardCreatedRecovery() }
@@ -561,15 +487,10 @@ struct PickerView: View {
                 if model.view == .agents {
                     Button("↵ Switch") { model.choose() }.disabled(!model.canOpen)
                         .accessibilityIdentifier("open-selected")
-                } else if model.view == .sessions && !model.isNewSessionPage && !model.splitMode {
+                } else if model.page == .directories && !model.splitMode {
                     sessionActions
-                } else if isListPage && !model.splitMode { listActions }
+                } else if model.page == .worktrees && !model.splitMode { listActions }
                 if model.page == .create { createSubmitButton }
-                if model.page == .repositories {
-                    Button("Choose ↵") { model.choose() }
-                        .disabled(model.selected == nil || model.busy || model.loading)
-                        .accessibilityIdentifier("open-selected")
-                }
             }
             .frame(height: PickerStyle.footerHeight)
         }
@@ -587,9 +508,16 @@ struct PickerView: View {
         HStack(spacing: 12) {
             Button("↵ Switch") { model.choose() }.disabled(!model.canOpen)
                 .accessibilityIdentifier("open-selected")
-            Button("⌃X Close") { model.askCloseSession() }
-                .disabled(model.busy || model.loading || model.selected?.kind != "session")
-                .accessibilityIdentifier("remove-session")
+            if model.selected?.kind == "session" {
+                Button("⌃X Close") { model.askCloseSession() }
+                    .disabled(model.busy || model.loading || model.selected?.kind != "session")
+                    .accessibilityIdentifier("remove-session")
+            }
+            if model.selected?.kind == "dir" {
+                Button("⌃T Worktrees") { model.showWorktrees() }
+                    .disabled(model.busy || model.loading)
+                    .accessibilityIdentifier("show-worktrees")
+            }
         }
         .font(.system(size: 10))
         .fixedSize()
@@ -602,15 +530,9 @@ struct PickerView: View {
                 .accessibilityIdentifier("open-selected")
             Button("⌃P Split") { model.toggleSplit() }.disabled(!model.canOpen)
                 .accessibilityIdentifier("toggle-split")
-            if model.page == .directories {
-                Button("⌃T Worktrees") { model.showWorktrees() }
-                    .disabled(model.busy || model.loading || model.selected == nil)
-                    .accessibilityIdentifier("show-worktrees")
-            } else {
-                Button("⌃X Remove") { model.askRemove() }
-                    .disabled(model.busy || model.loading || model.selected?.isMain != false)
-                    .accessibilityIdentifier("remove-worktree")
-            }
+            Button("⌃X Remove") { model.askRemove() }
+                .disabled(model.busy || model.loading || model.selected?.isMain != false)
+                .accessibilityIdentifier("remove-worktree")
         }
         .font(.system(size: 10))
         .fixedSize()
@@ -670,14 +592,27 @@ struct PickerView: View {
         PathDisplay.abbreviate(path, home: model.options.demo ? "/Users/demo" : NSHomeDirectory())
     }
 
+    /// Row tooltip: host and open context — never the raw session id.
+    private func launcherRowHelp(_ item: PickerItem) -> String {
+        if model.view != .sessions {
+            return item.path
+        }
+        var parts: [String] = []
+        if item.kind == "session" {
+            parts.append("Session")
+            if item.active == true { parts.append("Current session") }
+        } else {
+            parts.append("Directory")
+            if let host = item.host, host != "This Mac" { parts.append("on \(host)") }
+        }
+        if let host = item.host, host != "This Mac" { parts.append("via \(host)") }
+        return parts.joined(separator: " · ")
+    }
+
     private var emptyMessage: String {
         if model.view == .agents { return "No matching agents" }
-        if model.view == .sessions { return model.isNewSessionPage ? "No matching directories" : "No matching sessions" }
-        switch model.page {
-        case .worktrees: return "No matching worktrees"
-        case .repositories: return "No matching repositories"
-        default: return "No matching directories"
-        }
+        if model.page == .worktrees { return "No matching worktrees" }
+        return "No matching sessions or directories"
     }
 }
 

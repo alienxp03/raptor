@@ -62,15 +62,15 @@ func (m *dirModel) updateLauncherActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.actions) == 0 {
 			return m, nil
 		}
-		r := m.selected()
-		if r == nil {
+		chosen := m.selectedLauncher()
+		if chosen == nil || chosen.dir == nil {
 			return m, nil
 		}
 		action := m.actions[m.actionSel]
 		if action.next != "" {
-			m.next, m.nextRepo = action.next, worktreepkg.RepoRoot(r.path)
+			m.next, m.nextRepo = action.next, worktreepkg.RepoRoot(chosen.dir.Path)
 		} else {
-			m.target, m.picked = action.target, r
+			m.target, m.picked = action.target, &row{kind: "dir", label: chosen.dir.Label, path: chosen.dir.Path}
 		}
 		return m, tea.Quit
 	}
@@ -80,8 +80,8 @@ func (m *dirModel) updateLauncherActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *dirModel) viewLauncherActions() string {
 	width := m.width - 2
 	path := ""
-	if r := m.selected(); r != nil {
-		path = r.path
+	if row := m.selectedLauncher(); row != nil && row.dir != nil {
+		path = row.dir.Path
 	}
 	lines := []string{pickerLine(pickerAccent.Bold(true).Render("Actions"), width), pickerDirectory(path, width, false)}
 	count := maxInt(m.height-4, 0)

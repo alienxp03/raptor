@@ -125,6 +125,7 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     var windowLabel: String? = nil
     var blockID: String? = nil
     var active: Bool? = nil
+    var isLocal: Bool? = nil
     var isPinned: Bool? = nil
     var host: String? = nil
     var id: String { path }
@@ -189,7 +190,7 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
             .compactMap { $0 }.joined(separator: ", ")
     }
     enum CodingKeys: String, CodingKey {
-        case path, label, branch, kind, active, app, state, working, cwd
+        case path, label, branch, kind, active, isLocal = "is_local", app, state, working, cwd
         case updatedAt = "updated_at"
         case agentID = "agent_id"
         case windowID = "window_id"

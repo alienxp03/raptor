@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/rex"
 )
@@ -114,22 +115,25 @@ func TestPickerSearchKeepsCursorVisible(t *testing.T) {
 	}
 }
 
-func TestDirectoryPickerScrollAndEmptyState(t *testing.T) {
-	m := &dirModel{width: 40, height: 12, cfg: config.Default(), target: "session"}
+func TestLauncherScrollAndEmptyState(t *testing.T) {
+	m := &dirModel{width: 40, height: 12, cfg: config.Default(), target: "session", hostDirs: map[string][]catalog.Directory{}, launcherLoaded: true,
+		hostOrder: []string{rex.LocalHostLabel}}
+	dirs := make([]catalog.Directory, 0, 30)
 	for i := 0; i < 30; i++ {
-		m.rows = append(m.rows, row{kind: "dir", label: fmt.Sprintf("project-%02d", i), path: fmt.Sprintf("/workspace/project-%02d", i)})
+		dirs = append(dirs, catalog.Directory{Label: fmt.Sprintf("project-%02d", i), Path: fmt.Sprintf("/workspace/project-%02d", i)})
 	}
-	m.applyFilter()
+	m.hostDirs[rex.LocalHostLabel] = dirs
+	m.applyLauncher()
 	m.sel = 29
 	output := ansi.Strip(m.View())
-	if !strings.Contains(output, "▍ /workspace/project-29") {
+	if !strings.Contains(output, "❯ /workspace/project-29") {
 		t.Fatal("selected row is outside the viewport")
 	}
 	m.filter = "no-such-directory"
-	m.applyFilter()
+	m.applyLauncher()
 	output = ansi.Strip(m.View())
-	if !strings.Contains(output, "No matching directories") || !strings.Contains(output, "Open as: session") {
-		t.Fatal("empty state or target hint missing")
+	if !strings.Contains(output, "No matching sessions or directories") || !strings.Contains(output, "switch") {
+		t.Fatal("empty state or switch hint missing")
 	}
 }
 
