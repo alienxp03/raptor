@@ -1,6 +1,6 @@
 # Agents
 
-Use **Repos · Sessions · Agents** to switch views. Tab moves forward; Shift+Tab moves back. Escape dismisses the launcher from any of these views, even with search text entered. Ctrl+U clears the search in the terminal picker. In the Mac picker, Cmd+Shift+A selects Agents directly.
+Use **Sessions · Agents** to switch views. Tab moves forward; Shift+Tab moves back. Escape dismisses the launcher from any of these views, even with search text entered. Ctrl+U clears the search in the terminal picker. In the Mac picker, Cmd+Shift+A selects Agents directly.
 
 To open Agents directly from Rex, add this to your Rex config and reload it:
 
@@ -19,7 +19,7 @@ Agents lists the agent program-status records that Rex reports for terminal pane
 
 One row represents one reported agent record. A tab with several agent panes has several rows. A pane can also have several records. Duplicate tab names are expected.
 
-This is not a scan of all operating-system processes. A headless agent that does not report status to Rex does not appear. Status and names are snapshots; a background refresh updates them. A session or pane that closes during discovery does not block the other rows.
+This is not a scan of all operating-system processes. A headless agent that does not report status to Rex does not appear. Rex events trigger fresh status and name snapshots while the picker is open. No periodic status polling is used. A session or pane that closes during discovery does not block the other rows.
 
 Rows use an app icon and agent name. Every row shows session/tab context on the right; repeated tab names are omitted. Idle agents have no status badge. A compact age shows the time since Rex's last status report, when available.
 
@@ -33,9 +33,9 @@ Group placement and existing row order remain a snapshot while the picker is ope
 
 ## Working indicators
 
-Working indicators animate in **Repos and Agents**. Blocked indicators remain static; Idle has no indicator. The Mac picker respects the system's Reduced Motion setting. Set `REX_REDUCED_MOTION=1` to disable terminal animation. `NO_COLOR` disables terminal colors, not motion.
+Working indicators use three animated dots in **Sessions and Agents**. Blocked indicators remain static; Idle has no indicator. The Mac picker respects the system's Reduced Motion setting. Set `REX_REDUCED_MOTION=1` to disable terminal animation. `NO_COLOR` disables terminal colors, not motion.
 
-Directory indicators summarize agents whose working directories are in that folder, including child directories. A row with both blocked and working agents can show both indicators. Activity is based on the latest fetched status snapshot, not a continuous process monitor.
+Directory indicators show only agents whose working directory exactly matches that folder. Activity in child folders does not mark the parent. Local symlink aliases still match the same folder. A row with both blocked and working agents can show both indicators. Rex status events update activity while the picker is open. The indicators show reported agent status, not CPU activity.
 
 Agents is a navigation view. It does not terminate, rename, or close agents. Use the agent's own commands for those actions.
 
@@ -64,4 +64,4 @@ Without `XDG_CACHE_HOME`, the current Raptor cache location is `~/Library/Caches
 
 Write files atomically with mode `0600`. Publish at session start and on `session_info_changed`; refresh every five seconds. Remove the process's own file at session shutdown.
 
-Raptor uses the name only when the process owner, pane, session, and fresh timestamp match a Rex agent record. Invalid or old metadata is ignored. Metadata does not create extra agent rows. Without a matching name, Raptor uses the terminal title or app name.
+Rex's native program-status title takes priority. If the title is empty, Raptor uses the bridge name only when the process owner, pane, session, and fresh timestamp match a Rex agent record. Invalid or old metadata is ignored. Metadata does not create extra agent rows. Without a matching name, Raptor uses the terminal title or app name.

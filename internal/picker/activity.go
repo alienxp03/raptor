@@ -11,16 +11,17 @@ import (
 )
 
 type activityLoadedMsg struct {
-	entries []rex.AgentEntry
-	err     error
+	entries    []rex.AgentEntry
+	err        error
+	generation uint64
 }
 
 type activityTickMsg struct{ id uint64 }
 
-func activityCommand(session string) tea.Cmd {
+func activityCommand(session string, generation uint64) tea.Cmd {
 	return func() tea.Msg {
 		entries, err := rex.AgentEntries(session)
-		return activityLoadedMsg{entries, err}
+		return activityLoadedMsg{entries: entries, err: err, generation: generation}
 	}
 }
 
@@ -38,9 +39,10 @@ func applyRowActivity(rows []row, agents []rex.AgentEntry) {
 // projectActivity folds agent activity onto launcher directory rows. Session
 // rows already carry their state from the host listing.
 func (m *dirModel) projectActivity(agents []rex.AgentEntry) {
+	m.activityEntries = agents
 	paths := make([]string, len(m.launcher))
 	for i, r := range m.launcher {
-		if r.dir != nil {
+		if r.dir != nil && (r.local || r.identity == "") {
 			paths[i] = r.dir.Path
 		}
 	}
@@ -50,7 +52,7 @@ func (m *dirModel) projectActivity(agents []rex.AgentEntry) {
 	}
 	catalog.ApplyDirectoryActivity(items, agents)
 	for i, item := range items {
-		if m.launcher[i].dir != nil {
+		if m.launcher[i].dir != nil && (m.launcher[i].local || m.launcher[i].identity == "") {
 			m.launcher[i].dir.State = item.State
 			m.launcher[i].dir.Working = item.Working
 		}

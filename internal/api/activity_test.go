@@ -98,40 +98,36 @@ esac
 	if len(agents.Items) != 2 || agents.Items[0].Active {
 		t.Fatalf("agents=%+v", agents)
 	}
-	scans(2)
+	scans(1)
+	// Expiry and disk deletion must not evict the persistent memory snapshot.
 	h.activityAt = time.Now().Add(-activitySnapshotTTL - time.Second)
-	checkSessions(true)
-	scans(2) // Fresh cache: the stale snapshot is never consulted.
-
-	// No cache: the stale snapshot refreshes and lights the rows.
 	clearCache()
 	checkSessions(true)
-	scans(3)
+	scans(1)
 
 	if err := os.WriteFile(fail, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	h.activityAt = time.Now().Add(-activitySnapshotTTL - time.Second)
-	clearCache()
-	checkSessions(false)
-	scans(5) // Failed snapshot: rows keep plain state, cache stores them.
-	// A failed fresh agent request must still fail, not return cached activity.
-	if _, err := h.call("agents", json.RawMessage(`{}`)); err == nil {
-		t.Fatal("accepted failed agents snapshot")
-	}
-	scans(6)
+	h.requestRefresh()
+	h.cacheMu.Lock()
+	done := h.refreshDone
+	h.cacheMu.Unlock()
+	<-done
+	checkSessions(true) // Failed refresh preserves both usable snapshots.
+	call("agents")
+	scans(2)
 	if err := os.Remove(fail); err != nil {
 		t.Fatal(err)
 	}
 	clearCache()
 	checkSessions(true)
-	scans(7)
+	scans(2)
 	// Cache is per Handler, not process-wide.
 	other := New(rex.Ctx{}, config.Default())
 	if _, err := other.activitySnapshot(false); err != nil {
 		t.Fatal(err)
 	}
-	scans(8)
+	scans(3)
 
 }
 

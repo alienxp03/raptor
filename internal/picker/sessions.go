@@ -109,7 +109,13 @@ func (m *dirModel) loadLauncherDirs(host string, force bool) tea.Cmd {
 	// newest reply for each host is accepted.
 	m.launcherDirsPending[host] = request
 	return func() tea.Msg {
-		return launcherDirsMsg{request: request, host: host, items: catalog.DirectoriesOn(host, false)}
+		items := catalog.DirectoriesOn(host, false)
+		if host != rex.LocalHostLabel && host != "" {
+			if agents, err := rex.AgentEntriesOn(host, ""); err == nil {
+				catalog.ApplyDirectoryActivityOn(host, items, agents)
+			}
+		}
+		return launcherDirsMsg{request: request, host: host, items: items}
 	}
 }
 
@@ -131,6 +137,24 @@ func (m *dirModel) loadAllLauncherDirs(force bool) tea.Cmd {
 func (m *dirModel) applyLauncher() {
 	rows := m.composeLauncher()
 	m.launcher = rows
+	m.projectActivity(m.activityEntries)
+	for i := range m.launcher {
+		r := &m.launcher[i]
+		if r.dir != nil && r.identity != "" {
+			if agents, ok := m.activityRemote[r.identity]; ok {
+				items := []catalog.Directory{*r.dir}
+				catalog.ApplyDirectoryActivityOn(r.identity, items, agents)
+				r.dir.State, r.dir.Working = items[0].State, items[0].Working
+			}
+		}
+	}
+	m.filterLauncher()
+}
+
+// Filtering uses the materialized rows only. Typing must not recompose the
+// catalog or resolve filesystem paths again.
+func (m *dirModel) filterLauncher() {
+	rows := m.launcher
 	texts := launcherTexts(rows)
 	if m.filter == "" {
 		m.launcherView = make([]launcherMatch, len(rows))
@@ -274,6 +298,16 @@ func (m *dirModel) acceptLauncherSessions(msg launcherSessionsMsg) {
 	if msg.request != m.launcherSessionsRequest || !m.launcherSessionsLoading {
 		return
 	}
+	activeSelection := m.sel
+	defer func() {
+		if m.viewMode != 0 {
+			m.sel = activeSelection
+		}
+	}()
+	var selected *launcherRow
+	if m.viewMode == 0 {
+		selected = m.selectedLauncher()
+	}
 	m.launcherSessionsLoading = false
 	m.launcherLoaded = true
 	m.sessions = msg.groups
@@ -293,7 +327,19 @@ func (m *dirModel) acceptLauncherSessions(msg launcherSessionsMsg) {
 		}
 	}
 	m.applyLauncher()
-	m.loadAllLauncherDirs(true)
+	if selected != nil {
+		for position, match := range m.launcherView {
+			fresh := m.launcher[match.index]
+			if fresh.identity != selected.identity {
+				continue
+			}
+			if (fresh.session != nil && selected.session != nil && fresh.session.Kind == selected.session.Kind && fresh.session.ID == selected.session.ID) ||
+				(fresh.dir != nil && selected.dir != nil && fresh.dir.Path == selected.dir.Path) {
+				m.sel = position
+				break
+			}
+		}
+	}
 }
 
 func (m *dirModel) acceptLauncherDirs(msg launcherDirsMsg) {
@@ -351,12 +397,12 @@ func (m *dirModel) updateLauncher(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.filter != "" {
 			r := []rune(m.filter)
 			m.filter = string(r[:len(r)-1])
-			m.applyLauncher()
+			m.filterLauncher()
 		}
 		return m, nil
 	case "ctrl+u":
 		m.filter = ""
-		m.applyLauncher()
+		m.filterLauncher()
 		return m, nil
 	case "up", "ctrl+k":
 		if m.sel > 0 {
@@ -445,7 +491,7 @@ func (m *dirModel) updateLauncher(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 			m.filter += string(msg.Runes)
-			m.applyLauncher()
+			m.filterLauncher()
 			return m, nil
 		}
 	}

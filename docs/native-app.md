@@ -11,7 +11,7 @@ mobile Rex action --------------------> raptor dirs / wt (Bubble Tea)
 
 The Mac app is a separate floating window, not a Rex-rendered popup. It requires macOS 14 or later. The picker opens 72 points below the active screen's usable top edge and grows downward as results change.
 
-The Mac UI stays warm between uses. Escape hides the window and closes that picker's Go child; Cmd+Q quits the app completely. No focus watcher, login item, or network service runs. Each reopening creates a new model and Go backend with fresh Rex context; a live mutation or removal confirmation cannot have its context replaced.
+The installed resident host keeps the panel, model, and Go backend warm between uses. Escape or Cmd+Q hides the resident panel and stops its live Rex subscription. Use `raptor service stop` to stop the resident host. Each reopening supplies fresh Rex context. A live mutation or removal confirmation cannot have its context replaced.
 
 ## UI selection
 
@@ -32,15 +32,17 @@ Without an explicit app path, the plugin checks `~/Applications/Raptor.app` and 
 
 ## Reopening and performance
 
-The plugin skips the terminal-title lookup for the native UI. The app keeps its window and SwiftUI runtime warm, but stops Go while hidden. A new request supplies session, pane, and client IDs; those IDs are never reused from a previous invocation. Search text, form state, and backend connection reset on reopening.
+The plugin skips the terminal-title lookup for the native UI. The resident app keeps its panel and backend warm while hidden. A new request supplies session, pane, and client IDs. Cached rows appear before revalidation; context-bound actions remain gated until the new context is ready. Successful session/agent navigation and dispatch hide the resident panel without closing its backend. This avoids a new process and catalog scan on the next opening.
+
+While visible, the panel receives native Rex events through Go. Status changes update rows without reopening or resetting selection, scroll, search, or target. Search filters Go's in-memory catalog, not a new Rex scan. A live refresh runs separately and publishes its completed snapshot. Typing retains the current rows until matching results arrive; actions on an older query stay gated. Subscription cleanup and reconnect recovery are separate from dot animation. See [Rex API integration](rex-api.md).
 
 Local measurements from the launch command to a visible window were about 125–140 ms for warm reopens versus 230–280 ms for fresh processes. Populated results took about 170–180 ms warm. These are local measurements, not timing guarantees; the first launch after installation can take longer.
 
-Quit the app before replacing an installed bundle. The build/installer refuses to replace a running copy. Open the picker and press Cmd+Q, then retry.
+`make install` stops the resident host before replacing the bundle, then restarts it. Before a manual bundle replacement, run `raptor service stop`; Cmd+Q only hides a resident picker. Restart it with `raptor service start`.
 
 ## Shared logic
 
-The **Open in** control uses the shared target order: tab → session → cd here → pane right → left → above → below. Configured target lists are respected by both interfaces; cd/pane targets require an origin pane. Ctrl+O cycles the choices; Ctrl+Shift+O cycles backward. The dropdown also supports pointer selection. Tab / Shift+Tab moves keyboard focus, not the open target. Ctrl+P remains the pane-split shortcut.
+The **Open in** control uses the shared target order: tab → session → cd here → pane right → pane below. Configured target lists are respected by both interfaces; cd/pane targets require an origin pane. Ctrl+O cycles the choices; Ctrl+Shift+O cycles backward. The dropdown also supports pointer selection. Tab / Shift+Tab moves keyboard focus, not the open target. Ctrl+P remains the pane-split shortcut.
 
 Home-directory labels use `~/…`; tooltips and backend requests retain the full absolute paths. Paths outside the current home directory stay absolute.
 

@@ -147,6 +147,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // AppKit supplies resh's panel fade; no custom delay or alpha animation.
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
+        model?.setPresented(true)
         startThemeRefresh()
     }
 
@@ -169,6 +170,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func dismissResidentPanel() {
+        model?.setPresented(false)
         stopThemeRefresh()
         panel?.orderOut(nil)
     }
@@ -242,8 +244,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sizeSubscription = next.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.resizePanel() }
         }
-        bringForward(picker)
         next.start()
+        bringForward(picker)
     }
 
     private func makePanel(for next: PickerModel) -> RaptorPanel {
@@ -348,10 +350,12 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
         picker.makeKeyAndOrderFront(nil)
+        model?.setPresented(true)
         startThemeRefresh()
     }
 
     private func bindDismissal(_ next: PickerModel) {
+        next.keepsBackendWarmOnNavigation = resident
         let dismiss: () -> Void = { [weak self, weak next] in
             guard let self, let next, self.model === next else { return }
             self.dismissPicker()

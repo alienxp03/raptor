@@ -1,6 +1,7 @@
 package picker
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -75,9 +76,15 @@ type dirModel struct {
 	previewPending          bool
 	previewText             string
 	activityFrame           int
+	activityEntries         []rex.AgentEntry
+	activityRemote          map[string][]rex.AgentEntry
 	activityTickPending     bool
 	activityTickID          uint64
 	activityStopping        bool
+	activityWatcher         *rex.EventWatcher
+	activityLivePending     bool
+	activityLiveDirty       bool
+	activityLiveID          uint64
 	viewStates              [3]dirViewState
 	err                     string
 	width                   int
@@ -143,7 +150,11 @@ func runDirs(ctx rex.Ctx, cfg config.Config, launcher bool, view int) int {
 	m := newDirModel(ctx, cfg, launcher, view)
 	var dm *dirModel
 	for {
+		m.activityWatcher = rex.WatchEvents(context.Background())
+		m.activityWatcher.Discover()
 		final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+		m.activityWatcher.Close()
+		m.activityWatcher = nil
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -201,11 +212,13 @@ func (m *dirModel) Init() tea.Cmd {
 	m.activityStopping = false
 	m.activityTickPending = false
 	m.activityTickID++
-	commands := []tea.Cmd{m.ctx.TitleCommand(), m.scheduleActivityTick()}
+	m.activityLiveID++
+	m.activityLivePending, m.activityLiveDirty = false, false
+	commands := []tea.Cmd{m.ctx.TitleCommand(), m.scheduleActivityTick(), waitActivityEvent(m.activityWatcher)}
 	// Launcher rows carry their own State/Working from the host listing; the
 	// local-only agent snapshot is a concern of the Agents view.
 	if m.viewMode == 0 {
-		commands = append(commands, activityCommand(m.ctx.Session))
+		commands = append(commands, activityCommand(m.ctx.Session, m.activityLiveID))
 	}
 	if m.agentsLoading || (m.viewMode == 2 && !m.agentsLoaded) {
 		commands = append(commands, m.loadAgents(true))
@@ -250,7 +263,7 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activityStopping = true
 	}
 	switch msg.(type) {
-	case activityTickMsg, activityLoadedMsg, agentsLoadedMsg, launcherSessionsMsg:
+	case activityTickMsg, activityLoadedMsg, agentsLoadedMsg, launcherSessionsMsg, activityLiveMsg:
 		if tick := m.scheduleActivityTick(); tick != nil {
 			return model, tea.Batch(cmd, tick)
 		}
@@ -260,6 +273,13 @@ func (m *dirModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *dirModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case activityEventMsg:
+		if m.activityStopping {
+			return m, nil
+		}
+		return m, tea.Batch(waitActivityEvent(m.activityWatcher), m.refreshLiveActivity())
+	case activityLiveMsg:
+		return m, m.acceptLiveActivity(msg)
 	case activityTickMsg:
 		if msg.id == m.activityTickID {
 			m.activityTickPending = false
@@ -267,7 +287,7 @@ func (m *dirModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case activityLoadedMsg:
-		if msg.err == nil {
+		if msg.err == nil && msg.generation == m.activityLiveID {
 			m.projectActivity(msg.entries)
 		}
 		return m, nil
@@ -275,8 +295,12 @@ func (m *dirModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.acceptAgents(msg)
 		return m, nil
 	case launcherSessionsMsg:
+		current := msg.request == m.launcherSessionsRequest && m.launcherSessionsLoading
 		m.acceptLauncherSessions(msg)
-		return m, m.schedulePreview()
+		if current {
+			return m, tea.Batch(m.loadAllLauncherDirs(false), m.schedulePreview())
+		}
+		return m, nil
 	case launcherDirsMsg:
 		m.acceptLauncherDirs(msg)
 		return m, m.schedulePreview()

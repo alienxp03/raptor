@@ -114,7 +114,28 @@ private actor SlowDirectoryBackend: BackendClient {
 }
 
 // Explicit replies simulate pipe calls that finish even after task cancellation.
+private actor EventCounter {
+    private var value = 0
+    func increment() { value += 1 }
+    func count() -> Int { value }
+}
+
 private actor CachedListBackend: BackendClient {
+    private let events: Bool
+    private var handler: (@Sendable () -> Void)?
+    private var oldHandler: (@Sendable () -> Void)?
+    init(events: Bool = false) { self.events = events }
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) async throws -> Bool {
+        guard events else { return false }
+        calls.append(handler == nil ? "unsubscribe" : "subscribe")
+        oldHandler = self.handler
+        self.handler = handler
+        return true
+    }
+    func emit(_ times: Int = 1, stale: Bool = false) {
+        for _ in 0..<times { (stale ? oldHandler : handler)?() }
+    }
+    func methods() -> [String] { calls }
     private var pending: [String: [CheckedContinuation<APIResult, Error>]] = [:]
     private var calls: [String] = []
     private var lastParams: [String: [String: APIValue]] = [:]
@@ -127,6 +148,10 @@ private actor CachedListBackend: BackendClient {
     func reply(_ method: String, _ result: APIResult) {
         guard waiting(method) else { testFailure("Reply for \(method) arrived with no pending call") }
         pending[method]!.removeFirst().resume(returning: result)
+    }
+    func replyLatest(_ method: String, _ result: APIResult) {
+        guard waiting(method) else { testFailure("Reply for \(method) arrived with no pending call") }
+        pending[method]!.removeLast().resume(returning: result)
     }
     func fail(_ method: String) {
         guard waiting(method) else { testFailure("Failure for \(method) arrived with no pending call") }
@@ -156,6 +181,7 @@ struct NativeChecks {
             try await themeIntegrationChecks()
             return
         }
+        try await searchLatencyChecks()
         require(PickerStyle.panelAnimationBehavior(reduceMotion: false) == .default,
                      "Panel presentation must use resh's default AppKit animation")
         require(PickerStyle.panelAnimationBehavior(reduceMotion: true) == .none,
@@ -285,6 +311,7 @@ struct NativeChecks {
         try nativeThemeRoleChecks()
         try await themeRefreshChecks()
         try await dismissalChecks()
+        try await residentNavigationWarmthChecks()
         // The launcher reaches Create only through ⌃T Worktrees on a directory row.
         let directoryCreate = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: DemoBackend())
         directoryCreate.start()
@@ -381,11 +408,115 @@ struct NativeChecks {
         require(retry.error == nil && retry.notice?.contains("No Rex call") == true)
         retry.close()
 
+        try await liveEventChecks()
+
         // Optional transport fixture exists only inside an aux test .app bundle.
         if CommandLine.arguments.contains("--transport-fixture") {
             try await transportChecks()
         }
         print("PASS: launch flags, decoding, launcher fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
+    }
+
+    @MainActor private static func liveEventChecks() async throws {
+        let options = try LaunchOptions(arguments: ["--demo", "--mode", "agents"])
+        let backend = CachedListBackend(events: true)
+        let model = PickerModel(options: options, backend: backend)
+        func agent(_ id: String, _ state: String) -> PickerItem {
+            PickerItem(path: id, kind: "agent", state: state)
+        }
+        let initial = APIResult(items: [agent("a", "working"), agent("b", "idle")], targets: ["tab", "session"], target: "tab")
+        model.setPresented(true)
+        model.start()
+        try await pending("agents", backend)
+        let methods = await backend.methods()
+        require(methods.firstIndex(of: "subscribe")! < methods.firstIndex(of: "agents")!, "Subscribe must precede initial rows")
+        await backend.reply("agents", initial)
+        try await wait { !model.refreshing }
+        require(await backend.count("agents") == 1, "Cold subscribe must not duplicate the initial snapshot")
+        await backend.emit()
+        try await pending("agents", backend)
+        await backend.reply("agents", initial)
+        try await Task.sleep(for: .milliseconds(70))
+        model.selectedID = "b"; model.scrollID = "b"; model.target = "session"
+        model.splitMode = true; model.targetPickerPresented = true
+        let count = await backend.count("agents")
+        await backend.emit(20)
+        try await pending("agents", backend)
+        require(await backend.count("agents") == count + 1, "Burst must coalesce")
+        require(!model.loading && !model.refreshing, "Live refresh must not show loading")
+        await backend.emit(20)
+        await backend.reply("agents", APIResult(items: [agent("new", "blocked"), agent("b", "working"), agent("a", "idle")]))
+        try await pending("agents", backend)
+        require(model.items.map(\.id) == ["a", "b"] && model.items[0].state == "idle", "Update content, not presentation order")
+        require(model.agentSections.map(\.id) == ["Working", "Idle"], "Keep snapshot groups")
+        require(model.selectedID == "b" && model.scrollID == "b" && model.target == "session")
+        require(model.splitMode && model.targetPickerPresented, "Keep split and popover state")
+        await backend.reply("agents", initial)
+        try await Task.sleep(for: .milliseconds(100))
+        require(await backend.count("agents") == count + 2, "In-flight changes need exactly one follow-up, no polling")
+        model.targetPickerPresented = false
+        model.query = "filter"
+        try await pending("agents", backend)
+        await backend.reply("agents", initial)
+        try await wait { !model.refreshing }
+        await backend.emit()
+        try await pending("agents", backend)
+        let params = await backend.parameters("agents")
+        if case .text("filter") = params["query"] {} else { testFailure("Live refresh lost query") }
+        model.setPresented(false)
+        await backend.reply("agents", APIResult(items: []))
+        try await Task.sleep(for: .milliseconds(80))
+        require(model.items.count == 2 && model.query == "filter", "Hidden response must not apply")
+        let hiddenCount = await backend.count("agents")
+        await backend.emit(10, stale: true)
+        try await Task.sleep(for: .milliseconds(80))
+        require(await backend.count("agents") == hiddenCount, "Hidden callbacks must not request rows")
+        require(await backend.count("unsubscribe") == 1)
+        model.setPresented(true)
+        try await pending("agents", backend)
+        let token = model.prepareReconfigure(try LaunchOptions(arguments: ["--demo", "--session", "new"]))
+        let completion = Task { await model.completeReconfigure(token) }
+        await backend.reply("agents", APIResult(items: [agent("stale", "blocked")]))
+        await completion.value
+        try await pending("sessions", backend)
+        require(!model.items.contains { $0.id == "stale" }, "Prior-context event response must not apply")
+        await backend.reply("sessions", APIResult(items: [PickerItem(path: "s", kind: "session", working: true)], targets: ["tab"], target: "tab"))
+        try await wait { !model.refreshing }
+        await backend.emit()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: [PickerItem(path: "s", kind: "session", state: "blocked")]))
+        try await wait { model.items.first?.state == "blocked" }
+        require(model.items.first?.activity.blocked == true)
+        await backend.emit()
+        try await pending("sessions", backend)
+        model.close()
+        await backend.reply("sessions", APIResult(items: []))
+        await backend.emit(5)
+        try await Task.sleep(for: .milliseconds(80))
+        require(model.items.first?.id == "s", "Close must reject late events and responses")
+        let worktrees = CachedListBackend(events: true)
+        let worktreeOptions = try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/repo"])
+        let worktreeModel = PickerModel(options: worktreeOptions, backend: worktrees)
+        let trees = APIResult(items: [PickerItem(path: "/repo/tree", branch: "main")], targets: ["tab"], target: "tab", repo: "/repo", branches: ["main"], baseBranch: "main")
+        worktreeModel.setPresented(true); worktreeModel.start()
+        try await pending("worktrees.list", worktrees)
+        await worktrees.reply("worktrees.list", trees)
+        try await wait { !worktreeModel.refreshing }
+        await worktrees.emit()
+        try await pending("worktrees.list", worktrees)
+        worktreeModel.busy = true
+        await worktrees.reply("worktrees.list", trees)
+        try await Task.sleep(for: .milliseconds(80))
+        require(worktreeModel.busy && worktreeModel.repo == "/repo" && worktreeModel.base == "main", "Activity must preserve busy workflow and repository metadata")
+        worktreeModel.busy = false
+        worktreeModel.beginCreate(); worktreeModel.editBranch("feat/keep")
+        let treeCount = await worktrees.count("worktrees.list")
+        await worktrees.emit(10)
+        try await Task.sleep(for: .milliseconds(80))
+        require(await worktrees.count("worktrees.list") == treeCount, "Activity must not refresh a Create form")
+        require(worktreeModel.page == .create && worktreeModel.branch == "feat/keep" && worktreeModel.base == "main")
+        worktreeModel.close()
+        print("PASS: idle live subscriptions, subscribe-before-snapshot, burst/in-flight coalescing, row-only refresh, stable order/groups/selection/scroll/target/query/popover/split, hidden/context/close isolation, busy worktree/Create preservation")
     }
 
     @MainActor private static func groupedActivityChecks() async throws {
@@ -1015,7 +1146,8 @@ struct NativeChecks {
                      "A failed background refresh must keep cached rows usable")
 
         model.query = "filtered"
-        require(model.loading && model.items.isEmpty, "Uncached queries must not expose stale rows")
+        require(!model.loading && model.items == launcherRows.items && !model.canOpen,
+                "Uncached queries must retain the display snapshot without enabling stale actions")
         try await pending("sessions", backend)
         await backend.reply("sessions", launcherRows)
         try await wait { !model.refreshing }
@@ -1157,6 +1289,44 @@ struct NativeChecks {
         require(mutation.canOpen, "A successful retry and list refresh must restore actions")
         mutation.close()
         print("PASS: instant cached switching, per-view query/selection/scroll, cached Open, cancelled replies, refresh failure, mutation invalidation, origin/repo/page isolation, synchronous directory reopen, blocked context action gates, context failure/retry, startup warmup race")
+    }
+
+    @MainActor private static func residentNavigationWarmthChecks() async throws {
+        for action in ["sessions.jump", "sessions.create", "agents.jump", "dispatch"] {
+            let backend = CachedListBackend()
+            await backend.hold(action)
+            let isAgent = action == "agents.jump"
+            let options = try LaunchOptions(arguments: ["--mode", isAgent ? "agents" : "sessions", "--session", "S", "--block", "B"])
+            let model = PickerModel(options: options, backend: backend)
+            model.keepsBackendWarmOnNavigation = true
+            var dismissals = 0
+            var closes = 0
+            model.onDismiss = { dismissals += 1 }
+            model.onClose = { closes += 1 }
+            let listMethod = isAgent ? "agents" : "sessions"
+            let kind = isAgent ? "agent" : (action == "sessions.jump" ? "session" : "dir")
+            let item = PickerItem(path: "/repo", kind: kind, sessionID: "S", windowID: "W", blockID: "B")
+            let result = APIResult(items: [item], targets: ["session", "tab"], target: action == "dispatch" ? "tab" : "session")
+            model.start()
+            try await pending(listMethod, backend)
+            await backend.reply(listMethod, result)
+            try await wait { !model.refreshing }
+            model.choose()
+            try await pending(action, backend)
+            await backend.reply(action, APIResult())
+            try await wait { dismissals == 1 && !model.busy }
+            require(!model.backendIsClosed && closes == 0, "Resident navigation must hide, not restart the backend: \(action)")
+            if action == "sessions.jump" {
+                let count = await backend.count("sessions")
+                let token = model.prepareReconfigure(options)
+                await model.completeReconfigure(token)
+                require(model.contextReady && model.canOpen && model.items == [item], "Resident reopen must retain actionable cached rows")
+                try await Task.sleep(for: .milliseconds(20))
+                require(await backend.count("sessions") == count, "Warm navigation reopen must not rescan the list")
+            }
+            model.close()
+        }
+        print("PASS: resident session/agent jumps, Create and dispatch hide without closing the backend; cached reopen stays immediate")
     }
 
     @MainActor private static func dismissalChecks() async throws {
@@ -1389,9 +1559,10 @@ struct NativeChecks {
                                  foreground: "#203040", selection: "#556677",
                                  selectionForeground: "#ffeedd", surface: "#ddccbb")
         model.start()
-        try await pending("theme", backend)
         try await pending("sessions", backend)
+        require(await backend.count("theme") == 0, "Initial theme must not queue ahead of the list")
         await backend.reply("sessions", rows)
+        try await pending("theme", backend)
         try await wait { !model.refreshing }
         require(model.canOpen && !model.themeLoaded,
                      "A slow theme lookup must not block loaded rows")
@@ -1479,6 +1650,66 @@ struct NativeChecks {
         print("PASS: asynchronous Rex theme refresh, request coalescing, cached Open, stable picker state, selected text, material repaint, unchanged/error/invalid responses, retry and close")
     }
 
+    @MainActor private static func searchLatencyChecks() async throws {
+        for mode in ["wt", "wt-create"] {
+            let options = try LaunchOptions(arguments: ["--demo", "--mode", mode])
+            let model = PickerModel(options: options, backend: CachedListBackend())
+            require(model.queryDebounceMilliseconds == 140, "Worktree metadata debounce must stay unchanged")
+            model.close()
+        }
+        for mode in ["sessions", "agents"] {
+            let backend = CachedListBackend()
+            let options = try LaunchOptions(arguments: ["--demo", "--mode", mode])
+            let model = PickerModel(options: options, backend: backend)
+            let old = PickerItem(path: "old", kind: mode == "agents" ? "agent" : "session")
+            let latest = PickerItem(path: "latest", kind: old.kind)
+            let snapshot = APIResult(items: [old], targets: ["tab"], target: "tab")
+            model.start()
+            try await pending(mode, backend)
+            await backend.reply(mode, snapshot)
+            try await wait { !model.refreshing && model.themeLoaded }
+            require(model.canOpen && model.queryDebounceMilliseconds == 0)
+            model.query = "l"
+            try await pending(mode, backend)
+            require(model.items == [old] && !model.loading && !model.canOpen)
+            model.choose(); model.openNumbered(1); model.togglePin(); model.showWorktrees(); model.askCloseSession()
+            require(!model.busy && model.removalCandidate == nil && model.page == .directories,
+                    "Pending search rows must be display-only for every action")
+            model.query = "la"
+            model.query = "latest"
+            let began = ContinuousClock.now
+            // The obsolete in-flight read may complete after the current one.
+            // Hold it until the current response has replaced the display.
+            for _ in 0..<2000 {
+                if await backend.count(mode) == 3 { break }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            require(await backend.count(mode) == 3, "Only the yielded old query and latest query should reach the mock")
+            let elapsed = began.duration(to: .now)
+            require(model.items == [old] && !model.loading && !model.canOpen)
+            await backend.replyLatest(mode, APIResult(items: [latest], targets: ["tab"], target: "tab"))
+            try await wait { !model.refreshing }
+            require(model.items == [latest] && model.canOpen)
+            await backend.reply(mode, APIResult(items: [PickerItem(path: "obsolete", kind: old.kind)]))
+            // Let the obsolete task attempt to publish after the latest result.
+            await Task.yield()
+            require(model.items == [latest] && model.canOpen, "A late obsolete response must not replace matching results")
+            let calls = await backend.count(mode)
+            let reopen = model.prepareReconfigure(options)
+            require(model.items == [old] && !model.loading && model.canOpen && model.query.isEmpty,
+                    "Reopen must synchronously show the cached unfiltered snapshot")
+            await model.completeReconfigure(reopen)
+            if mode == "agents" {
+                try await pending(mode, backend)
+                await backend.reply(mode, snapshot)
+                try await wait { !model.refreshing }
+            }
+            require(await backend.count(mode) == calls + (mode == "agents" ? 1 : 0))
+            print("PASS: \(mode) search debounce=0ms; 3 list requests (initial, in-flight old, latest), intermediate query=0; observed latest dispatch=\(elapsed); cached reopen synchronous, extra list requests=\(mode == "agents" ? 1 : 0)")
+            model.close()
+        }
+    }
+
     @MainActor private static func warmReopenChecks() async throws {
         let options = try LaunchOptions(arguments: ["--demo", "--session", "S", "--block", "B", "--client", "C", "--title", "T"])
         let launcherRows = APIResult(items: ["/a", "/b", "/c"].map { PickerItem(path: $0, kind: "dir") }, targets: ["tab", "session"], target: "tab")
@@ -1536,6 +1767,7 @@ struct NativeChecks {
             let token = model.prepareReconfigure(changed)
             require(!model.contextReady && !model.canOpen && model.targets.isEmpty && model.target.isEmpty,
                          "A changed context component must gate actions and discard cached targets")
+            require(model.refreshTheme() == nil, "Appearance polling must not jump ahead of context and initial rows")
             model.choose(); model.showWorktrees(); model.switchView()
             let completion = Task { await model.completeReconfigure(token) }
             try await pending("context", backend)
@@ -1797,8 +2029,52 @@ struct NativeChecks {
         print("PASS: real Go backend → NDJSON → Swift decoding → model → selected text and native panel tint")
     }
 
+    private static func queuedSearchChecks(_ options: LaunchOptions) async throws {
+        let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("aux/native-search-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gate = directory.appendingPathComponent("gate").path
+        let backend = ProcessBackend(options: options)
+        defer { backend.close() }
+        let inFlight = Task { try await backend.request("sessions", params: ["query": .text("in-flight"), "gate": .text(gate)]) }
+        for _ in 0..<2000 {
+            if FileManager.default.fileExists(atPath: gate + ".ready") { break }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        require(FileManager.default.fileExists(atPath: gate + ".ready"), "Fixture must hold an issued read")
+        inFlight.cancel() // It must still drain its own response ID.
+        let obsolete = (0..<20).map { index in
+            let task = Task { try await backend.request(index % 2 == 0 ? "sessions" : "agents", params: ["query": .text("old-\(index)")]) }
+            task.cancel()
+            return task
+        }
+        let latest = Task { try await backend.request("agents", params: ["query": .text("latest")]) }
+        let mutation = Task { try await backend.request("sessions.jump", params: [:]) }
+        mutation.cancel() // Never suppress or duplicate a queued mutation.
+        let began = ContinuousClock.now
+        FileManager.default.createFile(atPath: gate + ".release", contents: Data())
+        require(try await inFlight.value.items?.first?.path == "in-flight")
+        for task in obsolete {
+            do { _ = try await task.value; testFailure("Canceled queued search reached the wire") }
+            catch is CancellationError {} // No connection teardown or ID allocation.
+        }
+        require(try await latest.value.items?.first?.path == "latest")
+        let elapsed = began.duration(to: .now)
+        _ = try await mutation.value
+        let audit = try await backend.request("audit", params: [:]).branches ?? []
+        require(audit.count == 4 && audit.filter { $0.contains(":sessions.jump:") }.count == 1,
+                "Wire must contain one in-flight read, latest read, one mutation, and audit: \(audit)")
+        require(!audit.contains { $0.contains("old-") })
+        for (index, entry) in audit.enumerated() {
+            require(entry.hasPrefix("\(index + 1):"), "Skipped reads must not consume protocol IDs")
+        }
+        print("PASS: blocked transport: 20 canceled queued searches=0 wire requests; in-flight drained, latest=1, canceled mutation=1, contiguous IDs; release-to-latest=\(elapsed)")
+    }
+
     private static func transportChecks() async throws {
         let options = try LaunchOptions(arguments: ["--session", "S", "--block", "B", "--client", "C", "--title", "A title"])
+        try await queuedSearchChecks(options)
         let dismissed = ProcessBackend(options: options)
         dismissed.close() // Closing before the first request must not start a child.
         do {
@@ -1812,8 +2088,37 @@ struct NativeChecks {
             testFailure("API error accepted")
         } catch { require(error.localizedDescription == "fixture error", "Unexpected error: \(error.localizedDescription)") }
         _ = try await backend.request("ok", params: [:])
+        let events = EventCounter()
+        _ = try await backend.setChangeHandler { Task { await events.increment() } }
+        try await Task.sleep(for: .milliseconds(160))
+        require(await events.count() == 1, "Idle notifications must be read without a request")
+        _ = try await backend.request("interleaved", params: [:])
+        try await Task.sleep(for: .milliseconds(30))
+        require(await events.count() == 2, "Interleaved notifications must not consume a response ID")
+        _ = try await backend.setChangeHandler(nil)
+        _ = try await backend.request("interleaved", params: [:])
+        try await Task.sleep(for: .milliseconds(30))
+        require(await events.count() == 2, "Unsubscribed notifications must not reach the consumer")
         backend.close()
-        for method in ["bad-id", "malformed", "eof", "both", "no-result"] {
+        for _ in 0..<8 {
+            let finalReply = ProcessBackend(options: options)
+            _ = try await finalReply.request("reply-and-eof", params: [:])
+            do {
+                _ = try await finalReply.request("ok", params: [:])
+                testFailure("EOF connection accepted a later request")
+            } catch {}
+            finalReply.close()
+        }
+        let graceful = ProcessBackend(options: options)
+        let identity = try await graceful.request("graceful-close", params: [:])
+        guard let path = identity.path, let pid = Int32(path) else { testFailure("Missing fixture process ID") }
+        graceful.close()
+        let shutdown = Date()
+        while kill(pid, 0) == 0 && Date().timeIntervalSince(shutdown) < 0.9 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        require(kill(pid, 0) != 0, "Backend must receive EOF and exit before signal escalation")
+        for method in ["bad-id", "malformed", "eof", "both", "no-result", "event-id", "unknown-event"] {
             let connection = ProcessBackend(options: options)
             do {
                 _ = try await connection.request(method, params: [:])
@@ -1833,6 +2138,14 @@ struct NativeChecks {
             _ = try await pending.value
             testFailure("In-flight request survived close")
         } catch {}
-        print("PASS: persistent NDJSON, split reads, valid API error recovery, ID mismatch, malformed JSON, EOF, invalid envelopes, closed connection, in-flight shutdown")
+        let timed = ProcessBackend(options: options)
+        let began = Date()
+        do {
+            _ = try await timed.request("hang", params: [:])
+            testFailure("Request exceeded its deadline without failing")
+        } catch {}
+        require(timed.isClosed && Date().timeIntervalSince(began) >= 29 && Date().timeIntervalSince(began) < 35,
+                "Request timeout must close and wake the connection at 30 seconds")
+        print("PASS: persistent NDJSON, split reads, idle/interleaved notifications, unsubscribe, valid API error recovery, strict IDs/envelopes, malformed JSON, EOF, closed connection, final reply before EOF, graceful EOF shutdown and 30-second timeout")
     }
 }

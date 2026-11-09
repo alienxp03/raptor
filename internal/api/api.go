@@ -4,6 +4,7 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,27 +34,52 @@ type Handler struct {
 	ctx rex.Ctx
 	cfg config.Config
 
-	activityAgents []rex.AgentEntry
-	activityAt     time.Time
+	activityAgents     []rex.AgentEntry
+	activityAt         time.Time
+	activityGeneration uint64
+	cacheMu            sync.Mutex // protects snapshots, refresh state, and background context capture
+	generation         uint64
+	launcherGeneration uint64
+	revalidating       bool
+	launcher           launcherCacheEntry
+	launcherLoaded     bool
+	activityLoaded     bool
+	refreshDone        chan struct{}
+	snapshotChanged    chan struct{}
+	refreshPending     bool
+	refreshLauncher    bool
+	presentation       uint64
+	notify             func() error
+	loadSnapshot       snapshotLoader // optional backend override; set before serving
+
 }
 
-func New(ctx rex.Ctx, cfg config.Config) *Handler { return &Handler{ctx: ctx, cfg: cfg} }
+func New(ctx rex.Ctx, cfg config.Config) *Handler {
+	return &Handler{ctx: ctx, cfg: cfg, snapshotChanged: make(chan struct{})}
+}
 
 const activitySnapshotTTL = 2 * time.Second
 
-// Serve dispatches requests serially. Keep one successful snapshot across view
-// and context changes. Failures are not cached; the next request can retry.
-// Fresh agent requests also refresh activity, but never reuse origin Active flags.
+// Keep successful, unfiltered activity across view and context changes.
+// Events refresh it in the background; warm requests only copy and filter.
 func (h *Handler) activitySnapshot(fresh bool) ([]rex.AgentEntry, error) {
-	if !fresh && !h.activityAt.IsZero() && time.Since(h.activityAt) < activitySnapshotTTL {
-		return h.activityAgents, nil
+	return h.activitySnapshotContext(context.Background(), fresh)
+}
+
+func (h *Handler) activitySnapshotContext(ctx context.Context, fresh bool) ([]rex.AgentEntry, error) {
+	h.cacheMu.Lock()
+	if h.activityLoaded {
+		entries := append([]rex.AgentEntry(nil), h.activityAgents...)
+		h.cacheMu.Unlock()
+		return entries, nil
 	}
-	entries, err := rex.AgentEntries(h.ctx.Session)
-	if err != nil {
+	h.cacheMu.Unlock()
+	if err := h.refreshColdContext(ctx, false); err != nil {
 		return nil, err
 	}
-	h.activityAgents, h.activityAt = entries, time.Now()
-	return entries, nil
+	h.cacheMu.Lock()
+	defer h.cacheMu.Unlock()
+	return append([]rex.AgentEntry(nil), h.activityAgents...), nil
 }
 
 type request struct {
@@ -68,18 +94,83 @@ type response struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// Serve writes only protocol responses. Invalid envelopes use id 0 when their
-// integer id cannot be read. Input/output failures terminate the stream.
+// Serve writes protocol responses and opt-in rex.changed notifications.
+// Invalid envelopes use id 0 when their integer id cannot be read.
 func (h *Handler) Serve(input io.Reader, output io.Writer) error {
-	r := bufio.NewReader(input)
+	return h.ServeContext(context.Background(), input, output)
+}
+
+// ServeContext also cancels long-lived Rex children when the owner shuts down.
+func (h *Handler) ServeContext(ctx context.Context, input io.Reader, output io.Writer) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type inputLine struct {
+		data      []byte
+		oversized bool
+		err       error
+	}
+	// A standard-input pipe can remain in a blocking read after SIGTERM.
+	// Keep that read off the owner goroutine so it can reap its Rex children.
+	lines := make(chan inputLine, 1)
+	go func() {
+		r := bufio.NewReader(input)
+		for ctx.Err() == nil {
+			line, oversized, err := readLine(r)
+			select {
+			case lines <- inputLine{line, oversized, err}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	encoder := json.NewEncoder(output)
+	var outputMu sync.Mutex
+	var outputErr error
+	write := func(value any) error {
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		if outputErr == nil {
+			outputErr = encoder.Encode(value)
+		}
+		return outputErr
+	}
+	var watcher *rex.EventWatcher
+	var watchDone chan struct{}
+	stop := func() {
+		h.cacheMu.Lock()
+		h.presentation++
+		h.notify = nil
+		h.refreshPending = false
+		h.cacheMu.Unlock()
+		if watcher != nil {
+			watcher.Close()
+			<-watchDone
+			watcher = nil
+		}
+	}
+	defer stop()
 	for {
-		line, oversized, err := readLine(r)
+		var next inputLine
+		select {
+		case <-ctx.Done():
+			return nil
+		case next = <-lines:
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		line, oversized, err := next.data, next.oversized, next.err
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
 		if len(line) == 0 && !oversized && errors.Is(err, io.EOF) {
-			return nil
+			stop()
+			outputMu.Lock()
+			defer outputMu.Unlock()
+			return outputErr
 		}
 		res := response{}
 		if oversized {
@@ -97,8 +188,48 @@ func (h *Handler) Serve(input io.Reader, output io.Writer) error {
 				res.Error = "request requires integer id and method"
 			case len(bytes.TrimSpace(req.Params)) == 0 || bytes.TrimSpace(req.Params)[0] != '{':
 				res.Error = "params must be an object"
+			case req.Method == "events.subscribe":
+				var p struct {
+					Enabled bool `json:"enabled"`
+				}
+				if decodeErr := json.Unmarshal(req.Params, &p); decodeErr != nil {
+					res.Error = decodeErr.Error()
+				} else {
+					stop()
+					if p.Enabled {
+						h.cacheMu.Lock()
+						h.notify = func() error {
+							return write(struct {
+								Event string `json:"event"`
+							}{"rex.changed"})
+						}
+						h.cacheMu.Unlock()
+						watcher = rex.WatchEvents(ctx)
+						watcher.Discover()
+						watchDone = make(chan struct{})
+						w, done := watcher, watchDone
+						go func() {
+							defer close(done)
+							for {
+								select {
+								case _, ok := <-w.Changes:
+									if !ok {
+										return
+									}
+									h.requestLiveRefresh()
+								case <-w.Done():
+									return
+								}
+							}
+						}()
+					}
+					res.Result = struct{}{}
+				}
 			default:
-				result, callErr := h.call(req.Method, req.Params)
+				result, callErr := h.callContext(ctx, req.Method, req.Params)
+				if ctx.Err() != nil {
+					return nil
+				}
 				if callErr != nil {
 					res.Error = callErr.Error()
 				} else {
@@ -106,7 +237,7 @@ func (h *Handler) Serve(input io.Reader, output io.Writer) error {
 				}
 			}
 		}
-		if writeErr := encoder.Encode(res); writeErr != nil {
+		if writeErr := write(res); writeErr != nil {
 			return writeErr
 		}
 		if errors.Is(err, io.EOF) {
@@ -208,6 +339,11 @@ func (h *Handler) launcherCachePath() string {
 }
 
 func (h *Handler) readLauncherCache() (launcherCacheEntry, bool) {
+	h.cacheMu.Lock()
+	defer h.cacheMu.Unlock()
+	if h.launcherLoaded {
+		return h.launcher, true
+	}
 	data, err := os.ReadFile(h.launcherCachePath())
 	if err != nil {
 		return launcherCacheEntry{}, false
@@ -216,6 +352,7 @@ func (h *Handler) readLauncherCache() (launcherCacheEntry, bool) {
 	if json.Unmarshal(data, &entry) != nil || entry.Items == nil {
 		return launcherCacheEntry{}, false
 	}
+	h.launcher, h.launcherLoaded = entry, true
 	return entry, true
 }
 
@@ -228,6 +365,9 @@ func (h *Handler) writeLauncherCache(items []catalog.LauncherItem, hosts []hostH
 		return
 	}
 	path := h.launcherCachePath()
+	if os.MkdirAll(filepath.Dir(path), 0o755) != nil {
+		return
+	}
 	tmp := path + ".tmp"
 	if os.WriteFile(tmp, data, 0o644) != nil {
 		return
@@ -302,6 +442,11 @@ func (h *Handler) fetchLauncher(localAgents []rex.AgentEntry) ([]catalog.Launche
 		workers.Go(func() {
 			for host := range jobs {
 				items := catalog.DirectoriesOn(host, false)
+				agents := localAgents
+				if host != rex.LocalHostLabel {
+					agents, _ = rex.AgentEntriesOn(host, "")
+				}
+				catalog.ApplyDirectoryActivityOn(host, items, agents)
 				if host == rex.LocalHostLabel {
 					for i := range items {
 						items[i].Pinned = pins[paths.Canonical(items[i].Path)]
@@ -321,8 +466,6 @@ func (h *Handler) fetchLauncher(localAgents []rex.AgentEntry) ([]catalog.Launche
 
 	localDisplay := rex.LocalHostname()
 	items := catalog.LauncherItems(groups, hostOrder, hostDirs, "", localAgents, localDisplay)
-	catalog.PinLauncherOrigin(items, h.ctx.Session)
-	catalog.ApplyLauncherDirActivity(items, rex.LocalHostLabel, localAgents)
 	hosts := make([]hostHeader, 0, len(groups))
 	for _, group := range groups {
 		label := group.Label
@@ -337,15 +480,14 @@ func (h *Handler) fetchLauncher(localAgents []rex.AgentEntry) ([]catalog.Launche
 // revalidateLauncher refreshes the launcher cache in the background after a
 // stale response went out.
 func (h *Handler) revalidateLauncher() {
-	localAgents, err := rex.AgentEntries(h.ctx.Session)
-	if err != nil {
-		localAgents = nil
-	}
-	items, hosts := h.fetchLauncher(localAgents)
-	h.writeLauncherCache(items, hosts)
+	h.requestRefresh()
 }
 
 func (h *Handler) call(method string, params json.RawMessage) (any, error) {
+	return h.callContext(context.Background(), method, params)
+}
+
+func (h *Handler) callContext(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	// Decode each method separately: unrelated parameters must not change type
 	// validation for the selected method.
 	switch method {
@@ -363,7 +505,14 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
+		h.cacheMu.Lock()
 		h.ctx = rex.Ctx{Session: p.Session, Block: p.Block, Client: p.Client, Title: p.Title}
+		h.presentation++
+		if h.revalidating {
+			h.refreshPending = true
+			h.generation++
+		}
+		h.cacheMu.Unlock()
 		return struct{}{}, nil
 	case "pins.toggle":
 		var p struct {
@@ -379,6 +528,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		h.patchLauncherPin(p.Path, pinned)
 		return pinsResult{Pinned: pinned}, nil
 	case "agents":
 		var p struct {
@@ -387,9 +537,12 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		entries, err := h.activitySnapshot(true)
+		entries, err := h.activitySnapshotContext(ctx, true)
 		if err != nil {
 			return nil, err
+		}
+		for i := range entries {
+			entries[i].Active = entries[i].SessionID == h.ctx.Session && (h.ctx.Block == "" || entries[i].BlockID == h.ctx.Block)
 		}
 		result := agentsResult{Items: []rex.AgentEntry{}, Targets: []string{}, Target: h.cfg.Enter}
 		for _, i := range catalog.FilterAgents(entries, p.Query) {
@@ -416,21 +569,28 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		// sesh's stale-while-revalidate: fresh cache answers instantly, stale
-		// cache answers instantly while a background fetch refreshes it for
-		// the next open, and a cold start fetches live.
-		if cached, ok := h.readLauncherCache(); ok {
-			age := time.Since(cached.Timestamp)
-			items := catalog.FilterLauncherItems(cached.Items, p.Query, h.ctx.Session)
-			if age >= launcherSoftTTL {
-				go h.revalidateLauncher()
+		h.cacheMu.Lock()
+		wasLoaded := h.launcherLoaded
+		h.cacheMu.Unlock()
+		cached, ok := h.readLauncherCache()
+		if !ok {
+			if err := h.refreshColdContext(ctx, true); err != nil {
+				return nil, err
 			}
-			return sessionsResult{Items: items, Hosts: cached.Hosts, Targets: h.targets(), Target: "session"}, nil
+			cached, _ = h.readLauncherCache()
+		} else if !wasLoaded {
+			// Disk rows are immediately usable. Refresh once, not per query.
+			h.revalidateLauncher()
 		}
-		localAgents, _ := h.activitySnapshot(false)
-		items, hosts := h.fetchLauncher(localAgents)
-		h.writeLauncherCache(items, hosts)
-		return sessionsResult{Items: catalog.FilterLauncherItems(items, p.Query, h.ctx.Session), Hosts: hosts, Targets: h.targets(), Target: "session"}, nil
+		items := append([]catalog.LauncherItem{}, cached.Items...)
+		for i := range items {
+			items[i].Active = items[i].Local && items[i].SessionID == h.ctx.Session
+		}
+		// Full IDs were compared above. An empty origin prevents catalog's
+		// reference resolver from making native calls for each candidate.
+		items = catalog.PinLauncherOrigin(items, "")
+		items = catalog.FilterLauncherItems(items, p.Query, "")
+		return sessionsResult{Items: items, Hosts: cached.Hosts, Targets: h.targets(), Target: "session"}, nil
 	case "sessions.jump":
 		_, entry, err := decodeSessionAction(params)
 		if err != nil {
@@ -507,7 +667,7 @@ func (h *Handler) call(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		items := catalog.DirectoriesOn(p.Host, p.ReposOnly)
-		if agents, err := h.activitySnapshot(false); err == nil {
+		if agents, err := h.activitySnapshotContext(ctx, false); err == nil {
 			catalog.ApplyDirectoryActivity(items, agents)
 		}
 		result := directoryResult{Items: []catalog.Directory{}, Targets: h.targets(), Target: h.cfg.Enter}

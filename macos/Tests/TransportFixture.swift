@@ -8,17 +8,37 @@ struct TransportFixture {
     static func main() throws {
         let expected = ["--session", "S", "--block", "B", "--client", "C", "--title", "A title", "api"]
         guard Array(CommandLine.arguments.dropFirst()) == expected else { exit(3) }
+        var requests: [String] = []
         while let line = readLine() {
             guard let request = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   let id = request["id"] as? Int, let method = request["method"] as? String else { exit(4) }
+            let params = request["params"] as? [String: Any] ?? [:]
+            let query = params["query"] as? String ?? ""
+            requests.append("\(id):\(method):\(query)")
+            if let gate = params["gate"] as? String {
+                FileManager.default.createFile(atPath: gate + ".ready", contents: Data())
+                while !FileManager.default.fileExists(atPath: gate + ".release") {
+                    Thread.sleep(forTimeInterval: 0.001)
+                }
+            }
             if method == "eof" { exit(2) }
             if method == "hang" { while true { Thread.sleep(forTimeInterval: 1) } }
+            if method == "interleaved" {
+                try FileHandle.standardOutput.write(contentsOf: Data("{\"event\":\"rex.changed\"}\n".utf8))
+            }
             var response: [String: Any] = ["id": id, "result": [:] as [String: String]]
             switch method {
+            case "audit": response["result"] = ["branches": requests]
+            case "sessions", "agents": response["result"] = ["items": [["path": query]]]
             case "error": response = ["id": id, "error": "fixture error"]
+            case "graceful-close":
+                signal(SIGTERM, SIG_IGN)
+                response["result"] = ["path": String(getpid())]
             case "bad-id": response["id"] = id + 1
             case "both": response["error"] = "bad envelope"
             case "no-result": response = ["id": id]
+            case "event-id": response = ["id": id, "event": "rex.changed"]
+            case "unknown-event": response = ["event": "unexpected"]
             default: break
             }
             var data = method == "malformed" ? Data("not json".utf8) : try JSONSerialization.data(withJSONObject: response)
@@ -26,6 +46,13 @@ struct TransportFixture {
             try FileHandle.standardOutput.write(contentsOf: data.prefix(5))
             Thread.sleep(forTimeInterval: 0.01)
             try FileHandle.standardOutput.write(contentsOf: data.dropFirst(5))
+            if method == "reply-and-eof" { exit(0) }
+            if method == "events.subscribe",
+               let params = request["params"] as? [String: Any], params["enabled"] as? Bool == true {
+                // No new request is needed to read this notification.
+                Thread.sleep(forTimeInterval: 0.08)
+                try FileHandle.standardOutput.write(contentsOf: Data("{\"event\":\"rex.changed\"}\n".utf8))
+            }
         }
     }
 }

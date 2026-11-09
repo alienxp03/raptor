@@ -246,13 +246,24 @@ struct APIResult: Codable, Sendable {
 protocol BackendClient: Sendable {
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult
     func close()
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) async throws -> Bool
 }
 
-// All blocking pipe I/O runs on one private queue, never the UI executor.
-// The lock protects only shutdown/timeout state; it is never held during pipe I/O.
+extension BackendClient {
+    // Request-only mocks and DemoBackend never opt into the wire API.
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) async throws -> Bool { false }
+}
+
+// Serial requests and a dedicated idle reader run off the UI executor.
+// The condition protects reply, event-handler and shutdown/timeout state;
+// it is never held during pipe I/O.
 final class ProcessBackend: BackendClient, @unchecked Sendable {
     private let queue = DispatchQueue(label: "raptor.backend.io", qos: .userInitiated)
-    private let lock = NSLock()
+    private let lock = NSCondition()
+    private var reply: Result<APIResult, Error>?
+    private var connectionFailure: String?
+    private var changeHandler: (@Sendable () -> Void)?
+    private let reader = DispatchQueue(label: "raptor.backend.reader", qos: .userInitiated)
     private var options: LaunchOptions // queue-only after init
     private var process: Process?
     private var closed = false
@@ -260,7 +271,6 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     private var nextID = 0 // I/O queue only
     private var input: FileHandle? // I/O queue only
     private var output: FileHandle? // I/O queue only
-    private var buffer = Data() // I/O queue only
 
     init(options: LaunchOptions) { self.options = options }
 
@@ -309,6 +319,8 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         output = stdout.fileHandleForReading
         process = child
+        let handle = stdout.fileHandleForReading
+        reader.async { [self] in readMessages(from: handle) }
     }
 
     /// True once the connection is broken or shut down. The resident host
@@ -318,24 +330,44 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         return closed
     }
 
-    func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async { [self] in
-                do { continuation.resume(returning: try exchange(method, params: params)) }
-                catch { continuation.resume(throwing: error) }
-            }
+    // Cancellation only drops reads which have not claimed the pipe. An issued
+    // read must drain its matching ID; mutations always run exactly once.
+    private final class QueuedRead: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+        func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+        func claim() throws {
+            lock.lock(); defer { lock.unlock() }
+            if cancelled { throw CancellationError() }
         }
     }
 
-    private func exchange(_ method: String, params: [String: APIValue]) throws -> APIResult {
+    func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
+        let read = ["sessions", "agents", "directories", "worktrees.list", "worktrees.branches",
+                    "worktrees.preview", "theme"].contains(method) ? QueuedRead() : nil
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                queue.async { [self] in
+                    do {
+                        try read?.claim()
+                        continuation.resume(returning: try exchange(method, params: params, read: read))
+                    } catch { continuation.resume(throwing: error) }
+                }
+            }
+        } onCancel: { read?.cancel() }
+    }
+
+    private func exchange(_ method: String, params: [String: APIValue], read: QueuedRead? = nil) throws -> APIResult {
         struct Request: Encodable { let id: Int; let method: String; let params: [String: APIValue] }
-        struct Response: Decodable { let id: Int; let result: APIResult?; let error: String? }
         try startIfNeeded()
+        // Process launch can take time. Recheck before reserving a wire ID.
+        try read?.claim()
         nextID += 1
         let id = nextID
         lock.lock()
         guard !closed else { lock.unlock(); throw APIError.message("Backend connection closed.") }
         activeID = id
+        reply = nil
         lock.unlock()
         let timeout = DispatchWorkItem { [weak self] in self?.timeout(id) }
         DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeout)
@@ -343,38 +375,93 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
             timeout.cancel()
             lock.lock(); activeID = nil; lock.unlock()
         }
-        let response: Response
+        let response: Result<APIResult, Error>
         do {
             var data = try JSONEncoder().encode(Request(id: id, method: method, params: params))
             data.append(0x0A)
             try input?.write(contentsOf: data)
-            while !buffer.contains(0x0A) {
-                let chunk = try readChunk()
-                guard !chunk.isEmpty else {
-                    throw APIError.message("Backend exited or timed out. Close and reopen Raptor. Check whether an operation completed before retrying.")
-                }
-                buffer.append(chunk)
-                guard buffer.count <= 8 * 1024 * 1024 else { throw APIError.message("Backend response exceeds 8 MB.") }
+            lock.lock()
+            while reply == nil && !closed { lock.wait() }
+            let received = reply
+            let failure = connectionFailure
+            lock.unlock()
+            // EOF can race the waiter after a complete reply. Keep that reply;
+            // the closed connection still rejects every subsequent request.
+            guard let received else {
+                throw APIError.message(failure ?? "Backend exited or timed out. Close and reopen Raptor. Check whether an operation completed before retrying.")
             }
-            let newline = buffer.firstIndex(of: 0x0A)!
-            let line = buffer[..<newline]
-            response = try JSONDecoder().decode(Response.self, from: line)
-            buffer.removeSubrange(...newline)
-            guard response.id == id else { throw APIError.message("Backend response ID does not match the request.") }
-            guard (response.result != nil) != (response.error != nil) else {
-                throw APIError.message("Backend must return either a result or an error.")
-            }
+            response = received
         } catch {
             close()
             throw APIError.message("Backend connection failed: \(error.localizedDescription)")
         }
         // Application errors are valid responses; keep the persistent connection open.
-        if let error = response.error { throw APIError.message(error) }
-        return response.result!
+        return try response.get()
     }
 
-    private func readChunk() throws -> Data {
-        guard let output else { throw APIError.message("Backend output is unavailable.") }
+    func setChangeHandler(_ handler: (@Sendable () -> Void)?) async throws -> Bool {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            queue.async { [self] in
+                lock.lock(); changeHandler = handler; lock.unlock()
+                do {
+                    _ = try exchange("events.subscribe", params: ["enabled": .flag(handler != nil)])
+                    continuation.resume(returning: true)
+                } catch {
+                    lock.lock(); changeHandler = nil; lock.unlock()
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    // The reader drains stdout while idle. exchange remains the only writer.
+    private func readMessages(from output: FileHandle) {
+        struct Message: Decodable {
+            let id: Int?
+            let event: String?
+            let result: APIResult?
+            let error: String?
+        }
+        var buffer = Data()
+        do {
+            while true {
+                let chunk = try readChunk(from: output)
+                guard !chunk.isEmpty else { throw APIError.message("Backend exited.") }
+                buffer.append(chunk)
+                while let newline = buffer.firstIndex(of: 0x0A) {
+                    guard newline <= 8 * 1024 * 1024 else { throw APIError.message("Backend response exceeds 8 MB.") }
+                    let message = try JSONDecoder().decode(Message.self, from: buffer[..<newline])
+                    buffer.removeSubrange(...newline)
+                    if let event = message.event {
+                        guard event == "rex.changed", message.id == nil, message.result == nil, message.error == nil else {
+                            throw APIError.message("Invalid backend event envelope.")
+                        }
+                        lock.lock(); let handler = changeHandler; lock.unlock()
+                        handler?()
+                    } else {
+                        lock.lock()
+                        guard let id = message.id, id == activeID, reply == nil,
+                              (message.result != nil) != (message.error != nil) else {
+                            lock.unlock()
+                            throw APIError.message("Backend response ID or envelope does not match the request.")
+                        }
+                        if let error = message.error { reply = .failure(APIError.message(error)) }
+                        else { reply = .success(message.result!) }
+                        lock.broadcast()
+                        lock.unlock()
+                    }
+                }
+                guard buffer.count <= 8 * 1024 * 1024 else { throw APIError.message("Backend response exceeds 8 MB.") }
+            }
+        } catch {
+            lock.lock()
+            if !closed { connectionFailure = error.localizedDescription }
+            lock.unlock()
+            close()
+        }
+    }
+
+    private func readChunk(from output: FileHandle) throws -> Data {
         var bytes = [UInt8](repeating: 0, count: 65536)
         while true {
             lock.lock(); let stopped = closed; lock.unlock()
@@ -399,25 +486,34 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         lock.lock()
         guard activeID == id else { lock.unlock(); return }
         closed = true
+        changeHandler = nil
+        lock.broadcast()
         let child = process
         lock.unlock()
-        stop(child)
+        stop(child, input: input)
     }
 
     func close() {
         lock.lock()
         closed = true
+        changeHandler = nil
+        lock.broadcast()
         let child = process
         lock.unlock()
-        stop(child)
+        stop(child, input: input)
     }
 
-    private func stop(_ child: Process?) {
+    private func stop(_ child: Process?, input: FileHandle?) {
+        // EOF lets Go run deferred watcher cleanup before escalation. Its
+        // SIGTERM handler also cancels subscriptions during a blocked request.
+        try? input?.close()
         if let child, child.isRunning {
-            child.terminate()
-            // A stuck backend must not survive the panel.
             DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+                guard child.isRunning else { return }
+                child.terminate()
+                DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                    if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+                }
             }
         }
     }

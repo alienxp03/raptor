@@ -378,18 +378,3 @@ type launcherTexts []string
 
 func (l launcherTexts) String(i int) string { return l[i] }
 func (l launcherTexts) Len() int            { return len(l) }
-
-// ApplyLauncherDirActivity folds agent activity onto launcher directory rows
-// for one host. Session rows already carry their state from the host listing.
-func ApplyLauncherDirActivity(items []LauncherItem, host string, agents []rex.AgentEntry) {
-	if host != rex.LocalHostLabel || len(agents) == 0 {
-		return
-	}
-	for i := range items {
-		if items[i].Kind == "dir" {
-			scan := []Directory{{Path: items[i].Path}}
-			ApplyDirectoryActivity(scan, agents)
-			items[i].State, items[i].Working = scan[0].State, scan[0].Working
-		}
-	}
-}

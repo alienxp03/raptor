@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/alienxp03/raptor/internal/api"
 	"github.com/alienxp03/raptor/internal/config"
@@ -51,7 +54,14 @@ func main() {
 
 	switch fs.Args()[0] {
 	case "api":
-		if err := api.New(ctx, cfg).Serve(os.Stdin, os.Stdout); err != nil {
+		lifetime, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		go func() {
+			<-lifetime.Done()
+			// Unblock an idle request reader as well as canceling Rex children.
+			_ = os.Stdin.Close()
+		}()
+		if err := api.New(ctx, cfg).ServeContext(lifetime, os.Stdin, os.Stdout); err != nil && lifetime.Err() == nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
