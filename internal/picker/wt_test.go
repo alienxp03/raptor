@@ -17,7 +17,16 @@ import (
 
 func fixtureRepo(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "repo")
+	root := t.TempDir()
+	empty := filepath.Join(root, "empty.toml")
+	if err := os.WriteFile(empty, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRUNK_CONFIG_PATH", empty)
+	t.Setenv("WORKTRUNK_SYSTEM_CONFIG_PATH", empty)
+	t.Setenv("WORKTRUNK_PROJECT_CONFIG_PATH", empty)
+	t.Setenv("WORKTRUNK_WORKTREE_PATH", filepath.Join(root, "trees", "{{ repo }}", "{{ branch | sanitize }}"))
+	dir := filepath.Join(root, "repo")
 	if err := os.Mkdir(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +54,7 @@ func TestWorktreeForm(t *testing.T) {
 		t.Fatal("form not editable")
 	}
 	out := ansi.Strip(m.View())
-	for _, s := range []string{"feat/login", "feature-login", "main", "Create"} {
+	for _, s := range []string{"feat/login", "feat-login", "main", "Create"} {
 		if !strings.Contains(out, s) {
 			t.Fatal("missing " + s)
 		}

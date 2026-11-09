@@ -177,6 +177,7 @@ func client(t *testing.T, h *Handler) func(string, any, any) string {
 
 func fixtureRepo(t *testing.T) string {
 	t.Helper()
+	isolateWorktrunk(t)
 	repo := filepath.Join(t.TempDir(), ".sample")
 	if err := os.Mkdir(repo, 0755); err != nil {
 		t.Fatal(err)
@@ -247,6 +248,7 @@ func TestWorktreeListOmitsUnavailableSuggestion(t *testing.T) {
 				if err := os.Symlink(cfg.WorktreeRoot, cfg.WorktreeRoot); err != nil {
 					t.Fatal(err)
 				}
+				t.Setenv("WORKTRUNK_WORKTREE_PATH", filepath.Join(cfg.WorktreeRoot, "{{ repo }}", "{{ branch | sanitize }}"))
 			}
 			call := client(t, New(rex.Ctx{}, cfg))
 			var result map[string]json.RawMessage
@@ -273,7 +275,10 @@ func TestWorktreeLifecycle(t *testing.T) {
 	if err := call("worktrees.preview", params, &preview); err != "" {
 		t.Fatal(err)
 	}
-	want := filepath.Join(cfg.WorktreeRoot, "sample", "feature-native")
+	want, pathErr := worktree.PreviewPath(repo, "feat/native")
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
 	if preview.Path != want || preview.ValidationError != "" {
 		t.Fatalf("preview: %+v", preview)
 	}

@@ -11,6 +11,8 @@ class Raptor < Formula
   depends_on xcode: ["26.0", :build]
   depends_on macos: :sonoma
   depends_on "zoxide"
+  depends_on "worktrunk"
+  depends_on "gh"
 
   def setup_go_environment
     ENV["GOENV"] = "off"

@@ -53,7 +53,7 @@ is not sufficient inside the fetch sandbox. With that variable set, the install
 and upgrade commands above work without extra flags. Do not commit tokens.
 
 These are development builds, not stable releases. Building requires macOS 14+,
-Xcode 26+, and Go 1.27.1+ (Homebrew installs Go and zoxide). The formula downloads
+Xcode 26+, and Go 1.27.1+ (Homebrew installs Go, zoxide, Worktrunk, and gh). The formula downloads
 Go modules before its offline build. Source access uses your Git credentials.
 
 For a fresh Rex setup, append the packaged module to the Lua search path:
@@ -203,19 +203,41 @@ Use the `raptor_worktree_list` Rex action for native Mac worktrees or the mobile
 | Cmd+Backspace / Ctrl+X on Mac; Ctrl+X / Delete in terminal | Remove a worktree after confirmation |
 | Esc | Clear the filter, then return to directories |
 
+When creation hooks are configured, New Worktree and Instant Pi Worktree also defer setup to a new terminal. Installs run visibly before Pi starts. A failed setup leaves a usable shell and a printed retry command. **Here** cannot run pending setup; choose Session, Tab, or a new pane. Repositories without creation hooks keep their existing open behavior.
+
 Both create forms show labeled **Repo** and **Destination** paths, the branch, base, and open target. Direct Create launches render before repository metadata loads; typing and Escape stay available. Escape closes a directly launched form (or first dismisses its base chooser); forms opened from a list return to that list. The create form prefills an available two-word branch name, such as `otter-falcon`, using the same generator as Instant Pi worktree. The name stays editable. Suggesting a name creates no files or Git references. Go supplies the destination preview and validation in both interfaces. In the terminal UI, Tab moves through Branch name → Base branch → Open in → Create. Ctrl+O cycles the target from any form field. The visible **Open in** field also uses Left/Right to choose a tab, session, current shell, or pane direction (when a source pane is available). Enter on Open in moves to Create without submitting. Once the form is ready, Enter in Branch name accepts the default name, base, and target, then creates and opens the worktree. Enter on Create does the same. Git validates the name and destination again before creation.
 
 On Mac, Cmd+N or Ctrl+N opens the native form. Tab / Shift+Tab moves between enabled controls. Search local base branches in **From branch**; Enter selects and Escape returns to the form. Ctrl+O changes the **Open in** target. Press Enter in the branch field to use the default fields, click **Create**, or press Cmd+Enter. If opening fails after creation, **Retry opening** reuses the created worktree, never creates it again. Hiding and reopening preserves this recovery state. **Discard recovery** clears the recovery screen but keeps the worktree. Use Cmd+Backspace or Ctrl+X to request removal; confirmation defaults to Cancel.
 
 Raptor lists local worktrees only. It keeps the branch when you remove a worktree. Git blocks removal when the worktree has uncommitted changes or is locked. You cannot remove the primary worktree.
 
-Worktrees use this layout:
+Worktrunk (`wt`) manages creation and removal. Its configured `worktree-path` owns destination paths; Raptor does not move existing worktrees or override the template. For example, in `~/.config/worktrunk/config.toml`:
 
-```text
-<worktree_root>/<primary-repo>/<branch-folder>
+```toml
+worktree-path = "~/workspace/worktrees/{{ repo }}/{{ branch | sanitize }}"
 ```
 
-`feat/login` becomes `feature-login`; other slashes become hyphens. Leading dots are removed from the primary repository name so the folder is not hidden. The Git branch name does not change.
+With this template, `feat/login` in `raptor` uses `~/workspace/worktrees/raptor/feat-login`. The branch name stays unchanged. The old Raptor `worktree_root` setting no longer sets new worktree paths.
+
+## Open a pull request (Mac)
+
+While the native picker is open, press **Cmd+Shift+P**, or paste a GitHub PR URL into main search and select **Open PR #123 — owner/repo**. Both open a confirmation form; pasting alone creates nothing. There is no separate Open PR button or terminal PR form.
+
+Use a full GitHub URL anywhere. A PR number needs repository context. Raptor reuses a matching local clone or clones the base repository into `~/workspace/<owner>/<repo>`, then uses Worktrunk to create or reuse the PR worktree. Fork PRs keep their branch names. Occupied paths and branch conflicts are not overwritten.
+
+The form opens a Session (default) or Tab. New destination labels use `<repo>-pr-<number>-<branch>`, with branch slashes replaced by hyphens; for example `aurora-pr-10990-fix-cancellation-page-back-navigation`. Worktree paths stay under Worktrunk's control. Reopening the same PR with the same target reuses its worktree and recorded Rex destination; completed setup does not run again. A concurrent operation reports busy instead of creating duplicates. Existing destination labels are not renamed.
+
+Setup runs there with visible output and normal Worktrunk approval prompts. Setup failure keeps the worktree and terminal available; use the printed retry command after fixing the error. Reopening an existing worktree does not repeat creation setup. If opening fails, retry opening the preserved worktree rather than creating another one.
+
+The Rex command palette action **`raptor_pr_open`** opens the native form directly. Add an optional binding:
+
+```lua
+rex.bind("shift+cmd+p", "raptor_pr_open")
+```
+
+This binding is optional; Raptor does not install global bindings. The action reports an error when the native Mac app is unavailable. Authenticate GitHub CLI on the server host with `gh auth login`.
+
+Safety limits: repositories with `pre-switch` hooks need an interactive Worktrunk switch first. Changed source/destination hook configuration stops deferred setup rather than changing its meaning. Background service hooks remain Worktrunk-managed; inspect `wt config state logs` if one fails. Raptor never auto-approves project hooks.
 
 ## Open targets
 
@@ -235,14 +257,13 @@ The default order is tab → session → cd here → pane right → left → abo
 All settings are optional. Save them in `~/.config/raptor/config.toml`:
 
 ```toml
-worktree_root = "~/Workspace/worktrees"
 enter = "tab"
 targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]
 ```
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `worktree_root` | `~/Workspace/worktrees` | Parent folder for new worktrees |
+| `worktree_root` | Legacy | Ignored for new paths; configure Worktrunk `worktree-path` instead |
 | `enter` | `tab` | Target selected when a picker opens |
 | `targets` | `tab`, `session`, `here`, `pane`, `pane_left`, `pane_above`, `pane_below` | Available open targets |
 
@@ -266,7 +287,7 @@ rex do raptor target=tab dir=/path/to/project
 
 ## Requirements and development
 
-Raptor needs Rex, Git, and zoxide. Go builds both interfaces' backend. The Mac UI also requires Swift/Xcode tools to build; end users of the packaged app do not need build tools.
+Raptor needs Rex, Git, zoxide, and Worktrunk (`wt`, tested with 0.81.0). PR opening also needs authenticated GitHub CLI (`gh`). Go builds both interfaces' backend. The Mac UI also requires Swift/Xcode tools to build; end users of the packaged app do not need build tools.
 
 ```sh
 make              # Build ./raptor (terminal CLI)

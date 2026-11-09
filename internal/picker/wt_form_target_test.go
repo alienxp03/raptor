@@ -72,7 +72,7 @@ func TestWorktreeFormGreenFocus(t *testing.T) {
 func TestWorktreeFormDefaultPathAndBottomAction(t *testing.T) {
 	m := &wtModel{form: true, root: "/trees/project", base: "main", target: "tab", width: 80, height: 18}
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "Destination /trees/project") {
+	if !strings.Contains(view, "Destination Worktrunk configured path") {
 		t.Fatal("Default destination must be visible before entering a branch")
 	}
 	lines := strings.Split(view, "\n")
@@ -83,9 +83,11 @@ func TestWorktreeFormDefaultPathAndBottomAction(t *testing.T) {
 }
 
 func TestWorktreeFormLabeledPaths(t *testing.T) {
-	m := &wtModel{form: true, repo: "/source/project", root: "/trees/project", branch: "feat/demo", base: "main", target: "session", width: 80, height: 18}
+	repo := fixtureRepo(t)
+	t.Setenv("WORKTRUNK_WORKTREE_PATH", "/trees/project/{{ branch | sanitize }}")
+	m := &wtModel{form: true, repo: repo, root: "/ignored", branch: "feat/demo", base: "main", target: "session", width: 80, height: 18}
 	plain := ansi.Strip(m.View())
-	for _, text := range []string{"Repo        /source/project", "Destination /trees/project/feature-demo"} {
+	for _, text := range []string{"Repo        ", "Destination /trees/project/feat-demo"} {
 		if !strings.Contains(plain, text) {
 			t.Fatalf("missing labeled path %q: %s", text, plain)
 		}

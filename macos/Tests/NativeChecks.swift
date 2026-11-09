@@ -181,6 +181,7 @@ struct NativeChecks {
             try await themeIntegrationChecks()
             return
         }
+        try await pullRequestChecks()
         try await RexFocusChecks.run()
         try await searchLatencyChecks()
         require(PickerStyle.panelAnimationBehavior(reduceMotion: false) == .default,
@@ -416,6 +417,144 @@ struct NativeChecks {
             try await transportChecks()
         }
         print("PASS: launch flags, decoding, launcher fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
+    }
+
+    @MainActor private static func pullRequestChecks() async throws {
+        let options = try LaunchOptions(arguments: ["--mode", "pr", "--repo", "/repo", "--session", "original"])
+        require(try LaunchOptions(panelRequest: PanelRequest(mode: "pr")).mode == "pr")
+        require(ProcessBackend.timeoutSeconds(for: "pullrequests.prepare") == 600)
+        require(ProcessBackend.timeoutSeconds(for: "pullrequests.resolve") == 180)
+        require(ProcessBackend.timeoutSeconds(for: "pullrequests.open") == 180)
+        for method in ["sessions", "directories", "worktrees.list", "theme"] {
+            require(ProcessBackend.timeoutSeconds(for: method) == 30)
+        }
+        let decoded = try JSONDecoder().decode(APIResult.self, from: Data(#"{"input":"12","url":"https://github.com/o/r/pull/12","number":12,"title":"PR title","branch":"feat/pr","repo":"/repo","path":"/wt","clone_required":true,"existing":false,"session_id":"S","window_id":"W","block_id":"B","error":"select failed"}"#.utf8))
+        require(decoded.number == 12 && decoded.cloneRequired == true && decoded.sessionID == "S" && decoded.windowID == "W" && decoded.blockID == "B" && decoded.error == "select failed")
+        for invalid in ["12", "https://gitlab.com/o/r/pull/12", "https://github.com.evil/o/r/pull/12", "https://github.com/o/r/issues/12", "https://github.com/o/r/pull/0", "https://github.com/o/r/pull/12/extra"] {
+            require(PickerModel.pullRequestLink(invalid) == nil)
+        }
+        for invalid in ["github.com/o/r/pull/12", "http://github.com/o/r/pull/12",
+                        "https://github.com/o/r/pull/12?x=1", "https://github.com/o/r/pull/12#x",
+                        "https://github.com/o/r/pull/12?", "https://github.com/o/r/pull/12#",
+                        "https://user@github.com/o/r/pull/12", "https://github.com:443/o/r/pull/12",
+                        "https://github.com//o/r/pull/12", "https://github.com/o/r/pull/12//",
+                        "https://github.com/o/r/pull/01", "https://github.com/./r/pull/12",
+                        "https://github.com/o/../pull/12", "https://github.com/o%20x/r/pull/12"] {
+            require(PickerModel.pullRequestLink(invalid) == nil, "Invalid PR URL accepted: \(invalid)")
+        }
+        require(PickerModel.pullRequestLink("https://github.com/o/r/pull/12")?.number == 12)
+        require(PickerModel.pullRequestLink(" https://github.com/o/r/pull/12/ \n")?.repo == "o/r")
+        let backend = CachedListBackend()
+        for method in ["pullrequests.resolve", "pullrequests.prepare", "pullrequests.open"] { await backend.hold(method) }
+        let model = PickerModel(options: options, backend: backend)
+        model.keepsBackendWarmOnNavigation = true
+        model.start()
+        require(model.page == .pr && !model.showsPills && !model.loading && !model.canOpenPullRequest)
+        require(model.targets == ["session", "tab"] && model.target == "session")
+        require(PickerStyle.height(for: model) == 330)
+        model.prInput = "12"
+        try await pending("pullrequests.resolve", backend)
+        require(model.prStage == "Resolving" && !model.canOpenPullRequest)
+        let params = await backend.parameters("pullrequests.resolve")
+        guard case .text("/repo") = params["repo"] else { testFailure("PR number lost repository context") }
+        model.prInput = "13"
+        try await Task.sleep(for: .milliseconds(220))
+        await backend.replyLatest("pullrequests.resolve", APIResult(repo: "/repo", path: "/wt13", title: "Latest", branch: "feat/latest", existing: true))
+        try await wait { model.canOpenPullRequest }
+        await backend.reply("pullrequests.resolve", APIResult(title: "Stale"))
+        try await Task.sleep(for: .milliseconds(20))
+        require(model.pullRequest?.title == "Latest", "Stale PR response replaced current metadata")
+        model.repo = "/changed"
+        try await pending("pullrequests.resolve", backend)
+        model.repo = "/repo"
+        try await Task.sleep(for: .milliseconds(220))
+        await backend.reply("pullrequests.resolve", APIResult(title: "Wrong context"))
+        try await Task.sleep(for: .milliseconds(20))
+        require(model.pullRequest == nil && !model.canOpenPullRequest, "Old context became actionable")
+        await backend.reply("pullrequests.resolve", APIResult(repo: "/repo", path: "/wt13", title: "Latest", branch: "feat/latest", existing: true))
+        try await wait { model.canOpenPullRequest }
+        model.openPullRequest(); model.openPullRequest()
+        try await pending("pullrequests.prepare", backend)
+        require(model.prStage == "Preparing repository and worktree")
+        model.escape()
+        let changed = try LaunchOptions(arguments: ["--session", "different", "--repo", "/other"])
+        let duringPrepare = model.prepareReconfigure(changed)
+        await model.completeReconfigure(duringPrepare)
+        require(model.busy && model.page == .pr && model.options.session == "original")
+        await backend.reply("pullrequests.prepare", APIResult(repo: "/repo", path: "/wt13", title: "Latest"))
+        try await pending("pullrequests.open", backend)
+        require(model.createdPath == "/wt13" && model.prStage == "Opening session")
+        await backend.reply("pullrequests.open", APIResult(path: "/wt13", sessionID: "S", error: "Selection failed"))
+        try await wait { !model.busy }
+        require(model.error?.contains("Selection failed") == true && model.error?.contains("/wt13") == true && model.canOpenPullRequest)
+        require(PickerStyle.height(for: model) == 362)
+        let reopen = model.prepareReconfigure(changed)
+        await model.completeReconfigure(reopen)
+        require(model.createdPath == "/wt13" && model.options.session == "original")
+        model.target = "tab"; model.openPullRequest()
+        try await pending("pullrequests.open", backend)
+        require(await backend.count("pullrequests.prepare") == 1, "Open retry prepared a second worktree")
+        let openParams = await backend.parameters("pullrequests.open")
+        guard case .text("/wt13") = openParams["path"], case .text("tab") = openParams["target"] else { testFailure("PR retry lost path/target") }
+        await backend.fail("pullrequests.open")
+        try await wait { !model.busy }
+        require(model.createdPath == "/wt13" && model.canOpenPullRequest && model.error?.contains("Refresh failed") == true)
+        model.openPullRequest()
+        try await pending("pullrequests.open", backend)
+        require(await backend.count("pullrequests.prepare") == 1)
+        await backend.reply("pullrequests.open", APIResult(path: "/wt13"))
+        try await wait { !model.busy }
+        require(model.createdPath == nil && !model.backendIsClosed)
+        model.close()
+
+        let searchBackend = CachedListBackend()
+        let search = PickerModel(options: try LaunchOptions(arguments: []), backend: searchBackend)
+        search.start()
+        try await pending("sessions", searchBackend)
+        await searchBackend.reply("sessions", APIResult(items: [PickerItem(path: "/repo", kind: "dir")], targets: ["here", "tab"], target: "here"))
+        try await wait { search.canOpen }
+        search.query = "https://github.com/o/r/pull/12"
+        require(search.items.count == 1 && search.selected?.label == "Open PR #12 — o/r" && search.canOpen)
+        require(await searchBackend.count("pullrequests.prepare") == 0, "Paste prepared a worktree")
+        require(await searchBackend.count("pullrequests.resolve") == 0, "Paste requested metadata")
+        let savedID = search.selectedID
+        search.choose()
+        require(search.page == .pr && search.prInput == "https://github.com/o/r/pull/12" && search.target == "session")
+        search.escape()
+        require(search.page == .directories && search.query == "https://github.com/o/r/pull/12" && search.selectedID == savedID && search.target == "here")
+        search.beginPullRequest()
+        search.prInput = "12"
+        require(!search.canOpenPullRequest && search.error != nil, "Number without explicit repo was accepted")
+        search.prInput = "https://gitlab.com/o/r/pull/12"
+        require(!search.canOpenPullRequest && search.error != nil)
+        search.escape(); search.close()
+
+        let ambientBackend = CachedListBackend()
+        await ambientBackend.hold("pullrequests.resolve")
+        await ambientBackend.hold("pullrequests.prepare")
+        let ambient = PickerModel(options: options, backend: ambientBackend)
+        ambient.start()
+        ambient.prInput = "https://github.com/other/project/pull/12"
+        try await pending("pullrequests.resolve", ambientBackend)
+        require(await ambientBackend.parameters("pullrequests.resolve")["repo"] == nil,
+                "URL resolve must not require the unrelated ambient repository")
+        await ambientBackend.reply("pullrequests.resolve", APIResult(repo: "/other", path: "/other-wt"))
+        try await wait { ambient.canOpenPullRequest }
+        ambient.openPullRequest()
+        try await pending("pullrequests.prepare", ambientBackend)
+        require(await ambientBackend.parameters("pullrequests.prepare")["repo"] == nil,
+                "URL prepare must not require the unrelated ambient repository")
+        await ambientBackend.fail("pullrequests.prepare")
+        try await wait { !ambient.busy }
+        require(ambient.createdPath == nil && ambient.canOpenPullRequest,
+                "A failed Prepare must stay retryable without editing valid input")
+        ambient.openPullRequest()
+        try await pending("pullrequests.prepare", ambientBackend)
+        require(await ambientBackend.count("pullrequests.prepare") == 2)
+        await ambientBackend.fail("pullrequests.prepare")
+        try await wait { !ambient.busy }
+        ambient.close()
+        print("PASS: native PR mode, URL action without mutation, Escape state, number context, stale resolve, session/tab targets, layout, progress, structured open failure, hidden/context recovery and retry without prepare")
     }
 
     @MainActor private static func liveEventChecks() async throws {
@@ -2050,7 +2189,7 @@ struct NativeChecks {
         require(FileManager.default.fileExists(atPath: gate + ".ready"), "Fixture must hold an issued read")
         inFlight.cancel() // It must still drain its own response ID.
         let obsolete = (0..<20).map { index in
-            let task = Task { try await backend.request(index % 2 == 0 ? "sessions" : "agents", params: ["query": .text("old-\(index)")]) }
+            let task = Task { try await backend.request(index % 3 == 0 ? "pullrequests.resolve" : (index % 2 == 0 ? "sessions" : "agents"), params: ["query": .text("old-\(index)")]) }
             task.cancel()
             return task
         }
@@ -2077,9 +2216,48 @@ struct NativeChecks {
         print("PASS: blocked transport: 20 canceled queued searches=0 wire requests; in-flight drained, latest=1, canceled mutation=1, contiguous IDs; release-to-latest=\(elapsed)")
     }
 
+    @MainActor private static func pullRequestReconnectChecks() async throws {
+        for input in ["12", "13"] {
+            let options = try LaunchOptions(arguments: ["--mode", "pr", "--repo", "/ambient",
+                "--session", "S", "--block", "B", "--client", "C", "--title", "A title"])
+            let backend = ProcessBackend(options: options)
+            let model = PickerModel(options: options, backend: backend)
+            model.keepsBackendWarmOnNavigation = true
+            model.start()
+            model.prInput = input
+            try await wait { model.canOpenPullRequest }
+            model.target = input == "13" ? "tab" : "session"
+            model.openPullRequest()
+            try await wait { !model.busy && model.createdPath != nil && model.backendIsClosed }
+            require(model.canOpenPullRequest && model.error != nil, "Closed PR recovery must allow Retry")
+            model.escape()
+            require(model.createdPath == "/pr-\(input)" && model.page == .pr)
+            let unrelated = try LaunchOptions(arguments: ["--session", "unrelated", "--client", "other", "--repo", "/other"])
+            let token = model.prepareReconfigure(unrelated)
+            await model.completeReconfigure(token)
+            let savedError = model.error
+            require(model.target == (input == "13" ? "tab" : "session") && model.options.matches(options))
+            if input == "12" {
+                // Resident reopen rebinds without changing any recovery fields.
+                require(model.reconnectPullRequestBackend())
+                require(model.error == savedError && model.target == "session" && model.repo == "/ambient")
+                require(model.createdPath == "/pr-12" && model.options.matches(options))
+                require(!model.reconnectPullRequestBackend(), "Live backend must not be replaced")
+            }
+            // Second case reconnects directly from Retry, without a resident reopen.
+            model.openPullRequest()
+            try await wait { !model.busy }
+            require(model.createdPath == nil && model.error == nil && !model.backendIsClosed,
+                    "Reconnected Open must succeed without Prepare in the original context")
+            model.close()
+        }
+        print("PASS: PR structured-error/EOF recovery reconnects in place; original context, path, target, error retained; Retry never prepares")
+    }
+
     private static func transportChecks() async throws {
         let options = try LaunchOptions(arguments: ["--session", "S", "--block", "B", "--client", "C", "--title", "A title"])
         try await queuedSearchChecks(options)
+        try await pullRequestReconnectChecks()
         let dismissed = ProcessBackend(options: options)
         dismissed.close() // Closing before the first request must not start a child.
         do {

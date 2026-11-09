@@ -25,7 +25,7 @@ struct LaunchOptions: Sendable {
             index += 2
         }
         let mode = values["--mode"] ?? "dirs"
-        guard ["dirs", "wt", "wt-create", "agents", "sessions"].contains(mode) else { throw APIError.message("Mode must be dirs, wt, wt-create, agents or sessions.") }
+        guard ["dirs", "wt", "wt-create", "pr", "agents", "sessions"].contains(mode) else { throw APIError.message("Mode must be dirs, wt, wt-create, pr, agents or sessions.") }
         self.mode = mode
         session = values["--session"] ?? ""
         block = values["--block"] ?? ""
@@ -234,9 +234,23 @@ struct APIResult: Codable, Sendable {
     var suggestedBranch: String? = nil
     var path: String? = nil
     var validationError: String? = nil
+    var input: String? = nil
+    var url: String? = nil
+    var number: Int? = nil
+    var title: String? = nil
+    var branch: String? = nil
+    var cloneRequired: Bool? = nil
+    var existing: Bool? = nil
+    var sessionID: String? = nil
+    var windowID: String? = nil
+    var blockID: String? = nil
+    var error: String? = nil
     var theme: ThemePayload? = nil
     enum CodingKeys: String, CodingKey {
         case items, hosts, targets, target, repo, branches, path, theme
+        case input, url, number, title, branch, existing, error
+        case cloneRequired = "clone_required"
+        case sessionID = "session_id", windowID = "window_id", blockID = "block_id"
         case destinationRoot = "destination_root"
         case suggestedBranch = "suggested_branch"
         case needsRepo = "needs_repo", baseBranch = "base_branch", validationError = "validation_error"
@@ -344,7 +358,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
 
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         let read = ["sessions", "agents", "directories", "worktrees.list", "worktrees.branches",
-                    "worktrees.preview", "theme"].contains(method) ? QueuedRead() : nil
+                    "worktrees.preview", "pullrequests.resolve", "theme"].contains(method) ? QueuedRead() : nil
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async { [self] in
@@ -355,6 +369,14 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
                 }
             }
         } onCancel: { read?.cancel() }
+    }
+
+    static func timeoutSeconds(for method: String) -> Double {
+        switch method {
+        case "pullrequests.prepare": return 600
+        case "pullrequests.resolve", "pullrequests.open", "worktrees.create", "worktrees.remove", "dispatch": return 180
+        default: return 30
+        }
     }
 
     private func exchange(_ method: String, params: [String: APIValue], read: QueuedRead? = nil) throws -> APIResult {
@@ -370,7 +392,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         reply = nil
         lock.unlock()
         let timeout = DispatchWorkItem { [weak self] in self?.timeout(id) }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeout)
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.timeoutSeconds(for: method), execute: timeout)
         defer {
             timeout.cancel()
             lock.lock(); activeID = nil; lock.unlock()

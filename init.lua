@@ -214,6 +214,9 @@ function M.setup(options)
 				end
 			end
 		end
+		if mode == "pr" then
+			error("raptor: Open pull request requires the native Mac app; no terminal PR form is available", 0)
+		end
 		if cfg.ui == "gui" and mode ~= "launcher" then
 			error("raptor: GUI requested, but Raptor.app was not found or could not be launched", 0)
 		end
@@ -336,6 +339,20 @@ function M.setup(options)
 				end
 			end
 			return show_picker(ctx, "wt-create")
+		end,
+	})
+
+	rex.action({
+		name = "raptor_pr_open",
+		title = "Raptor: Open Pull Request",
+		description = "Open a GitHub pull request in a Worktrunk worktree. Mac app only.",
+		category = "Navigate",
+		keywords = "github pull request pr worktree",
+		run = function(ctx)
+			if ctx.session_id == nil then
+				error("raptor: no session context", 0)
+			end
+			return show_picker(ctx, "pr")
 		end,
 	})
 

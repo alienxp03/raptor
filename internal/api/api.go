@@ -19,6 +19,7 @@ import (
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/paths"
 	"github.com/alienxp03/raptor/internal/picker"
+	"github.com/alienxp03/raptor/internal/pullrequest"
 	"github.com/alienxp03/raptor/internal/rex"
 	"github.com/alienxp03/raptor/internal/worktree"
 )
@@ -691,6 +692,8 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 		}
 		result.Items = catalog.ApplyPins(result.Items)
 		return result, nil
+	case "pullrequests.resolve", "pullrequests.prepare", "pullrequests.open":
+		return h.pullRequest(method, params)
 	case "worktrees.list":
 		var p struct {
 			Repo  string `json:"repo"`
@@ -770,10 +773,35 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 			}
 			return result, nil
 		}
-		if err := worktree.CreateLocal(repo, p.Branch, p.Base, path); err != nil {
+		setup, err := pullrequest.PreflightLocal(repo)
+		if err != nil {
 			return nil, err
 		}
-		return pathResult{Path: path}, nil
+		before := map[string]bool{}
+		for _, tree := range worktree.List(repo) {
+			before[canonicalPath(tree.Path)] = true
+		}
+		createErr := worktree.CreateLocal(repo, p.Branch, p.Base, path)
+		// Use the registered resource, including a switch which failed after
+		// creation. Never attach creation setup to a pre-existing worktree.
+		for _, tree := range worktree.List(repo) {
+			if tree.Branch == p.Branch && !before[canonicalPath(tree.Path)] {
+				if canonicalPath(path) != canonicalPath(tree.Path) {
+					path = tree.Path
+				}
+				if err := setup.Register(tree.Path, tree.Branch, p.Base); err != nil {
+					return pathResult{Path: path}, fmt.Errorf("worktree preserved at %s; creation error: %v; could not register setup: %w", path, createErr, err)
+				}
+				if createErr != nil {
+					return pathResult{Path: path}, fmt.Errorf("worktree preserved at %s: %w", path, createErr)
+				}
+				return pathResult{Path: path}, nil
+			}
+		}
+		if createErr != nil {
+			return nil, createErr
+		}
+		return nil, fmt.Errorf("creation returned without a new registered worktree; inspect %s", path)
 	case "dispatch":
 		var p struct {
 			Target string `json:"target"`

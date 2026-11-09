@@ -28,6 +28,8 @@ Set `ui = "gui"` to force the Mac app on the server, regardless of the invoking 
 
 All picker actions (`raptor`, `raptor_worktree_list`, and `raptor_worktree_new`) use this setting. `raptor_worktree_new` sends `mode=wt-create` to the native app or runs `raptor wt --create` in the terminal. It only opens a form; it never creates a worktree without confirmation.
 
+`raptor_pr_open` is Mac-only. It sends `mode=pr` and opens the PR form without executing it. There is no terminal fallback for this action. Inside the native picker, Cmd+Shift+P opens the same form. Pasting a GitHub PR URL into main search adds a selectable action; it does not create resources until form confirmation. No visible Open PR button is added.
+
 Without an explicit app path, the plugin checks `~/Applications/Raptor.app` and `/Applications/Raptor.app`. Your bindings remain in your Rex `init.lua`. The installer does not change those bindings.
 
 ## Reopening and performance
@@ -73,11 +75,18 @@ Errors have an `error` string instead of `result`. IDs identify requests; they d
 | `worktrees.branches` | `repo`, `query` | Local base branches ranked by the shared Go fuzzy search; no network access |
 | `worktrees.preview` | `repo`, `branch`, `base` | Destination `path` and `validation_error` |
 | `worktrees.create` | `repo`, `branch`, `base` | Created `path`; does not open it automatically |
-| `worktrees.remove` | `repo`, `path` | Empty result after safe Git removal; branch retained |
+| `worktrees.remove` | `repo`, `path` | Empty result after safe Worktrunk removal; branch retained |
+| `pullrequests.resolve` | `repo`, `input` | Read-only PR metadata, clone location, existing/predicted worktree path |
+| `pullrequests.prepare` | `repo`, `input` | Clone/reuse repository and create/reuse PR worktree with setup deferred |
+| `pullrequests.open` | `path`, `target` (`session`/`tab`) | Open/select destination and release visible setup; retain returned IDs/path on error |
 | `dispatch` | `target`, `path` | Empty result after the existing Rex dispatch |
 | `theme` | none | Active Rex theme palette; `error` string when resolution fails |
 
 The native **Create** button sends creation followed by dispatch. These remain separate backend operations: the app records the created path before opening it. If opening fails, **Retry opening** dispatches that existing path without creating again. A timeout during creation can leave the outcome unknown; check the worktree list before trying creation again.
+
+PR preparation and opening are separate mutations. Partial failures can return a result containing `path` and `error`; the native form preserves this recovery path. Setup uses a durable journal under the Raptor state directory. It runs after the destination terminal starts and selection is requested, not after an assumed visual-focus acknowledgement. `pre-start` output is visible; long-lived post hooks remain background jobs with Worktrunk logs. Approval prompts are never auto-accepted. Setup failure keeps a usable shell and prints the retry command.
+
+Worktrunk owns all new worktree destinations. Raptor's legacy `worktree_root` does not override Worktrunk configuration. Existing creation interfaces stay available, including the terminal UI; the new PR form is native-only.
 
 ## Rex theme colors
 

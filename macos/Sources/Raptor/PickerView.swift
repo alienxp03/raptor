@@ -6,13 +6,14 @@ struct PickerView: View {
     @FocusState private var field: Field?
     @State private var baseReturnFocus: Field = .base
     @State private var selectedInitialDefault = false
-    private enum Field { case search, branch, base, target, submit }
+    private enum Field { case search, branch, base, target, submit, pullRequest }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             if model.showsPills { viewPills }
-            if model.page == .create { createForm } else { results }
+            if model.page == .pr { pullRequestForm }
+            else if model.page == .create { createForm } else { results }
             if model.page == .worktrees && model.view == .sessions { selectedWorktreePath }
             status
             footer
@@ -35,7 +36,7 @@ struct PickerView: View {
         .onChange(of: model.page) { _, page in
             model.basePickerPresented = false
             selectedInitialDefault = false
-            field = page == .create ? .branch : .search
+            field = page == .pr ? .pullRequest : (page == .create ? .branch : .search)
         }
         .alert("Remove worktree?", isPresented: Binding(
             get: { model.removalCandidate != nil && model.page == .worktrees },
@@ -63,10 +64,10 @@ struct PickerView: View {
 
     private var header: some View {
         Group {
-            if model.page == .create {
+            if model.isForm {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("New worktree").font(.system(size: PickerStyle.titleFontSize, weight: .semibold))
+                        Text(model.page == .pr ? "Open pull request" : "New worktree").font(.system(size: PickerStyle.titleFontSize, weight: .semibold))
                         if model.options.demo { demoBadge }
                         Spacer()
                     }
@@ -97,7 +98,7 @@ struct PickerView: View {
                 .padding(.horizontal, PickerStyle.listInset)
             }
         }
-        .frame(height: model.page == .create ? PickerStyle.createHeaderHeight : PickerStyle.searchHeight)
+        .frame(height: model.isForm ? PickerStyle.createHeaderHeight : PickerStyle.searchHeight)
     }
 
     private var searchPrompt: String {
@@ -144,7 +145,7 @@ struct PickerView: View {
     private var results: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                if model.view == .agents {
+                if model.view == .agents && model.items.first?.kind != "pr" {
                     ForEach(model.agentSections) { section in
                         Text(section.group.rawValue)
                             .font(.system(size: 10, weight: .semibold))
@@ -181,7 +182,7 @@ struct PickerView: View {
 
     private func row(_ item: PickerItem, position: Int = 0) -> some View {
         let selected = model.selectedID == item.id
-        let isAgent = model.view == .agents
+        let isAgent = model.view == .agents && item.kind != "pr"
         let isSessionRow = model.view == .sessions && item.isSessionEntry
         let isLauncherDir = model.view == .sessions && item.kind == "dir"
         return HoverRow(selected: selected, enabled: true) {
@@ -197,7 +198,9 @@ struct PickerView: View {
                     .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.selection)
                     .accessibilityLabel("Pinned")
             }
-            if isAgent {
+            if item.kind == "pr" {
+                Text(item.label ?? item.path).lineLimit(1).truncationMode(.middle)
+            } else if isAgent {
                 AgentIcon(app: item.app)
                     .frame(width: 16, height: 16).accessibilityHidden(true)
                 Text(item.label ?? item.agentID ?? "Agent")
@@ -285,7 +288,7 @@ struct PickerView: View {
         .help(isAgent ? [item.agentHelp, item.updatedAt].compactMap { $0 }.joined(separator: " · ") : launcherRowHelp(item))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isAgent ? item.agentAccessibility
-            : (isSessionRow ? item.label ?? item.path : displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? ""))
+            : (item.kind == "pr" ? item.label ?? item.path : (isSessionRow ? item.label ?? item.path : displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? "")))
               + (item.active == true && !isAgent ? ", Active" : "")
               + (item.activityAccessibility.isEmpty ? "" : ", " + item.activityAccessibility))
         .accessibilityValue(selected ? "Selected" : "")
@@ -308,6 +311,68 @@ struct PickerView: View {
         .padding(.horizontal, PickerStyle.listInset + PickerStyle.rowInset)
         .frame(height: PickerStyle.selectedPathHeight, alignment: .leading)
         .accessibilityIdentifier("selected-worktree-path")
+    }
+
+    private var pullRequestForm: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                formLabel("Pull request")
+                TextField("GitHub PR URL or number", text: $model.prInput)
+                    .textFieldStyle(.plain).disableAutocorrection(true)
+                    .padding(.horizontal, 9).frame(height: PickerStyle.controlHeight)
+                    .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
+                    .focused($field, equals: .pullRequest)
+                    .task { await Task.yield(); field = .pullRequest }
+                    .onSubmit { model.openPullRequest() }
+                    .disabled(model.busy || model.createdPath != nil)
+                    .accessibilityIdentifier("pr-input")
+            }
+            Text(model.pullRequest?.title ?? "Enter a pull request to preview it.")
+                .font(.system(size: 12, weight: .semibold)).lineLimit(2)
+                .textSelection(.enabled).help(model.pullRequest?.title ?? "")
+                .accessibilityIdentifier("pr-title")
+            pathRow("Branch", value: model.pullRequest?.branch ?? "—", path: nil)
+            pathRow("Repo", value: pullRequestRepoLabel, path: model.pullRequest?.repo ?? model.repo)
+            pathRow("Destination", value: (model.createdPath ?? model.pullRequest?.path).map(displayPath) ?? "Resolved by Worktrunk", path: model.createdPath ?? model.pullRequest?.path)
+            openTargetControl
+            if let stage = model.prStage {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.mini)
+                    Text(stage).font(.system(size: 12))
+                }
+                .accessibilityIdentifier("pr-progress")
+            }
+        }
+        .padding(.horizontal, PickerStyle.horizontalInset).padding(.vertical, 8)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var pullRequestRepoLabel: String {
+        let path = (model.pullRequest?.repo ?? model.repo).map(displayPath) ?? "From PR URL"
+        return model.pullRequest?.cloneRequired == true ? "Will clone to \(path)" : path
+    }
+
+    private var pullRequestActionLabel: String {
+        if model.busy { return model.prStage ?? "Opening session" }
+        if model.createdPath != nil { return "Retry opening" }
+        return model.pullRequest?.existing == true ? "Open existing" : "Open PR"
+    }
+
+    private var pullRequestSubmitButton: some View {
+        Button { model.openPullRequest() } label: {
+            HStack(spacing: 10) {
+                Text(model.busy ? "Opening…" : pullRequestActionLabel).fontWeight(.semibold)
+                Text("⌘↵").foregroundStyle(PickerStyle.secondaryText)
+            }
+            .padding(.horizontal, 12).frame(height: PickerStyle.controlHeight)
+            .background(PickerStyle.selection.opacity(0.25), in: Capsule())
+            .overlay(Capsule().strokeBorder(PickerStyle.selection.opacity(field == .submit ? 0.9 : 0.4)))
+        }
+        .buttonStyle(.plain).focusable().focused($field, equals: .submit)
+        .keyboardShortcut(.return, modifiers: .command)
+        .onKeyPress(.return) { model.openPullRequest(); return .handled }
+        .disabled(!model.canOpenPullRequest)
+        .accessibilityIdentifier("pr-submit")
     }
 
     private var createForm: some View {
@@ -445,7 +510,14 @@ struct PickerView: View {
     }
 
     private func advanceFormFocus(backward: Bool) {
-        guard model.page == .create, !model.busy, !model.basePickerPresented else { return }
+        guard model.isForm, !model.busy, !model.basePickerPresented else { return }
+        if model.page == .pr {
+            var fields: [Field] = model.createdPath == nil ? [.pullRequest, .target] : [.target]
+            if model.canOpenPullRequest { fields.append(.submit) }
+            let current = fields.firstIndex(of: field ?? .pullRequest) ?? (backward ? 0 : -1)
+            field = fields[(current + (backward ? fields.count - 1 : 1)) % fields.count]
+            return
+        }
         var fields: [Field] = model.createdPath == nil ? (model.loading ? [.branch] : [.branch, .base]) : []
         if !model.targets.isEmpty { fields.append(.target) }
         if model.canSubmitForm { fields.append(.submit) }
@@ -474,7 +546,7 @@ struct PickerView: View {
                     Text("Split ⌃P   j↓  l→").accessibilityIdentifier("keyboard-hint")
                 } else if model.view == .agents {
                     EmptyView()
-                } else if model.page == .create {
+                } else if model.isForm {
                     if model.createdPath != nil {
                         Button("Discard recovery") { model.discardCreatedRecovery() }
                             .disabled(model.busy)
@@ -494,6 +566,7 @@ struct PickerView: View {
                     sessionActions
                 } else if model.page == .worktrees && !model.splitMode { listActions }
                 if model.page == .create { createSubmitButton }
+                if model.page == .pr { pullRequestSubmitButton }
             }
             .frame(height: PickerStyle.footerHeight)
         }
@@ -503,7 +576,7 @@ struct PickerView: View {
         .padding(.horizontal, PickerStyle.horizontalInset)
         .frame(height: PickerStyle.footerHeight)
         .overlay(alignment: .top) {
-            if model.page != .create { Divider().overlay(PickerPalette.stroke) }
+            if !model.isForm { Divider().overlay(PickerPalette.stroke) }
         }
     }
 
@@ -543,8 +616,8 @@ struct PickerView: View {
     }
 
     private var openTargetControl: some View {
-        HStack(spacing: model.page == .create ? 10 : 6) {
-            if model.page == .create { formLabel("Open in") }
+        HStack(spacing: model.isForm ? 10 : 6) {
+            if model.isForm { formLabel("Open in") }
             else { Text("Open in:").font(.system(size: 11)).foregroundStyle(PickerStyle.foreground.opacity(0.75)) }
             Button {
                 guard !model.targetPickerPresented else { return }
@@ -554,10 +627,10 @@ struct PickerView: View {
                     Text(PickerModel.targetLabel(model.target))
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                 }
-                .font(.system(size: model.page == .create ? PickerStyle.bodyFontSize : 11, weight: .medium))
+                .font(.system(size: model.isForm ? PickerStyle.bodyFontSize : 11, weight: .medium))
                 .foregroundStyle(PickerStyle.foreground.opacity(0.85))
                 .padding(.horizontal, 8)
-                .frame(height: model.page == .create ? PickerStyle.controlHeight : 22)
+                .frame(height: model.isForm ? PickerStyle.controlHeight : 22)
                 .background(PickerStyle.foreground.opacity(0.06), in: Capsule())
                 .overlay(Capsule().strokeBorder(field == .target ? PickerStyle.selection : Color.clear))
                 .contentShape(Rectangle())
@@ -579,7 +652,7 @@ struct PickerView: View {
                     model.targetPickerPresented = false
                 })
             }
-            if model.page != .create {
+            if !model.isForm {
                 Text("⌃O").font(.system(size: 10)).foregroundStyle(PickerStyle.foreground.opacity(0.65))
             }
         }

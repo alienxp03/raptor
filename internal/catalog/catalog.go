@@ -164,11 +164,13 @@ func ListWorktrees(repo string, cfg config.Config) Worktrees {
 	info := Worktrees{Items: worktree.List(repo), Branches: worktree.LocalBranches(repo)}
 	// Suggestions are read-only and optional; unavailable names must not hide trees.
 	info.SuggestedBranch, _ = worktree.SuggestTaskName(repo, cfg)
-	primary := repo
-	if len(info.Items) > 0 {
-		primary = info.Items[0].Path
+	// Root is informational only; branch-specific destinations must use
+	// PreviewPath because Worktrunk templates can include nested branch paths.
+	if info.SuggestedBranch != "" {
+		if destination, err := worktree.PreviewPath(repo, info.SuggestedBranch); err == nil {
+			info.Root = filepath.Dir(destination)
+		}
 	}
-	info.Root = filepath.Join(cfg.WorktreeRoot, worktree.RepoFolder(paths.Basename(primary)))
 	info.BaseBranch, _ = worktree.GitOut(repo, "branch", "--show-current")
 	if info.BaseBranch == "" && len(info.Branches) > 0 {
 		info.BaseBranch = info.Branches[0]

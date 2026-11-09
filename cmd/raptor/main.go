@@ -16,6 +16,7 @@ import (
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/panel"
 	"github.com/alienxp03/raptor/internal/picker"
+	"github.com/alienxp03/raptor/internal/pullrequest"
 	"github.com/alienxp03/raptor/internal/rex"
 	"github.com/alienxp03/raptor/internal/service"
 	"github.com/alienxp03/raptor/internal/task"
@@ -38,7 +39,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|sessions|agents|launcher|wt|task|api|direct|last-session|last-pane|panel|service> [command flags]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|sessions|agents|launcher|wt|task|setup|api|direct|last-session|last-pane|panel|service> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -99,6 +100,18 @@ func main() {
 			os.Exit(1)
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(result)
+	case "setup":
+		rest := flag.NewFlagSet("setup", flag.ExitOnError)
+		path := rest.String("path", "", "worktree path (default: current directory)")
+		retry := rest.Bool("retry", false, "retry pending or failed worktree setup")
+		_ = rest.Parse(fs.Args()[1:])
+		if *path == "" {
+			*path, _ = os.Getwd()
+		}
+		if err := pullrequest.Setup(*path, *retry); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "direct":
 		// raptor -session X -block Y -client Z direct <target> <dir>
 		args := fs.Args()[1:]
@@ -113,7 +126,7 @@ func main() {
 	case "panel":
 		// Open (or toggle) the resident native panel over IPC.
 		rest := flag.NewFlagSet("panel", flag.ExitOnError)
-		mode := rest.String("mode", "dirs", "picker mode: dirs, sessions, agents, wt or wt-create")
+		mode := rest.String("mode", "dirs", "picker mode: dirs, sessions, agents, wt, wt-create or pr")
 		repo := rest.String("repo", "", "repository for worktree modes")
 		_ = rest.Parse(fs.Args()[1:])
 		req := panel.Request{

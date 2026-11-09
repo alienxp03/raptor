@@ -26,6 +26,15 @@ func fixture(t *testing.T) (string, config.Config, rex.Ctx, string) {
 	log := filepath.Join(t.TempDir(), "calls")
 	t.Setenv("TASK_LOG", log)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	wtRoot := t.TempDir()
+	empty := filepath.Join(wtRoot, "empty.toml")
+	if err := os.WriteFile(empty, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRUNK_CONFIG_PATH", empty)
+	t.Setenv("WORKTRUNK_SYSTEM_CONFIG_PATH", empty)
+	t.Setenv("WORKTRUNK_PROJECT_CONFIG_PATH", empty)
+	t.Setenv("WORKTRUNK_WORKTREE_PATH", filepath.Join(wtRoot, "trees", "{{ repo }}", "{{ branch | sanitize }}"))
 	script := `#!/bin/sh
 printf 'CALL\n' >> "$TASK_LOG"
 printf '%s\n' "$@" >> "$TASK_LOG"

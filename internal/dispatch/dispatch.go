@@ -8,11 +8,26 @@ import (
 
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/paths"
+	"github.com/alienxp03/raptor/internal/pullrequest"
 	"github.com/alienxp03/raptor/internal/rex"
 )
 
 // Dispatch opens dir with the given target, mirroring the old shell script.
 func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
+	pending, err := pullrequest.LocalPending(dir)
+	if err != nil {
+		return err
+	}
+	if pending && (target == "session" || target == "tab") {
+		_, err := pullrequest.Open(dir, target, ctx)
+		if err != nil {
+			return fmt.Errorf("worktree preserved at %s; setup destination: %w", dir, err)
+		}
+		return nil
+	}
+	if pending && target == "here" {
+		return fmt.Errorf("worktree preserved at %s; setup pending: choose Session or Tab; setup cannot be injected Here", dir)
+	}
 	switch target {
 	case "session":
 		if ctx.Client == "" {
@@ -63,21 +78,51 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 		if ctx.Block == "" {
 			return fmt.Errorf("no block context")
 		}
-		dirFlag := "--split=" + SplitDirection(target)
-		out, err := rex.Run("split", "-s", ctx.Session, "-b", ctx.Block, dirFlag, "-c", dir, "--json")
-		if err != nil {
-			return err
+		if pending {
+			_, resumed, err := pullrequest.ResumeLocal(dir, target, ctx)
+			if resumed || err != nil {
+				if err == nil {
+					rex.WriteLastPane(ctx)
+				}
+				return err
+			}
 		}
+		dirFlag := "--split=" + SplitDirection(target)
+		args := []string{"split", "-s", ctx.Session, "-b", ctx.Block, dirFlag, "-c", dir, "--json"}
+		if pending {
+			startup, err := pullrequest.LocalStartup(dir, target)
+			if err != nil {
+				return err
+			}
+			args = append(append(args, "--"), startup...)
+		}
+		out, createErr := rex.Run(args...)
 		var res struct {
 			BlockIDs []string `json:"block_ids"`
 		}
-		if json.Unmarshal([]byte(out), &res) != nil || len(res.BlockIDs) == 0 {
-			return fmt.Errorf("could not identify the new pane")
+		parseErr := json.Unmarshal([]byte(out), &res)
+		destination := pullrequest.OpenResult{Path: dir, SessionID: ctx.Session}
+		if len(res.BlockIDs) > 0 {
+			destination.BlockID = res.BlockIDs[0]
+		}
+		if pending {
+			if err := pullrequest.LocalDestination(dir, destination, false); err != nil {
+				return err
+			}
+		}
+		if createErr != nil {
+			if pending {
+				return fmt.Errorf("worktree preserved at %s; pane creation uncertain; inspect Rex before retrying: %w", dir, createErr)
+			}
+			return createErr
+		}
+		if parseErr != nil || len(res.BlockIDs) == 0 {
+			return fmt.Errorf("could not identify the new pane; inspect Rex before retrying")
 		}
 		if _, err := rex.Run("focus", "-s", ctx.Session, res.BlockIDs[0]); err != nil {
 			return err
 		}
-		if ctx.Client != "" {
+		if ctx.Client != "" || pending {
 			// Server focus alone does not select the pane's window on the
 			// requesting app, particularly while the native picker has focus.
 			args, _ := json.Marshal(map[string]string{"block_id": res.BlockIDs[0]})
@@ -93,7 +138,20 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 			if json.Unmarshal([]byte(out), &placement) != nil || placement.Block.WindowID == "" {
 				return fmt.Errorf("could not identify the new pane's window")
 			}
-			if err := rex.Do(ctx.Client, "session.select", "session_id="+ctx.Session, "window_id="+placement.Block.WindowID); err != nil {
+			destination.WindowID = placement.Block.WindowID
+			if pending {
+				if err := pullrequest.LocalDestination(dir, destination, false); err != nil {
+					return err
+				}
+			}
+			if ctx.Client != "" {
+				if err := rex.Do(ctx.Client, "session.select", "session_id="+ctx.Session, "window_id="+placement.Block.WindowID); err != nil {
+					return err
+				}
+			}
+		}
+		if pending {
+			if err := pullrequest.LocalDestination(dir, destination, true); err != nil {
 				return err
 			}
 		}

@@ -82,6 +82,7 @@ func TestWorktreeMatching(t *testing.T) {
 }
 
 func TestRepositoryDiscoveryAndMetadata(t *testing.T) {
+	isolateWorktrunk(t)
 	repo := filepath.Join(t.TempDir(), ".project")
 	if err := os.Mkdir(repo, 0755); err != nil {
 		t.Fatal(err)
@@ -121,7 +122,7 @@ func TestRepositoryDiscoveryAndMetadata(t *testing.T) {
 	if len(worktree.LocalBranches(repo)) != 1 || len(worktree.List(repo)) != 1 {
 		t.Fatal("metadata created a branch or worktree")
 	}
-	if got := filepath.Join(info.Root, worktree.Folder("feat/shared")); got != worktree.Path(repo, "feat/shared", cfg) {
+	if got := filepath.Join(info.Root, "feat-shared"); got != worktree.Path(repo, "feat/shared", cfg) {
 		t.Fatalf("destination differs: %s", got)
 	}
 	// Invoking from a secondary worktree must retain the primary repo's folder.
@@ -145,6 +146,7 @@ func TestRepositoryDiscoveryAndMetadata(t *testing.T) {
 func TestWorktreeSuggestionUnavailableKeepsMetadata(t *testing.T) {
 	for _, committed := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unborn", true: "destination-error"}[committed], func(t *testing.T) {
+			isolateWorktrunk(t)
 			repo := t.TempDir()
 			if _, err := worktree.GitOut(repo, "init", "-b", "main"); err != nil {
 				t.Fatal(err)
@@ -156,12 +158,13 @@ func TestWorktreeSuggestionUnavailableKeepsMetadata(t *testing.T) {
 					t.Fatal(err)
 				}
 				cfg.WorktreeRoot = filepath.Join(root, "loop")
+				t.Setenv("WORKTRUNK_WORKTREE_PATH", filepath.Join(cfg.WorktreeRoot, "{{ branch | sanitize }}"))
 				if err := os.Symlink(cfg.WorktreeRoot, cfg.WorktreeRoot); err != nil {
 					t.Fatal(err)
 				}
 			}
 			info := ListWorktrees(repo, cfg)
-			if info.SuggestedBranch != "" || len(info.Items) != 1 || !info.Items[0].IsMain || info.BaseBranch != "main" || info.Root == "" {
+			if info.SuggestedBranch != "" || len(info.Items) != 1 || !info.Items[0].IsMain || info.BaseBranch != "main" {
 				t.Fatalf("suggestion failure changed metadata: %+v", info)
 			}
 			if committed && !reflect.DeepEqual(info.Branches, []string{"main"}) {

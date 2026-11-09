@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/alienxp03/raptor/internal/config"
@@ -19,6 +18,8 @@ import (
 //go:embed task_words.txt
 var taskWordList string
 
+// CreateTask skips Worktrunk hooks. Callers must arrange visible setup for a
+// new worktree, and preserve a non-empty returned worktree even on error.
 func CreateTask(repo string, cfg config.Config) (Worktree, error) {
 	words, err := shuffledTaskWords()
 	if err != nil {
@@ -113,7 +114,10 @@ func taskDestination(repo, branch string, cfg config.Config, blocked map[string]
 	if err := ValidateNewBranch(repo, branch); err != nil {
 		return "", nil
 	}
-	path := Path(repo, branch, cfg)
+	path, err := PreviewPath(repo, branch)
+	if err != nil {
+		return "", err
+	}
 	if _, err := os.Lstat(path); err == nil {
 		return "", nil
 	} else if !os.IsNotExist(err) {
@@ -143,10 +147,11 @@ func createTask(repo string, cfg config.Config, names []string) (Worktree, error
 		if path == "" {
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return Worktree{}, err
-		}
-		if _, err := GitOut(repo, "worktree", "add", "-b", branch, path, head); err != nil {
+		tree, created, err := switchWorktree(repo, "--create", branch, "--base", head)
+		if err != nil {
+			if created {
+				return tree, fmt.Errorf("create task worktree: %w", err)
+			}
 			// Another shortcut/process can claim a name between validation and
 			// creation. Git is the final arbiter; never overwrite its result.
 			if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "exists; cannot create") {
@@ -154,7 +159,7 @@ func createTask(repo string, cfg config.Config, names []string) (Worktree, error
 			}
 			return Worktree{}, fmt.Errorf("create task worktree: %w", err)
 		}
-		return Worktree{Path: path, Branch: branch}, nil
+		return tree, nil
 	}
 	return Worktree{}, taskNamesExhausted(len(names))
 }

@@ -20,14 +20,36 @@ Packaging places this executable at `Raptor.app/Contents/MacOS/Raptor` and the G
 ## Launch contract
 
 ```text
-Raptor --mode sessions|dirs|agents|wt|wt-create --session SID --block BID --client CID --title TITLE [--repo PATH]
+Raptor --mode sessions|dirs|agents|wt|wt-create|pr --session SID --block BID --client CID --title TITLE [--repo PATH]
 ```
 
 Normal Rex invocations use the resident panel socket. Launch Services fallback delivers `raptor://picker?mode=dirs&session=SID&block=BID&client=CID` with `open -g -a Raptor.app`. Launch Services reuses the existing app. The URL parser accepts picker context only and rejects duplicate/unknown keys and oversized requests; it cannot dispatch an action automatically.
 
-Context is fixed during each picker operation. The resident host reuses its model and backend, sets new context through the `context` request, and can show cached same-origin rows immediately. Non-resident invocations create a fresh model and backend. A mutation or removal confirmation in progress keeps its current context and must finish before a different request can replace it. The child receives `--session SID --block BID --client CID --title TITLE api`, in that order. The app keeps one NDJSON process connection. Process launch and request writes use one private serial queue. A separate reader drains stdout even when no request is pending. Each request has an integer ID, a 30-second timeout, and an 8 MB response limit. Backend errors remain visible. EOF, invalid envelopes, mismatched IDs, malformed JSON and transport failures close the connection. Close and reopen the app to reconnect. A timeout can leave an operation outcome unknown; check before retrying.
+Context is fixed during each picker operation. The resident host reuses its model and backend, sets new context through the `context` request, and can show cached same-origin rows immediately. Non-resident invocations create a fresh model and backend. A mutation or removal confirmation in progress keeps its current context and must finish before a different request can replace it. The child receives `--session SID --block BID --client CID --title TITLE api`, in that order. The app keeps one NDJSON process connection. Process launch and request writes use one private serial queue. A separate reader drains stdout even when no request is pending. Each request has an integer ID, a 30-second timeout (180 seconds for PR Resolve/Open; 600 seconds for PR Prepare), and an 8 MB response limit. Backend errors remain visible. EOF, invalid envelopes, mismatched IDs, malformed JSON and transport failures close the connection. Close and reopen the app to reconnect. A timeout can leave an operation outcome unknown; check before retrying.
 
 Go owns search, repository resolution, target availability, branch validation, destination paths, worktree operations and dispatch. Swift only displays results and sends explicit requests. Search and preview requests have separate debounce timers and generation checks. Old results cannot replace new results. Mutation buttons and keyboard submission are blocked while a mutation runs.
+
+## Native pull requests
+
+Cmd+Shift+P opens the PR form. A GitHub PR URL in main search adds one selectable `Open PR #N — owner/repo` row. Enter opens the form; paste alone makes no API call. No PR browser or main-view PR button is added. `--mode pr`, panel mode `pr`, and picker URL mode `pr` open the form directly. The CLI and Rex action route to this mode outside the native app.
+
+The form accepts only `https://github.com/OWNER/REPO/pull/N` (optional trailing slash), or a positive number with explicit repository context. URL requests omit the ambient repository; the URL defines its own repository. HTTP, bare hosts, queries, fragments, credentials and ports are rejected. It resolves metadata asynchronously and rejects stale replies after input/context changes. Repo and Destination are read-only backend paths; `clone_required` adds `Will clone to …`. Session is recommended and selected by default; Tab is the only other target. Here and split targets are not offered.
+
+Native API contract:
+
+```text
+pullrequests.resolve {repo?: path, input: string}
+pullrequests.prepare {repo?: path, input: string}
+  -> {input?, url?, number?, title?, branch?, repo?, path?, clone_required?, existing?, error?}
+pullrequests.open {path: string, target: "session" | "tab"}
+  -> {path?, session_id?, window_id?, block_id?, error?}
+```
+
+All fields are flat. `number` is an integer; flags are booleans. `repo` is the local repository path, not `owner/repo`. Resolve is read-only. Prepare can take up to ten minutes. The backend owns clone, Worktrunk paths, resource reuse and visible setup in the destination terminal. Native progress is `Resolving`, `Preparing repository and worktree`, then `Opening session`.
+
+Prepare stores any returned path before checking a structured error or sending Open. Open failure preserves the path and exposes Retry opening; retry sends only Open, never Prepare. If the connection closed, Retry reconnects the same model with its original launch context. Resident reopen can also reconnect in place. Both retain the path, target and error; no unrelated invocation context replaces recovery. Go owns durable destination IDs and path reconciliation. Structured result `error` takes priority over apparent request success. Backend envelope errors also remain visible. Backend must reconcile partial destination IDs by path on Open retry. Hide/reopen and changed launch contexts retain in-flight prepare/open and committed recovery. Discard recovery forgets only the UI, never deletes resources. Escape before mutation restores the prior main query/selection; direct launch Escape hides the form.
+
+Tests: `NativeChecks.swift` covers URL recognition/action, no paste mutation, number context, stale resolution, target policy, progress/layout, structured errors, preserved recovery, and open retry without prepare. Queued transport cancellation includes Resolve; issued requests still drain matching IDs and mutations are not cancelled.
 
 ## Live Rex activity
 
@@ -92,6 +114,8 @@ matching local app peer; validate it with isolated history storage.
 | J/Down or L/Right in split mode | Open below or right |
 | Esc in split mode | Cancel split mode |
 | Cmd+N / Ctrl+N in worktrees | Show creation form |
+| Cmd+Shift+P | Show pull request form |
+| Cmd+Enter in the PR form | Prepare and open PR; retry Open with the preserved path |
 | Cmd+Backspace / Ctrl+X in worktrees | Ask to remove a non-main worktree |
 | Esc | Dismiss a popover/split mode first; hide the launcher or return from a nested page |
 | Cmd+Q | Hide the resident picker; quit a non-resident app when no mutation is pending |

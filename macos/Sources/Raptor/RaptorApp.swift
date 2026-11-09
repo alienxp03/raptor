@@ -96,8 +96,13 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func openResident(_ options: LaunchOptions) {
         guard let current = model else { return }
         if current.backendIsClosed, current.createdPath != nil {
-            // Replacing the model here would silently lose a committed worktree.
-            current.error = "Worktree created, but the backend closed. Open the Destination manually, or discard recovery before opening another picker."
+            // Rebind PR recovery in place, using its original context, never
+            // this invocation's options. Keep path, target and error visible.
+            if current.page == .pr {
+                current.reconnectPullRequestBackend()
+            } else {
+                current.error = "Worktree created, but the backend closed. Open the Destination manually, or discard recovery before opening another picker."
+            }
             showResidentPanel()
             return
         }
@@ -489,12 +494,12 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return true
         }
         if command && shift && !option && !control && key == "p" {
-            model.togglePin()
+            model.beginPullRequest()
             return true
         }
         // Tab switches views everywhere except the create form, which keeps
         // its field-focus behavior.
-        if event.keyCode == 48 && !command && !option && !control && model.page != .create && !model.basePickerPresented && !model.targetPickerPresented {
+        if event.keyCode == 48 && !command && !option && !control && !model.isForm && !model.basePickerPresented && !model.targetPickerPresented {
             model.switchView(backward: shift)
             return true
         }
@@ -515,8 +520,11 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             return true
         }
-        if model.page == .create && !option && !command && !control && event.keyCode == 48 {
+        if model.isForm && !option && !command && !control && event.keyCode == 48 {
             model.advanceFormFocus(backward: flags.contains(.shift)); return true
+        }
+        if model.page == .pr && command && !option && !control && (event.keyCode == 36 || event.keyCode == 76) {
+            model.openPullRequest(); return true
         }
         if model.page == .create && command && !option && !control && (event.keyCode == 36 || event.keyCode == 76) {
             if model.canSubmitForm { model.create() }
@@ -537,12 +545,12 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             case "o": model.cycleTarget(backward: flags.contains(.shift)); return true
             case "p": model.toggleSplit(); return true
             case "t": model.showWorktrees(); return true
-            case "j" where model.page != .create: model.move(1); return true
-            case "k" where model.page != .create: model.move(-1); return true
+            case "j" where !model.isForm: model.move(1); return true
+            case "k" where !model.isForm: model.move(-1); return true
             default: break
             }
         }
-        if model.page != .create && !command && !option && !control {
+        if !model.isForm && !command && !option && !control {
             switch event.keyCode {
             case 125: model.move(1); return true
             case 126: model.move(-1); return true

@@ -31,7 +31,7 @@ func TestCreateFormRendersBeforeRepositoryLoad(t *testing.T) {
 		t.Fatal("allow typing but not Git actions while loading")
 	}
 	m.Update(wtLoadedMsg{repo: "/repo", info: catalog.Worktrees{Root: "/trees/repo", BaseBranch: "main", Branches: []string{"main"}}})
-	if m.loading || m.repo != "/repo" || m.base != "main" || m.destination() != "/trees/repo/feature-fast" || m.branch != "feat/fast" {
+	if m.loading || m.repo != "/repo" || m.base != "main" || m.destination() != "" || m.branch != "feat/fast" {
 		t.Fatal("loaded metadata must preserve typed input")
 	}
 }

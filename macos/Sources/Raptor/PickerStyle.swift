@@ -78,6 +78,9 @@ enum PickerStyle {
     }
 
     @MainActor static func height(for model: PickerModel) -> CGFloat {
+        if model.page == .pr {
+            return 330 + (model.error == nil && model.notice == nil ? 0 : 32)
+        }
         if model.page == .create {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
             return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 32)

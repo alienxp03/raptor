@@ -151,6 +151,7 @@ func TestSuggestTaskNameErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{WorktreeRoot: loop}
+	t.Setenv("WORKTRUNK_WORKTREE_PATH", filepath.Join(loop, "{{ branch | sanitize }}"))
 	beforeRepo, beforeRoot := taskSnapshot(t, repo), taskSnapshot(t, root)
 	name, err := suggestTaskName(repo, cfg, []string{"amber-birch", "cedar-dune"})
 	if name != "" || err == nil || strings.Contains(err.Error(), "all 2") {

@@ -2,15 +2,22 @@ import SwiftUI
 
 @MainActor
 final class PickerModel: ObservableObject {
-    enum Page: Hashable { case directories, worktrees, create }
+    enum Page: Hashable { case directories, worktrees, create, pr }
+    var isForm: Bool { page == .create || page == .pr }
+    @Published var prInput = "" { didSet { if prInput != oldValue { resolvePullRequest() } } }
+    @Published private(set) var pullRequest: APIResult?
+    @Published private(set) var prStage: String?
+    private var prGeneration = 0
+    private var prTask: Task<Void, Never>?
+    private var prReturn: (page: Page, view: ViewKind, repo: String?, query: String, selected: String?, scroll: String?, targets: [String], target: String, items: [PickerItem])?
     enum ViewKind: Hashable, CaseIterable { case sessions, agents }
     private(set) var options: LaunchOptions
-    private let backend: any BackendClient
+    private var backend: any BackendClient
     @Published var view: ViewKind = .sessions
     @Published var page: Page
     @Published var query = "" {
         didSet {
-            if query != oldValue && page != .create && !changingContext {
+            if query != oldValue && !isForm && !changingContext {
                 // A changed search takes fresh backend relevance, even for a revisited query.
                 agentOrder.removeValue(forKey: cacheKey)
                 agentGroups.removeValue(forKey: cacheKey)
@@ -27,7 +34,10 @@ final class PickerModel: ObservableObject {
     @Published var target = ""
     @Published var repo: String? {
         didSet {
-            if repo != oldValue { suggestedBranch = nil }
+            if repo != oldValue {
+                suggestedBranch = nil
+                if page == .pr { resolvePullRequest() }
+            }
         }
     }
     private(set) var suggestedBranch: String?
@@ -180,7 +190,7 @@ final class PickerModel: ObservableObject {
     }
 
     private func activityChanged() {
-        guard presented, contextReady, !closed, page != .create else { return }
+        guard presented, contextReady, !closed, !isForm, Self.pullRequestLink(query) == nil else { return }
         activityDirty = true
         guard activityTask == nil else { return }
         let epoch = eventEpoch
@@ -204,7 +214,7 @@ final class PickerModel: ObservableObject {
                     try Task.checkCancellation()
                     guard self.presented, self.contextReady, !self.closed,
                           epoch == self.eventEpoch, token == self.generation,
-                          key == self.cacheKey, self.page != .create else { return }
+                          key == self.cacheKey, !self.isForm else { return }
                     self.activityDirty = false
                     var params: [String: APIValue] = ["query": .text(key.query)]
                     let method: String
@@ -292,7 +302,7 @@ final class PickerModel: ObservableObject {
         self.options = options
         self.backend = backend
         self.view = Self.initialView(for: options)
-        self.page = options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories)
+        self.page = options.mode == "pr" ? .pr : (options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories))
         self.repo = options.repo
         self.loading = true
     }
@@ -315,6 +325,10 @@ final class PickerModel: ObservableObject {
     /// Resident recovery: did the shared backend connection die?
     var backendIsClosed: Bool { closed || ((backend as? ProcessBackend)?.isClosed ?? false) }
     var canOpen: Bool {
+        if selected?.kind == "pr", !isForm {
+            return contextReady && !busy && !loading && Self.pullRequestLink(query) != nil
+                && selected?.path == query.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard contextReady, !busy, !loading, displayedKey == cacheKey else { return false }
         if view == .agents { return selected?.kind == "agent" }
         if page == .directories {
@@ -335,6 +349,7 @@ final class PickerModel: ObservableObject {
             case .directories: return "Sessions"
             case .worktrees: return "Worktrees"
             case .create: return "Create worktree"
+            case .pr: return "Open pull request"
             }
         }
     }
@@ -375,7 +390,7 @@ final class PickerModel: ObservableObject {
         themeTask = task
         return task
     }
-    var showsPills: Bool { page != .create }
+    var showsPills: Bool { !isForm }
 
 
     /// Synchronous open boundary: reset origin state before the panel is shown.
@@ -385,7 +400,7 @@ final class PickerModel: ObservableObject {
     func prepareReconfigure(_ options: LaunchOptions) -> Int {
         reconfigureGeneration += 1
         let token = reconfigureGeneration
-        if createdPath != nil {
+        if createdPath != nil || (page == .pr && busy) {
             // Keep the backend origin, repo, target and createParent together.
             // Reopening must neither cancel a mutation nor turn recovery into
             // another create (even when the incoming request is unrelated).
@@ -482,7 +497,9 @@ final class PickerModel: ObservableObject {
         self.options = options
         closed = false
         view = Self.initialView(for: options)
-        page = options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories)
+        page = options.mode == "pr" ? .pr : (options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories))
+        prGeneration += 1; prTask?.cancel()
+        pullRequest = nil; prInput = ""; prStage = nil; prReturn = nil
         repo = options.repo
         createParent = .worktrees
         query = ""
@@ -551,7 +568,7 @@ final class PickerModel: ObservableObject {
 
     func selectView(_ desired: ViewKind) {
         guard contextReady, desired != view else { return }
-        guard !busy, page != .create,
+        guard !busy, !isForm,
               removalCandidate == nil,
               !basePickerPresented, !targetPickerPresented else { return }
         saveListPosition()
@@ -606,6 +623,7 @@ final class PickerModel: ObservableObject {
         busy = false
         contextGeneration += 1
         queryTask?.cancel(); previewTask?.cancel(); operationTask?.cancel(); themeTask?.cancel()
+        prGeneration += 1; prTask?.cancel()
         onAdvanceFormFocus = nil; onFocusSearch = nil
         backend.close()
         onClose?()
@@ -617,6 +635,20 @@ final class PickerModel: ObservableObject {
 
     private func scheduleQuery(immediate: Bool = false, reuseFresh: Bool = false, freshQuery: Bool = false) {
         guard !closed, !changingContext, contextReady else { return }
+        if page == .pr {
+            targets = ["session", "tab"]; target = "session"
+            loading = false; refreshing = false
+            resolvePullRequest()
+            return
+        }
+        if let link = Self.pullRequestLink(query) {
+            generation += 1; queryTask?.cancel()
+            activityTask?.cancel(); activityTask = nil; activityDirty = false
+            let item = PickerItem(path: query.trimmingCharacters(in: .whitespacesAndNewlines), label: "Open PR #\(link.number) — \(link.repo)", kind: "pr")
+            items = [item]; selectedID = item.id; scrollID = nil
+            loading = false; refreshing = false; error = nil
+            return
+        }
         saveListPosition()
         let key = cacheKey
         // A warm reopen must not cancel and requeue the same pipe request.
@@ -788,6 +820,7 @@ final class PickerModel: ObservableObject {
         guard contextReady else { return }
         guard canOpen else { return }
         guard let selected else { return }
+        if selected.kind == "pr" { beginPullRequest(input: selected.path); return }
         if view == .agents {
             guard canOpen else { return }
             jumpAgent(selected)
@@ -888,6 +921,11 @@ final class PickerModel: ObservableObject {
 
     func escape() {
         if busy || !contextReady || (createdPath != nil && notice == nil) { dismiss(); return }
+        if page == .pr {
+            if targetPickerPresented { targetPickerPresented = false; return }
+            returnFromPullRequest()
+            return
+        }
         // Demo dispatch succeeded and stays visible only to show its notice.
         if createdPath != nil { createdPath = nil }
         guard removalCandidate == nil else { return }
@@ -1064,6 +1102,138 @@ final class PickerModel: ObservableObject {
             defer { if context == self.contextGeneration { self.busy = false } }
             do { try await operation() }
             catch { if context == self.contextGeneration, !self.closed { self.error = error.localizedDescription } }
+        }
+    }
+
+    // URL recognition is local and read-only. Metadata is requested only in the form.
+    static func pullRequestLink(_ input: String) -> (repo: String, number: Int)? {
+        let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pattern = #"^https://github\.com/([A-Za-z0-9_][A-Za-z0-9_.-]*)/([A-Za-z0-9_][A-Za-z0-9_.-]*)/pull/([1-9][0-9]*)/?$"#
+        guard let match = input.range(of: pattern, options: .regularExpression),
+              match == input.startIndex..<input.endIndex else { return nil }
+        let parts = input.dropFirst("https://github.com/".count).split(separator: "/")
+        guard parts[1] != ".", parts[1] != "..", let number = Int(parts[3]) else { return nil }
+        return ("\(parts[0])/\(parts[1])", number)
+    }
+
+    /// Keep recovery on this model and retain its original Rex context. Open
+    /// reconciles durable path/IDs state; reconnect must never call Prepare.
+    @discardableResult
+    func reconnectPullRequestBackend() -> Bool {
+        guard !closed, !busy, page == .pr, createdPath != nil,
+              let process = backend as? ProcessBackend, process.isClosed else { return false }
+        prTask?.cancel(); themeTask?.cancel()
+        backend = ProcessBackend(options: options)
+        renewSubscription()
+        return true
+    }
+
+    private var canReconnectPullRequest: Bool {
+        !closed && page == .pr && createdPath != nil && backendIsClosed
+    }
+
+    var canOpenPullRequest: Bool {
+        contextReady && (!backendIsClosed || canReconnectPullRequest) && !busy && !loading && !targetPickerPresented
+            && ["session", "tab"].contains(target)
+            && (createdPath != nil || pullRequest != nil)
+    }
+
+    func beginPullRequest(input: String = "") {
+        guard contextReady, !busy, page != .pr, createdPath == nil else { return }
+        prReturn = (page, view, repo, query, selectedID, scrollID, targets, target, items)
+        let context = repo ?? ((selected?.kind == "dir" || selected?.kind == "worktree") ? selected?.path : nil)
+        saveListPosition()
+        generation += 1; queryTask?.cancel()
+        activityTask?.cancel(); activityTask = nil; activityDirty = false
+        refreshing = false
+        view = .sessions; page = .pr
+        repo = context
+        targets = ["session", "tab"]; target = "session"
+        splitMode = false; targetPickerPresented = false
+        error = nil; notice = nil; pullRequest = nil; prStage = nil
+        prInput = input
+        resolvePullRequest()
+    }
+
+    private func returnFromPullRequest() {
+        prGeneration += 1; prTask?.cancel(); prStage = nil
+        guard let saved = prReturn else { dismiss(); return }
+        changingContext = true
+        page = saved.page; view = saved.view; repo = saved.repo; query = saved.query
+        items = saved.items; selectedID = saved.selected; scrollID = saved.scroll
+        targets = saved.targets; target = saved.target
+        loading = false; error = nil; pullRequest = nil; prReturn = nil
+        changingContext = false
+        if page == .create { scheduleQuery(immediate: true) }
+        else { onFocusSearch?() }
+    }
+
+    private func pullRequestParams() -> [String: APIValue] {
+        var params: [String: APIValue] = ["input": .text(prInput.trimmingCharacters(in: .whitespacesAndNewlines))]
+        // A full URL defines its own repository, not the ambient selection.
+        if Self.pullRequestLink(prInput) == nil, let repo, !repo.isEmpty { params["repo"] = .text(repo) }
+        return params
+    }
+
+    private func resolvePullRequest() {
+        guard page == .pr, createdPath == nil, !busy, contextReady, !closed else { return }
+        prGeneration += 1
+        let token = prGeneration
+        prTask?.cancel(); pullRequest = nil; error = nil; prStage = nil; loading = false
+        let input = prInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !input.isEmpty else { return }
+        let number = Int(input)
+        guard Self.pullRequestLink(input) != nil || (number != nil && number! > 0 && repo != nil) else {
+            error = "Enter a full github.com PR URL, or a PR number with a selected repository."
+            return
+        }
+        let params = pullRequestParams()
+        loading = true; prStage = "Resolving"
+        prTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(180))
+                let result = try await self.request("pullrequests.resolve", params: params)
+                guard token == self.prGeneration, self.page == .pr, !Task.isCancelled else { return }
+                if let message = result.error, !message.isEmpty { throw APIError.message(message) }
+                self.pullRequest = result
+                self.loading = false; self.prStage = nil
+            } catch {
+                guard token == self.prGeneration, self.page == .pr, !Task.isCancelled else { return }
+                self.loading = false; self.prStage = nil; self.error = error.localizedDescription
+            }
+        }
+    }
+
+    func openPullRequest() {
+        guard page == .pr, canOpenPullRequest else { return }
+        if backendIsClosed {
+            guard reconnectPullRequestBackend() else { return }
+        }
+        let params = pullRequestParams(), target = target
+        perform {
+            defer { self.prStage = nil }
+            if self.createdPath == nil {
+                self.prStage = "Preparing repository and worktree"
+                let result = try await self.request("pullrequests.prepare", params: params)
+                // Even a partial prepare result can contain a usable recovery path.
+                if let path = result.path, !path.isEmpty { self.createdPath = path }
+                if let message = result.error, !message.isEmpty { throw APIError.message(message) }
+                guard self.createdPath != nil else { throw APIError.message("Backend returned no worktree path.") }
+                self.pullRequest = result
+                self.invalidateLists()
+            }
+            guard let path = self.createdPath else { return }
+            self.prStage = "Opening session"
+            do {
+                let result = try await self.request("pullrequests.open", params: ["path": .text(path), "target": .text(target)])
+                if let returned = result.path, !returned.isEmpty { self.createdPath = returned }
+                if let message = result.error, !message.isEmpty { throw APIError.message(message) }
+            } catch {
+                throw APIError.message("Worktree preserved at \(self.createdPath ?? path). Retry opening. \(error.localizedDescription)")
+            }
+            self.createdPath = nil
+            self.finishNavigation()
         }
     }
 

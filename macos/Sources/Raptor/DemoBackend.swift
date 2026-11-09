@@ -120,6 +120,15 @@ actor DemoBackend: BackendClient {
         case "worktrees.remove":
             worktrees.removeAll { $0.path == text("path") && $0.isMain != true }
             return APIResult()
+        case "pullrequests.resolve", "pullrequests.prepare":
+            let input = text("input")
+            let number = Int(input) ?? Int(input.split(separator: "/").last ?? "") ?? 123
+            return APIResult(repo: repo, path: "/Users/demo/workspace/worktrees/example-kit/feat-native-picker",
+                             input: input, url: "https://github.com/demo/example-kit/pull/\(number)", number: number,
+                             title: "Add native pull request workflow", branch: "feat/native-picker",
+                             cloneRequired: false, existing: false)
+        case "pullrequests.open":
+            return APIResult(path: text("path"), sessionID: "session:demo-pr", windowID: "window:demo-pr", blockID: "block:demo-pr")
         case "dispatch":
             return APIResult() // No Rex call; the UI shows the synthetic result.
         default: throw APIError.message("Unknown demo method: \(method)")

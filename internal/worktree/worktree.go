@@ -3,13 +3,11 @@ package worktree
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/execx"
-	"github.com/alienxp03/raptor/internal/paths"
 )
 
 type Worktree struct {
@@ -40,9 +38,14 @@ func RepoRoot(dir string) string {
 func IsGitRepo(dir string) bool { return RepoRoot(dir) != "" }
 
 func List(repo string) []Worktree {
+	trees, _ := listWorktrees(repo)
+	return trees
+}
+
+func listWorktrees(repo string) ([]Worktree, error) {
 	out, err := GitOut(repo, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var result []Worktree
 	var current *Worktree
@@ -61,7 +64,7 @@ func List(repo string) []Worktree {
 			current.Branch = "detached " + hash
 		}
 	}
-	return result
+	return result, nil
 }
 
 func Folder(branch string) string {
@@ -79,13 +82,11 @@ func RepoFolder(name string) string {
 	return name
 }
 
+// Path is a compatibility wrapper. Use PreviewPath to retain preview errors.
+// cfg.WorktreeRoot is intentionally ignored: Worktrunk owns destination rules.
 func Path(repo, branch string, cfg config.Config) string {
-	// Always use the primary repository's name, even when launched inside a worktree.
-	name := paths.Basename(repo)
-	if trees := List(repo); len(trees) > 0 {
-		name = paths.Basename(trees[0].Path)
-	}
-	return filepath.Join(cfg.WorktreeRoot, RepoFolder(name), Folder(branch))
+	path, _ := PreviewPath(repo, branch)
+	return path
 }
 
 func ValidateNewBranch(repo, branch string) error {
@@ -111,6 +112,14 @@ func Validate(repo, branch, base, path string) error {
 	if _, err := GitOut(repo, "show-ref", "--verify", "--quiet", "refs/heads/"+base); err != nil {
 		return fmt.Errorf("local base branch not found: %s", base)
 	}
+	destination, err := PreviewPath(repo, branch)
+	if err != nil {
+		return err
+	}
+	if path != "" && path != destination {
+		return fmt.Errorf("destination differs from Worktrunk configuration: %s (expected %s)", path, destination)
+	}
+	path = destination
 	if _, err := os.Lstat(path); err == nil {
 		return fmt.Errorf("destination already exists: %s", path)
 	} else if !os.IsNotExist(err) {
@@ -124,14 +133,14 @@ func Validate(repo, branch, base, path string) error {
 	return nil
 }
 
+// CreateLocal creates through Worktrunk without hooks. Callers must run any
+// approved setup visibly in the destination terminal, not behind the picker.
+// path is a compatibility assertion, never a Worktrunk path override.
 func CreateLocal(repo, branch, base, path string) error {
 	if err := Validate(repo, branch, base, path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	_, err := GitOut(repo, "worktree", "add", "-b", branch, path, base)
+	_, _, err := switchWorktree(repo, "--create", branch, "--base", base)
 	return err
 }
 
@@ -139,8 +148,8 @@ func Remove(repo string, w Worktree) error {
 	if w.IsMain {
 		return fmt.Errorf("cannot remove the primary worktree")
 	}
-	// No --force and no branch deletion: Git refuses dirty/locked worktrees.
-	_, err := GitOut(repo, "worktree", "remove", w.Path)
+	// No force or branch deletion. Wait until removal finishes before refreshing.
+	_, err := wtOut(repo, "remove", "--no-delete-branch", "--foreground", w.Path)
 	return err
 }
 

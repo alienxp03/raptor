@@ -28,6 +28,19 @@ struct TransportFixture {
             }
             var response: [String: Any] = ["id": id, "result": [:] as [String: String]]
             switch method {
+            case "pullrequests.resolve", "pullrequests.prepare":
+                guard let input = params["input"] as? String else { exit(5) }
+                response["result"] = ["repo": "/ambient", "path": "/pr-" + input, "title": "Fixture PR"]
+            case "pullrequests.open":
+                guard let path = params["path"] as? String,
+                      params["target"] as? String == (path == "/pr-13" ? "tab" : "session") else { exit(6) }
+                let prepared = requests.contains { $0.contains(":pullrequests.prepare:") }
+                if prepared && path == "/pr-13" { exit(2) }
+                // A restarted backend can open from durable path state alone.
+                // Preparing on the restarted connection would fail again.
+                response["result"] = prepared
+                    ? ["path": path, "session_id": "kept-S", "window_id": "kept-W", "block_id": "kept-B", "error": "Selection failed"]
+                    : ["path": path, "session_id": "kept-S", "window_id": "kept-W", "block_id": "kept-B"]
             case "audit": response["result"] = ["branches": requests]
             case "sessions", "agents": response["result"] = ["items": [["path": query]]]
             case "error": response = ["id": id, "error": "fixture error"]
@@ -46,7 +59,7 @@ struct TransportFixture {
             try FileHandle.standardOutput.write(contentsOf: data.prefix(5))
             Thread.sleep(forTimeInterval: 0.01)
             try FileHandle.standardOutput.write(contentsOf: data.dropFirst(5))
-            if method == "reply-and-eof" { exit(0) }
+            if method == "reply-and-eof" || (method == "pullrequests.open" && requests.contains { $0.contains(":pullrequests.prepare:") }) { exit(0) }
             if method == "events.subscribe",
                let params = request["params"] as? [String: Any], params["enabled"] as? Bool == true {
                 // No new request is needed to read this notification.

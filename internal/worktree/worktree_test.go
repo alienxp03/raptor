@@ -11,7 +11,9 @@ import (
 
 func fixtureRepo(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "repo")
+	root := t.TempDir()
+	isolateWT(t, root)
+	dir := filepath.Join(root, "repo")
 	if err := os.Mkdir(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +22,7 @@ func fixtureRepo(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	return dir
+	return RepoRoot(dir)
 }
 
 func TestRepoFolder(t *testing.T) {
@@ -44,7 +46,7 @@ func TestLocalWorktreeLifecycle(t *testing.T) {
 		}
 	}
 	path := Path(repo, "feat/login", config.Config{WorktreeRoot: root})
-	if !strings.HasSuffix(path, "repo/feature-login") {
+	if !strings.HasSuffix(path, "repo/feat-login") {
 		t.Fatal(path)
 	}
 	if err := CreateLocal(repo, "feat/login", "main", path); err != nil {

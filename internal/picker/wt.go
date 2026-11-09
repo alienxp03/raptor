@@ -3,7 +3,6 @@ package picker
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,6 +13,7 @@ import (
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/paths"
+	"github.com/alienxp03/raptor/internal/pullrequest"
 	"github.com/alienxp03/raptor/internal/rex"
 	worktreepkg "github.com/alienxp03/raptor/internal/worktree"
 )
@@ -176,7 +176,10 @@ func (m *wtModel) Init() tea.Cmd {
 	}
 	return tea.Batch(m.ctx.TitleCommand(), load)
 }
-func (m *wtModel) destination() string { return filepath.Join(m.root, worktreepkg.Folder(m.branch)) }
+func (m *wtModel) destination() string {
+	path, _ := worktreepkg.PreviewPath(m.repo, m.branch)
+	return path
+}
 func (m *wtModel) baseLabel() string {
 	if m.loading {
 		return "Loading…"
@@ -187,7 +190,14 @@ func (m *wtModel) destinationLabel() string {
 	if m.loading {
 		return "Loading repository…"
 	}
-	return paths.HomeRelative(m.destination())
+	if m.branch == "" {
+		return "Worktrunk configured path"
+	}
+	path, err := worktreepkg.PreviewPath(m.repo, m.branch)
+	if err != nil {
+		return err.Error()
+	}
+	return paths.HomeRelative(path)
 }
 func (m *wtModel) applyFilter() {
 	m.view = catalog.FilterWorktrees(m.rows, m.filter)
@@ -405,7 +415,19 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.busy = true
 				m.err, m.errField = "", -1
-				return m, func() tea.Msg { return wtCreatedMsg{path, worktreepkg.CreateLocal(repo, branch, base, path)} }
+				return m, func() tea.Msg {
+					setup, err := pullrequest.PreflightLocal(repo)
+					if err != nil {
+						return wtCreatedMsg{path, err}
+					}
+					if err := worktreepkg.CreateLocal(repo, branch, base, path); err != nil {
+						return wtCreatedMsg{path, err}
+					}
+					if err := setup.Register(path, branch, base); err != nil {
+						return wtCreatedMsg{path, fmt.Errorf("worktree preserved at %s; could not save setup: %w", path, err)}
+					}
+					return wtCreatedMsg{path, nil}
+				}
 			default:
 				if m.field == 0 {
 					if editQuery(&m.branch, msg) {
