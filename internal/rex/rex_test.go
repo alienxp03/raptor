@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fakeRex(t *testing.T) string {
@@ -17,15 +18,15 @@ func fakeRex(t *testing.T) string {
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$REX_TEST_LOG"
 case "$*" in
-  *session.describe_block*)
-    if [ "$REX_TEST_FAIL" = describe ]; then echo 'missing pane' >&2; exit 1; fi
-    printf '%s\n' '{"block":{"window_id":"moved-window"}}';;
-  *session.focus_block*)
-    if [ "$REX_TEST_FAIL" = focus ]; then echo 'focus failed' >&2; exit 1; fi
-    printf '%s\n' '{"revision":1}';;
   *session.select*)
     if [ "$REX_TEST_FAIL" = select ]; then echo 'selection failed' >&2; exit 1; fi;;
-  'ls --json') printf '%s\n' '{"sessions":[{"session_id":"previous-session"}]}';;
+  *client.list*)
+    if [ "$REX_TEST_FAIL" = client ]; then echo '{"clients":[]}'; exit 0; fi
+    echo '{"clients":[{"client_id":"client:app","info":{"kind":"app","label":"my-mac"}}]}';;
+  *'ls --json')
+    if [ "$REX_TEST_FAIL" = list ]; then echo 'host unavailable' >&2; exit 1; fi
+    if [ "$REX_TEST_FAIL" = malformed ]; then echo '{}'; exit 0; fi
+    echo '{"sessions":[{"session_id":"session:previous"},{"session_id":"session:current"}]}';;
 esac
 `
 	if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0o755); err != nil {
@@ -34,115 +35,119 @@ esac
 	return log
 }
 
+func seedHistory(t *testing.T, host string, ids ...string) {
+	t.Helper()
+	for i, id := range ids {
+		if err := RecordSessionVisit(host, id, time.Now().Add(time.Duration(i-len(ids))*time.Minute), false); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestSelectSessionRemembersOnlyOnSuccess(t *testing.T) {
 	fakeRex(t)
-	ctx := Ctx{Session: "current-session", Block: "current-pane", Client: "client"}
-	WriteLast("previous-session")
+	ctx := Ctx{Session: "session:current", Client: "client:app"}
+	seedHistory(t, "", "session:previous")
+	before, _ := os.ReadFile(recencyPath())
 	t.Setenv("REX_TEST_FAIL", "select")
-	if err := SelectSession(ctx, "previous-session"); err == nil {
+	if err := SelectSession(ctx, "session:previous"); err == nil {
 		t.Fatal("expected selection failure")
 	}
-	if got := readLastForTest(t); got != "previous-session" {
-		t.Fatalf("state after failed selection = %q", got)
-	}
-	if _, err := LastPane(); err == nil {
-		t.Fatal("failed selection wrote pane history")
+	after, _ := os.ReadFile(recencyPath())
+	if string(before) != string(after) {
+		t.Fatal("failed selection changed history")
 	}
 	t.Setenv("REX_TEST_FAIL", "")
-	if err := SelectSession(ctx, "previous-session"); err != nil {
+	if err := SelectSession(ctx, "session:previous"); err != nil {
 		t.Fatal(err)
 	}
-	if got := readLastForTest(t); got != ctx.Session {
-		t.Fatalf("state after successful selection = %q", got)
-	}
-	if pane, err := LastPane(); err != nil || pane != (Pane{ctx.Session, ctx.Block}) {
-		t.Fatalf("pane = %+v, err = %v", pane, err)
+	ranks := LoadSessionRecency()
+	if ranks.Rank("", "session:previous") != 0 || ranks.Rank("", ctx.Session) != 1 {
+		t.Fatalf("wrong history: %v", ranks)
 	}
 }
 
-func TestSelectLastRequiresClientContext(t *testing.T) {
-	if _, err := SelectLast(Ctx{Session: "current-session"}); err == nil {
-		t.Fatal("expected missing-client error")
+func TestSelectLastSkipsDeletedAndToggles(t *testing.T) {
+	fakeRex(t)
+	seedHistory(t, "", "session:previous", "session:deleted", "session:current")
+	ctx := Ctx{Session: "session:current", Client: "client:app"}
+	for _, want := range []string{"session:previous", "session:current", "session:previous"} {
+		got, err := SelectLast(ctx)
+		if err != nil || got != want {
+			t.Fatalf("selected %q, error %v, want %q", got, err, want)
+		}
+		ctx.Session = got
 	}
 }
 
-func TestSelectLastPane(t *testing.T) {
-	for _, sameSession := range []bool{false, true} {
-		t.Run(map[bool]string{false: "cross-session", true: "same-session"}[sameSession], func(t *testing.T) {
-			log := fakeRex(t)
-			ctx := Ctx{Session: "current-session", Block: "current-pane", Client: "client"}
-			target := Ctx{Session: "previous-session", Block: "previous-pane"}
-			if sameSession {
-				target.Session = ctx.Session
-			}
-			WriteLast("unchanged-session")
-			WriteLastPane(target)
-			pane, err := SelectLastPane(ctx)
-			if err != nil || pane != (Pane{target.Session, target.Block}) {
-				t.Fatalf("pane = %+v, err = %v", pane, err)
-			}
-			if saved, err := LastPane(); err != nil || saved != (Pane{ctx.Session, ctx.Block}) {
-				t.Fatalf("saved pane = %+v, err = %v", saved, err)
-			}
-			wantSession := ctx.Session
-			if sameSession {
-				wantSession = "unchanged-session"
-			}
-			if got := readLastForTest(t); got != wantSession {
-				t.Fatalf("saved session = %q", got)
-			}
-			calls, _ := os.ReadFile(log)
-			if !strings.Contains(string(calls), "window_id=moved-window") {
-				t.Fatalf("did not select the pane's current window: %s", calls)
-			}
-		})
-	}
-}
-
-func TestSelectLastPaneFailurePreservesHistory(t *testing.T) {
-	for _, failure := range []string{"describe", "focus", "select"} {
+func TestSelectLastFailurePreservesHistory(t *testing.T) {
+	for _, failure := range []string{"select", "list", "malformed"} {
 		t.Run(failure, func(t *testing.T) {
 			fakeRex(t)
+			seedHistory(t, "", "session:previous")
+			before, _ := os.ReadFile(recencyPath())
 			t.Setenv("REX_TEST_FAIL", failure)
-			target := Ctx{Session: "previous-session", Block: "previous-pane"}
-			WriteLastPane(target)
-			WriteLast("previous-session")
-			if _, err := SelectLastPane(Ctx{Session: "current-session", Block: "current-pane", Client: "client"}); err == nil {
+			if _, err := SelectLast(Ctx{Session: "session:current", Client: "client:app"}); err == nil {
 				t.Fatal("expected failure")
 			}
-			if saved, _ := LastPane(); saved != (Pane{target.Session, target.Block}) {
-				t.Fatalf("failure changed history: %+v", saved)
-			}
-			if got := readLastForTest(t); got != target.Session {
-				t.Fatalf("failure changed session history: %q", got)
+			after, _ := os.ReadFile(recencyPath())
+			if string(before) != string(after) {
+				t.Fatal("failed navigation changed history")
 			}
 		})
 	}
 }
 
-func TestPaneHistoryRejectsMissingInvalidAndCurrentPane(t *testing.T) {
-	fakeRex(t)
-	ctx := Ctx{Session: "current-session", Block: "current-pane", Client: "client"}
-	if _, err := SelectLastPane(ctx); err == nil {
-		t.Fatal("accepted missing history")
+func TestSelectLastRemote(t *testing.T) {
+	log := fakeRex(t)
+	seedHistory(t, "work-host", "session:previous")
+	got, err := SelectLast(Ctx{Session: "session:current", Client: "client:app"})
+	if err != nil || got != "session:previous" {
+		t.Fatalf("selected %q, error %v", got, err)
 	}
-	WriteLastPane(ctx)
-	if _, err := SelectLastPane(ctx); err == nil {
-		t.Fatal("accepted already-focused pane")
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls), "-S work-host -C client:app do session.select session_id=session:previous") {
+		t.Fatalf("wrong remote routing: %s", calls)
 	}
-	if err := os.WriteFile(paneStatePath(), []byte(`{}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LastPane(); err == nil {
-		t.Fatal("accepted invalid history")
+	if LoadSessionRecency().Rank("work-host", got) != 0 {
+		t.Fatal("remote selection not recorded")
 	}
 }
 
-func readLastForTest(t *testing.T) string {
-	t.Helper()
-	data, err := os.ReadFile(statePath())
-	if err != nil {
+func TestSelectLastRemoteRequiresApp(t *testing.T) {
+	log := fakeRex(t)
+	seedHistory(t, "work-host", "session:previous")
+	t.Setenv("REX_TEST_FAIL", "client")
+	before, _ := os.ReadFile(recencyPath())
+	if _, err := SelectLast(Ctx{Session: "session:current", Client: "client:app"}); err == nil {
+		t.Fatal("accepted a remote host without the requesting app")
+	}
+	after, _ := os.ReadFile(recencyPath())
+	calls, _ := os.ReadFile(log)
+	if string(before) != string(after) || strings.Contains(string(calls), "session.select") || strings.Contains(string(calls), "session.focus_window") {
+		t.Fatal("failed remote routing changed history or focus")
+	}
+}
+
+func TestSelectLastLegacyFallback(t *testing.T) {
+	fakeRex(t)
+	if err := os.MkdirAll(filepath.Dir(statePath()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return strings.TrimSpace(string(data))
+	if err := os.WriteFile(statePath(), []byte("session:previous\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := SelectLast(Ctx{Session: "session:current", Client: "client:app"})
+	if err != nil || got != "session:previous" {
+		t.Fatalf("selected %q, error %v", got, err)
+	}
+}
+
+func TestSelectLastRejectsMissingContextOrHistory(t *testing.T) {
+	fakeRex(t)
+	for _, ctx := range []Ctx{{}, {Session: "session:current"}, {Client: "client:app"}, {Session: "session:current", Client: "client:app"}} {
+		if _, err := SelectLast(ctx); err == nil {
+			t.Fatalf("expected error for %+v", ctx)
+		}
+	}
 }

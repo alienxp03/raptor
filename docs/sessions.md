@@ -31,6 +31,19 @@ The rank snapshot stays fixed while the picker is open. Agent reports, title cha
 
 History builds from observed visits, not inferred past activity. Up to 256 host/session timestamps persist in `$XDG_CACHE_HOME/raptor/session-recency.json`, or `~/Library/Caches/raptor/session-recency.json` by default. The file is private and atomically updated. Missing focus preferences do not clear history.
 
+## Last Session
+
+Use **Cmd+P** on Mac or **Ctrl+P** on mobile for Last Session
+(`raptor_session_last`). It uses the same shared session-recency history as the
+Sessions list, validates the host, and skips deleted sessions. The legacy single
+session ID is used only as a fallback.
+
+```lua
+rex.bind("cmd+p", "raptor_session_last")
+-- Mobile:
+rex.bind("ctrl+p", "raptor_session_last")
+```
+
 ## Open-target override
 
 Local directory rows can skip session creation: Ctrl+O cycles the open target (session → tab → cd here → pane right → pane below), and Enter dispatches with it, exactly like the old directory picker. Remote rows always launch sessions on their host.

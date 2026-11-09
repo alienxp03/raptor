@@ -56,7 +56,7 @@ func TestMissingClientDoesNotCreateSession(t *testing.T) {
 	}
 }
 
-func TestDispatchPaneHistory(t *testing.T) {
+func TestDispatchNavigation(t *testing.T) {
 	for _, target := range []string{"tab", "pane_right", "pane_below", "session"} {
 		for _, fail := range []bool{false, true} {
 			name := target
@@ -91,14 +91,6 @@ esac
 				err := Dispatch(target, "/tmp/project", ctx, config.Default())
 				if (err != nil) != fail {
 					t.Fatalf("error = %v, want failure %v", err, fail)
-				}
-				pane, historyErr := rex.LastPane()
-				if fail {
-					if historyErr == nil {
-						t.Fatal("failed dispatch updated history")
-					}
-				} else if historyErr != nil || pane != (rex.Pane{Session: ctx.Session, Block: ctx.Block}) {
-					t.Fatalf("pane = %+v, error = %v", pane, historyErr)
 				}
 			})
 		}

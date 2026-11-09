@@ -39,7 +39,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|sessions|agents|launcher|wt|task|setup|api|direct|last-session|last-pane|panel|service> [command flags]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|sessions|agents|launcher|wt|task|setup|api|direct|last-session|panel|service> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -206,13 +206,6 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println(sid)
-	case "last-pane":
-		pane, err := rex.SelectLastPane(ctx)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Println(pane.Block)
 	case "version":
 		fmt.Println(version)
 	default:

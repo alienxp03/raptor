@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -475,7 +474,7 @@ func TestRepoResolutionAndErrors(t *testing.T) {
 	}
 }
 
-func TestDispatchUsesOriginAndHistory(t *testing.T) {
+func TestDispatchUsesOrigin(t *testing.T) {
 	cache := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cache)
 	log := filepath.Join(t.TempDir(), "rex.log")
@@ -505,19 +504,7 @@ esac
 	if string(data) != want {
 		t.Fatalf("origin not forwarded: %s", data)
 	}
-	files, err := filepath.Glob(filepath.Join(cache, "rex", "*"))
-	if err != nil || len(files) == 0 {
-		t.Fatalf("history not written: %v %v", files, err)
-	}
-	var history strings.Builder
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fmt.Fprint(&history, string(data))
-	}
-	if !strings.Contains(history.String(), "origin-block") {
-		t.Fatalf("origin history missing: %s", history.String())
+	if _, err := os.Stat(filepath.Join(cache, "rex", "raptor-last-pane")); !os.IsNotExist(err) {
+		t.Fatalf("tab dispatch must not write Last Pane history: %v", err)
 	}
 }

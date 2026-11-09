@@ -388,122 +388,25 @@ function M.setup(options)
 		end,
 	})
 
-	-- History shortcuts stay in Lua: no binary startup or nested Rex CLI calls.
-	local cache = os.getenv("XDG_CACHE_HOME")
-	if cache == nil or cache == "" then
-		cache = os.getenv("HOME") .. "/.cache"
-	end
-	local history_path = cache .. "/rex/raptor-last"
-	local pane_path = cache .. "/rex/raptor-last-pane"
-
-	local function read_history(path)
-		local file = io.open(path, "r")
-		if file == nil then
-			error("raptor: no previous location recorded; navigate with Raptor first", 0)
-		end
-		local data = file:read("*a")
-		file:close()
-		return data
-	end
-
-	local function write_history(path, data)
-		local file, err = io.open(path, "w")
-		if file == nil then
-			error("raptor: " .. tostring(err), 0)
-		end
-		local ok, write_err = file:write(data)
-		file:close()
-		if ok == nil then
-			error("raptor: " .. tostring(write_err), 0)
-		end
-	end
-
-	local function remember_pane(ctx)
-		if ctx.session_id ~= nil and ctx.block_id ~= nil then
-			write_history(pane_path, rex.json.encode({ session_id = ctx.session_id, block_id = ctx.block_id }))
-		end
-	end
-
-	local function last_session(ctx)
-		if ctx.client_id == nil or ctx.session_id == nil then
-			error("raptor: no client or session context", 0)
-		end
-		local sid = read_history(history_path):match("^%s*(.-)%s*$")
-		if sid == ctx.session_id then
-			error("raptor: previous session is already selected; switch sessions with Raptor first", 0)
-		end
-		local sessions, err = rex.call("session.list")
-		if sessions == nil then
-			error(err, 0)
-		end
-		local found = false
-		for _, session in ipairs(sessions.sessions or {}) do
-			if session.session_id == sid then
-				found = true
-				break
-			end
-		end
-		if not found then
-			error("raptor: previous session is gone", 0)
-		end
-		rex.client.queue("session.select", { session_id = sid })
-		write_history(history_path, ctx.session_id .. "\n")
-		remember_pane(ctx)
-		return { selected = sid }
-	end
-
-	local function last_pane(ctx)
-		if ctx.client_id == nil or ctx.session_id == nil or ctx.block_id == nil then
-			error("raptor: no client, session, or pane context", 0)
-		end
-		local pane = rex.json.decode(read_history(pane_path))
-		if type(pane) ~= "table" or type(pane.session_id) ~= "string" or type(pane.block_id) ~= "string" then
-			error("raptor: invalid previous pane record", 0)
-		end
-		if pane.session_id == ctx.session_id and pane.block_id == ctx.block_id then
-			error("raptor: previous pane is already focused; open another pane with Raptor first", 0)
-		end
-		if pane.session_id ~= ctx.session_id then
-			local attached, attach_err = rex.session.attach({ session_id = pane.session_id })
-			if attached == nil then
-				error("raptor: previous session is unavailable: " .. tostring(attach_err), 0)
-			end
-		end
-		local description, err = rex.session.describe_block({ session_id = pane.session_id, block_id = pane.block_id })
-		if description == nil then
-			error("raptor: previous pane is unavailable: " .. tostring(err), 0)
-		end
-		local window_id = description.block and description.block.window_id
-		if window_id == nil then
-			error("raptor: previous pane is not in a window", 0)
-		end
-		local focused, focus_err = rex.session.focus_block({ session_id = pane.session_id, block_id = pane.block_id })
-		if focused == nil then
-			error(focus_err, 0)
-		end
-		rex.client.queue("session.select", { session_id = pane.session_id, window_id = window_id })
-		remember_pane(ctx)
-		if pane.session_id ~= ctx.session_id then
-			write_history(history_path, ctx.session_id .. "\n")
-		end
-		return { selected = pane.block_id }
-	end
-
+	-- Use the Go backend so shortcuts and both pickers share validated history.
 	rex.action({
 		name = "raptor_session_last",
 		title = "Raptor: Last Session",
-		description = "Toggle the session Raptor left. Manual Rex navigation does not update history.",
+		description = "Switch to the most recent live session.",
 		category = "Navigate",
 		keywords = "last session back toggle",
-		run = last_session,
-	})
-	rex.action({
-		name = "raptor_pane_last",
-		title = "Raptor: Last Pane",
-		description = "Toggle the pane Raptor left, even across sessions. No background watcher.",
-		category = "Navigate",
-		keywords = "last pane block back toggle",
-		run = last_pane,
+		run = function(ctx)
+			ctx = resolve_context(ctx)
+			if ctx.client_id == nil or ctx.session_id == nil then
+				error("raptor: no client or session context", 0)
+			end
+			local command = base_cmd(ctx, false)
+			table.insert(command, "last-session")
+			local result, err = rex.exec(command, { timeout = 30 })
+			if result == nil then error(err, 0) end
+			if not result.ok then error("raptor: " .. result.stdout .. result.stderr, 0) end
+			return { selected = result.stdout:match("^%s*(.-)%s*$") }
+		end,
 	})
 
 	-- Direct keybinding entry points. Unlike actions, these never touch the

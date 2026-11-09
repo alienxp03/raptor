@@ -95,7 +95,7 @@ rex.bind("shift+cmd+t", "raptor_worktree_list")
 rex.bind("ctrl+n", "raptor_worktree_new")
 ```
 
-These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_worktree_list`, `raptor_worktree_new`, `raptor_session_last`, and `raptor_pane_last` to the Rex command palette. Reload the Rex config after you change it.
+These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_worktree_list`, `raptor_worktree_new`, and `raptor_session_last` to the Rex command palette. Reload the Rex config after you change it.
 
 The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it. The installed resident host keeps the Go backend warm across navigation; reopening supplies fresh Rex context. An event-driven Mac focus observer records recent session use, including Rex sidebar switches. See [session ordering](docs/sessions.md#recent-use-order). If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`. Set `ui = "gui"` to force the server’s Mac app, including from CLI or iOS; a missing app or failed launch reports an error instead of falling back.
 
@@ -152,24 +152,23 @@ make package                # App ZIP and SHA-256 checksum in dist/
 
 Local builds are ad-hoc signed, **not notarized**. The HEAD formula is published in `alienxp03/tap`; signing/notarization hooks and a cask template remain available for a future tagged binary release. See [Mac architecture and protocol](docs/native-app.md) and [packaging instructions](packaging/macos.md).
 
-## Return to a previous location
+## Last Session
 
 ```lua
-rex.bind("cmd+p", "raptor_pane_last")
+rex.bind("cmd+p", "raptor_session_last")
+-- Mobile:
+rex.bind("ctrl+p", "raptor_session_last")
 ```
 
-- `raptor_pane_last`: toggle the pane Raptor left, including across sessions and tabs.
-- `raptor_session_last`: toggle the session Raptor left.
+**Cmd+P** on Mac and **Ctrl+P** on mobile return to the last session.
+`raptor_session_last` uses the shared [session-recency history](docs/sessions.md#recent-use-order),
+validates the host, and skips deleted sessions. The legacy single session ID is
+used only as a fallback.
 
 Canonical names use resource + action, except `raptor`, which remains the default
-launcher. Old action names are no longer registered, keeping the command palette free of
-duplicates. Update existing bindings: `raptor_wt` → `raptor_worktree_list`,
-`raptor_create` → `raptor_worktree_new`, `raptor_last_pane` → `raptor_pane_last`,
+launcher. Old action names are no longer registered. Update existing bindings:
+`raptor_wt` → `raptor_worktree_list`, `raptor_create` → `raptor_worktree_new`,
 and `raptor_last_session` / `raptor_last` → `raptor_session_last`.
-
-Raptor records the origin when it opens a pane, tab, or different session. Changing directory with `here` does not update pane history. Clicking panes, normal Rex pane shortcuts, and manual tab or session changes do not update either history. No background watcher runs.
-
-Both actions run directly in Lua, without starting Raptor or the Rex CLI. Pane history starts after your first Raptor navigation; closed or detached panes give an error. History is shared by clients on the same server. Rex client selection is queued, not an acknowledgement that the app displayed it.
 
 ## Directory picker
 

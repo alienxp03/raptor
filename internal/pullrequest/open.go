@@ -173,9 +173,9 @@ func Open(path, target string, ctx rex.Ctx) (result OpenResult, err error) {
 		return result, err
 	}
 	if result.SessionID != ctx.Session {
-		rex.WriteLast(ctx.Session)
+		_ = rex.RecordSessionUse("", ctx.Session)
 	}
-	rex.WriteLastPane(ctx)
+	_ = rex.RecordSessionUse("", result.SessionID)
 	s.Result, s.Released = result, true
 	if err = save(path, s); err != nil {
 		return result, err

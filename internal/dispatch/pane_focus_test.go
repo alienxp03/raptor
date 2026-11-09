@@ -17,7 +17,6 @@ func TestPaneSelectsRequestingClientWindow(t *testing.T) {
 				dir := t.TempDir()
 				logPath := filepath.Join(dir, "calls")
 				t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-				t.Setenv("XDG_CACHE_HOME", t.TempDir())
 				t.Setenv("REX_TEST_LOG", logPath)
 				t.Setenv("REX_TEST_FAIL_AT", failure)
 				script := `#!/bin/sh
@@ -35,8 +34,6 @@ esac
 				if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				previous := rex.Ctx{Session: "previous-session", Block: "previous-pane"}
-				rex.WriteLastPane(previous)
 				ctx := rex.Ctx{Session: "origin-session", Block: "origin-pane", Client: "requested-client"}
 				if failure == "no-client" {
 					ctx.Client = ""
@@ -63,14 +60,6 @@ esac
 				}
 				if strings.Join(calls, "\n") != strings.Join(want, "\n") {
 					t.Fatalf("commands = %q, want %q", calls, want)
-				}
-				history, err := rex.LastPane()
-				wantHistory := rex.Pane{Session: ctx.Session, Block: ctx.Block}
-				if wantFailure {
-					wantHistory = rex.Pane{Session: previous.Session, Block: previous.Block}
-				}
-				if err != nil || history != wantHistory {
-					t.Fatalf("history = %+v, error = %v, want %+v", history, err, wantHistory)
 				}
 			})
 		}

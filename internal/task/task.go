@@ -86,9 +86,6 @@ func Start(ctx rex.Ctx, cfg config.Config, explicitRepo, resumePath string) (Res
 		prior, resumed, resumeErr := pullrequest.ResumeLocal(tree.Path, "task", ctx)
 		if resumed || resumeErr != nil {
 			result.WindowID, result.BlockID = prior.WindowID, prior.BlockID
-			if resumeErr == nil {
-				rex.WriteLastPane(ctx)
-			}
 			return result, resumeErr
 		}
 		command, err = pullrequest.LocalStartup(tree.Path, "task", pi)
@@ -127,7 +124,6 @@ func Start(ctx rex.Ctx, cfg config.Config, explicitRepo, resumePath string) (Res
 			return result, err
 		}
 	}
-	rex.WriteLastPane(ctx)
 	return result, nil
 }
 

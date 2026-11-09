@@ -4,91 +4,93 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
+	"time"
 )
 
-// Pane identifies a terminal across sessions. Window placement is resolved on
-// use, so a pane can move to another tab without invalidating its history.
-type Pane struct {
-	Session string `json:"session_id"`
-	Block   string `json:"block_id"`
-}
-
-func paneStatePath() string {
-	return filepath.Join(filepath.Dir(statePath()), "raptor-last-pane")
-}
-
-func WriteLastPane(ctx Ctx) {
-	if ctx.Session == "" || ctx.Block == "" {
-		return
-	}
-	data, _ := json.Marshal(Pane{Session: ctx.Session, Block: ctx.Block})
-	_ = os.MkdirAll(filepath.Dir(paneStatePath()), 0o755)
-	_ = os.WriteFile(paneStatePath(), data, 0o644)
-}
-
-func LastPane() (Pane, error) {
-	data, err := os.ReadFile(paneStatePath())
-	if err != nil {
-		return Pane{}, fmt.Errorf("no previous pane recorded yet")
-	}
-	var pane Pane
-	if json.Unmarshal(data, &pane) != nil || pane.Session == "" || pane.Block == "" {
-		return Pane{}, fmt.Errorf("invalid previous pane record")
-	}
-	return pane, nil
-}
-
-// SelectSession changes the client session before updating either history.
+// SelectSession records both ends only after the client accepts the switch.
 func SelectSession(ctx Ctx, sid string) error {
 	if ctx.Client == "" {
 		return fmt.Errorf("no client context")
 	}
-	if err := Do(ctx.Client, "session.select", "session_id="+sid); err != nil {
+	return selectHistorySession(ctx, "", ctx.Client, sid)
+}
+
+func selectHistorySession(ctx Ctx, host, client, sid string) error {
+	if _, err := RunOn(host, "-C", client, "do", "session.select", "session_id="+sid); err != nil {
 		return err
 	}
 	if ctx.Session != sid {
-		WriteLast(ctx.Session)
-		WriteLastPane(ctx)
+		_ = RecordSessionUse("", ctx.Session)
 	}
+	_ = RecordSessionUse(host, sid)
 	return nil
 }
 
-// SelectLastPane restores a pane's current window, including in another session.
-// It records the origin only after both focus and client selection succeed.
-func SelectLastPane(ctx Ctx) (Pane, error) {
-	if ctx.Client == "" || ctx.Session == "" || ctx.Block == "" {
-		return Pane{}, fmt.Errorf("no client, session, or pane context")
+// SelectLast uses the same history as both pickers. Failed host queries and
+// selections stop navigation; they must not turn an unavailable session into
+// a deleted session or report a server-only focus as a successful app switch.
+func SelectLast(ctx Ctx) (string, error) {
+	if ctx.Client == "" || ctx.Session == "" {
+		return "", fmt.Errorf("no client or session context")
 	}
-	pane, err := LastPane()
+	doc, _, err := readRecency(recencyPath(), time.Now())
 	if err != nil {
-		return Pane{}, err
+		return "", fmt.Errorf("could not read session history: %w", err)
 	}
-	if pane.Session == ctx.Session && pane.Block == ctx.Block {
-		return Pane{}, fmt.Errorf("the previous pane is already focused; open another pane with Raptor first")
+	// Old installations have a single local ID. Check it only after the shared
+	// history, and never let a stale legacy ID block newer valid visits.
+	if data, err := os.ReadFile(statePath()); err == nil {
+		id := strings.TrimSpace(string(data))
+		if id != "" {
+			doc.Visits = append(doc.Visits, recencyVisit{SessionID: id})
+		}
 	}
-	args, _ := json.Marshal(map[string]string{"block_id": pane.Block})
-	out, err := Run("api", "call", "-s", pane.Session, "session.describe_block", string(args))
+	listings := map[string]map[string]bool{}
+	for _, visit := range doc.Visits {
+		if visit.SessionID == ctx.Session {
+			continue
+		}
+		sessions, ok := listings[visit.Host]
+		if !ok {
+			sessions, err = historySessions(visit.Host)
+			if err != nil {
+				return "", err
+			}
+			listings[visit.Host] = sessions
+		}
+		if !sessions[visit.SessionID] {
+			continue
+		}
+		client := ctx.Client
+		if visit.Host != "" {
+			client = appClientOn(visit.Host, ClientLabel(ctx.Client))
+			if client == "" {
+				return "", fmt.Errorf("cannot identify the requesting app on %s", visit.Host)
+			}
+		}
+		if err := selectHistorySession(ctx, visit.Host, client, visit.SessionID); err != nil {
+			return "", err
+		}
+		return visit.SessionID, nil
+	}
+	return "", fmt.Errorf("no previous live session recorded; switch sessions first")
+}
+
+func historySessions(host string) (map[string]bool, error) {
+	out, err := RunOnBounded(host, remoteListTimeout, "ls", "--json")
 	if err != nil {
-		return Pane{}, fmt.Errorf("previous pane is unavailable: %w", err)
+		return nil, fmt.Errorf("could not check previous sessions on %s: %w", LocalHostLabelOr(host), err)
 	}
-	var result struct {
-		Block struct {
-			WindowID string `json:"window_id"`
-		} `json:"block"`
+	var data struct {
+		Sessions []apiSession `json:"sessions"`
 	}
-	if json.Unmarshal([]byte(out), &result) != nil || result.Block.WindowID == "" {
-		return Pane{}, fmt.Errorf("previous pane is not in a window")
+	if err := json.Unmarshal([]byte(out), &data); err != nil || data.Sessions == nil {
+		return nil, fmt.Errorf("could not parse previous sessions on %s", LocalHostLabelOr(host))
 	}
-	if _, err := Run("api", "call", "-s", pane.Session, "session.focus_block", string(args)); err != nil {
-		return Pane{}, err
+	sessions := make(map[string]bool, len(data.Sessions))
+	for _, session := range data.Sessions {
+		sessions[session.SessionID] = true
 	}
-	if err := Do(ctx.Client, "session.select", "session_id="+pane.Session, "window_id="+result.Block.WindowID); err != nil {
-		return Pane{}, err
-	}
-	WriteLastPane(ctx)
-	if ctx.Session != pane.Session {
-		WriteLast(ctx.Session)
-	}
-	return pane, nil
+	return sessions, nil
 }

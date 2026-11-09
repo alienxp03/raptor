@@ -82,10 +82,6 @@ func TestTaskCreatesTabWithFreshEmptyPi(t *testing.T) {
 	if !strings.Contains(calls, "-C\niphone\ndo\nsession.select\nsession_id=origin-session\nwindow_id=new-window") {
 		t.Fatal("requesting app not selected")
 	}
-	pane, err := rex.LastPane()
-	if err != nil || pane.Block != ctx.Block {
-		t.Fatal("origin history not recorded")
-	}
 }
 
 func TestTaskMissingContextOrPiDoesNotCreate(t *testing.T) {

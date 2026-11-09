@@ -71,7 +71,6 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 		} else if _, err := rex.Run("focus", "-s", ctx.Session, res.WindowID); err != nil {
 			return err
 		}
-		rex.WriteLastPane(ctx)
 		return nil
 
 	case "pane_right", "pane_below":
@@ -81,9 +80,6 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 		if pending {
 			_, resumed, err := pullrequest.ResumeLocal(dir, target, ctx)
 			if resumed || err != nil {
-				if err == nil {
-					rex.WriteLastPane(ctx)
-				}
 				return err
 			}
 		}
@@ -155,7 +151,6 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 				return err
 			}
 		}
-		rex.WriteLastPane(ctx)
 		return nil
 
 	case "here":
