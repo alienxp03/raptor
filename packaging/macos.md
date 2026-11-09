@@ -49,8 +49,9 @@ VERSION=0.0.1 scripts/package-macos.sh --universal
 Submission waits for success, staples the app, validates the ticket and Gatekeeper,
 and recreates the ZIP before computing its checksum. `--skip-build` packages an
 existing signed app; `VERSION` must match it. Set `APP_SIGN_IDENTITY` as well when
-notarizing an existing app. Ad-hoc builds are local artifacts, not notarized
-releases. Gatekeeper can block downloaded copies. No bypass is applied.
+notarizing an existing app. Ad-hoc builds are not Apple-notarized.
+Homebrew formula installs normally do not set browser-download quarantine flags.
+Gatekeeper can block browser-downloaded copies. No bypass is applied.
 
 The Mac UI stays running while hidden. Quit it with Cmd+Q before an upgrade. Build and install scripts refuse to replace a running copy.
 
@@ -71,9 +72,52 @@ Make targets:
 - `make install-app`: build/install the Mac app plus CLI explicitly.
 - `make test-macos`: run native model/transport tests and strict Swift UI checks.
 
+## Prebuilt Homebrew releases
+
+`.github/workflows/release.yml` builds a universal app on a `vMAJOR.MINOR.PATCH`
+tag from `master`. It runs Go, Lua, native Mac, and formula-generation checks;
+then creates a **draft** GitHub release with the ZIP, SHA-256 checksum, and
+`raptor.rb` formula. Both Intel and Apple Silicon executables are included;
+the runner tests only its host architecture. No Apple credentials are needed.
+
+To release:
+
+1. Merge and test the release commit on `master`.
+2. Push a version tag, for example `v0.1.0`.
+3. Review the draft assets and test the app on Intel and Apple Silicon.
+4. Ensure archive downloads are publicly accessible, then publish the draft.
+5. Copy the release's `raptor.rb` asset to the tap's `Formula/raptor.rb`, and to
+   `packaging/homebrew/raptor.rb` in this repository. Test the formula before
+   publishing the tap update.
+
+```sh
+brew install alienxp03/tap/raptor
+brew test alienxp03/tap/raptor
+```
+
+Stable installs need neither Go nor Xcode. The formula installs `Raptor.app`,
+its bundled CLI, and its bundled Rex plugin. It does not remove quarantine
+attributes, disable Gatekeeper, or change user configuration. Keeping the `.app`
+bundle is intentional. This is not Apple notarization or a guarantee that every
+macOS security check will accept the app.
+
+The source repository is currently private. The generated stable formula uses
+ordinary release URLs: it requires public assets. A private repository token
+alone is not a supported private-asset download strategy. Do not publish a
+stable tap entry until downloads work without authentication. The draft-release
+workflow does not change repository visibility or push the tap.
+
+Generate a formula locally from a real package:
+
+```sh
+VERSION=0.1.0 scripts/package-macos.sh --universal
+ruby scripts/release-formula.rb 0.1.0 dist > aux/raptor.rb
+bash scripts/test-release.sh
+```
+
 ## Homebrew HEAD package
 
-`homebrew/raptor.rb` is the working HEAD-only formula, also published as
+`homebrew/raptor.rb` retains source builds with `--HEAD`, also published as
 `alienxp03/homebrew-tap/Formula/raptor.rb`. Keep both copies identical.
 
 ```sh
@@ -104,5 +148,6 @@ require a repo-scoped `gh auth git-credential` helper and
 `HOMEBREW_GITHUB_API_TOKEN` in the calling shell; see the README. No credentials
 are embedded. A read-only token for the source repository is sufficient.
 
-`homebrew/raptor.rb.in` remains an unfilled cask template for a future tagged
-binary release. It is not used by the HEAD formula.
+`homebrew/raptor.rb.in` is an unused cask template. Prebuilt releases use a
+formula, not a cask. Until the first stable release, the working formula is
+HEAD-only.

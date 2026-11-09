@@ -150,7 +150,7 @@ make package                # App ZIP and SHA-256 checksum in dist/
 ./scripts/package-macos.sh --universal  # Intel + Apple Silicon
 ```
 
-Local builds are ad-hoc signed, **not notarized**. The HEAD formula is published in `alienxp03/tap`; signing/notarization hooks and a cask template remain available for a future tagged binary release. See [Mac architecture and protocol](docs/native-app.md) and [packaging instructions](packaging/macos.md).
+Builds are ad-hoc signed, **not Apple-notarized**. Tagged releases create a draft with a universal Mac ZIP and a prebuilt Homebrew formula; publishing the release and updating the tap are manual. Until the first stable release, use the HEAD formula in `alienxp03/tap`. Prebuilt formula installs need neither Go nor Xcode. Browser downloads can still trigger Gatekeeper. See [Mac architecture and protocol](docs/native-app.md) and [packaging instructions](packaging/macos.md).
 
 ## Last Session
 

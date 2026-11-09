@@ -1,0 +1,83 @@
+name: Release macOS
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      APP_SIGN_IDENTITY: "-"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check release tag
+        shell: bash
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+          git merge-base --is-ancestor HEAD origin/master
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: |
+          brew install lua
+          make test
+          make test-macos
+          bash scripts/test-release.sh
+      - name: Package universal app
+        run: |
+          scripts/package-macos.sh --universal
+          dist/Raptor.app/Contents/MacOS/raptor-cli version
+          ruby scripts/release-formula.rb "$VERSION" dist > dist/raptor.rb
+          ruby -c dist/raptor.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: |
+            dist/Raptor-*.zip
+            dist/Raptor-*.zip.sha256
+            dist/raptor.rb
+          if-no-files-found: error
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-release
+          path: dist
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          cd dist
+          sha256sum --check Raptor-*.zip.sha256
+          if gh release view "$TAG" --json isDraft > release.json; then
+            jq -e '.isDraft' release.json > /dev/null
+          else
+            gh release create "$TAG" --verify-tag --draft --title "$TAG" \
+              --notes 'Universal macOS app (Intel and Apple Silicon). Ad-hoc signed, not Apple-notarized. Install with the Homebrew formula; browser downloads can be blocked by Gatekeeper. The raptor.rb asset is for the tap maintainer.'
+          fi
+          gh release upload "$TAG" Raptor-*.zip Raptor-*.zip.sha256 raptor.rb --clobber

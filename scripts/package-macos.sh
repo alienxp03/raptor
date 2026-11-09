@@ -69,5 +69,5 @@ mv -f "$work/$archive" "$DIST_DIR/$archive"
 mv -f "$work/$archive.sha256" "$DIST_DIR/$archive.sha256"
 printf 'ZIP: %s\nChecksum: %s\n' "$DIST_DIR/$archive" "$DIST_DIR/$archive.sha256"
 if [[ -z ${NOTARY_PROFILE:-} ]]; then
-  printf '%s\n' 'Not notarized. Local use only; Gatekeeper may block downloaded copies.'
+  printf '%s\n' 'Not Apple-notarized. Gatekeeper may block browser-downloaded copies.'
 fi
