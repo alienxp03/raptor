@@ -42,7 +42,7 @@ Local measurements from the launch command to a visible window were about 125–
 
 ## Shared logic
 
-The **Open in** control uses the shared target order: tab → session → cd here → pane right → pane below. Configured target lists are respected by both interfaces; cd/pane targets require an origin pane. Ctrl+O cycles the choices; Ctrl+Shift+O cycles backward. The dropdown also supports pointer selection. Tab / Shift+Tab moves keyboard focus, not the open target. Ctrl+P remains the pane-split shortcut.
+The **Open in** control uses the shared target order: session → tab → cd here → pane right → pane below. Configured target lists are respected by both interfaces; cd/pane targets require an origin pane. Ctrl+O cycles the choices; Ctrl+Shift+O cycles backward. The dropdown also supports pointer selection. Tab / Shift+Tab moves keyboard focus, not the open target. Ctrl+P remains the pane-split shortcut.
 
 Home-directory labels use `~/…`; tooltips and backend requests retain the full absolute paths. Paths outside the current home directory stay absolute.
 
@@ -61,7 +61,7 @@ The app starts the bundled `Contents/MacOS/raptor-cli` executable with the origi
 
 ```json
 {"id":1,"method":"directories","params":{"query":"demo"}}
-{"id":1,"result":{"items":[{"path":"/demo/project","label":"project"}],"targets":["tab","session","here","pane","pane_left","pane_above","pane_below"],"target":"tab"}}
+{"id":1,"result":{"items":[{"path":"/demo/project","label":"project"}],"targets":["session","tab","here","pane_right","pane_below"],"target":"tab"}}
 ```
 
 Errors have an `error` string instead of `result`. IDs identify requests; they do not identify directories or worktrees. Paths returned by Go identify selectable entries.

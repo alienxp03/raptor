@@ -33,7 +33,7 @@ History builds from observed visits, not inferred past activity. Up to 256 host/
 
 ## Open-target override
 
-Local directory rows can skip session creation: Ctrl+O cycles the open target (session → tab → split → here), and Enter dispatches with it, exactly like the old directory picker. Remote rows always launch sessions on their host.
+Local directory rows can skip session creation: Ctrl+O cycles the open target (session → tab → cd here → pane right → pane below), and Enter dispatches with it, exactly like the old directory picker. Remote rows always launch sessions on their host.
 
 ## Worktrees
 

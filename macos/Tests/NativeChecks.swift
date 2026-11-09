@@ -788,7 +788,7 @@ struct NativeChecks {
                 HostHeader(label: "Demo Host", local: false, reachable: true, error: nil),
                 HostHeader(label: "Down Host", local: false, reachable: false, error: "ssh: host down"),
             ],
-            targets: ["tab", "session"], target: "session")
+            targets: ["session", "tab", "here", "pane_right", "pane_below"], target: "session")
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "sessions", "--session", "S"])
         let backend = CachedListBackend()
         let model = PickerModel(options: options, backend: backend)
@@ -808,6 +808,10 @@ struct NativeChecks {
                      "Every configured host must be decoded, including unreachable ones")
         require(model.numberedPosition(of: model.items[3]) == 4, "Directory rows take real numbered positions")
         model.selectedID = "/tmp/plain"
+        model.cycleTarget(backward: false)
+        require(model.target == "tab", "Ctrl+O must choose Tab immediately after Session")
+        model.cycleTarget(backward: true)
+        require(model.target == "session", "Reverse cycling must restore Session")
         // A query re-ranks rows, but the backend always pins the origin
         // session first; the mac renders backend order as-is.
         model.query = "dot"

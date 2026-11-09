@@ -147,13 +147,13 @@ func TestDefaultTargetCycle(t *testing.T) {
 	}
 	for _, config := range []config.Config{cfg, {}} {
 		target := "tab"
-		for _, want := range []string{"session", "here", "pane_right", "pane_below", "tab"} {
+		for _, want := range []string{"here", "pane_right", "pane_below", "session", "tab"} {
 			target = dispatch.NextTarget(config, target, true)
 			if target != want {
 				t.Fatalf("next target = %q, want %q", target, want)
 			}
 		}
-		if dispatch.NextTarget(config, "tab", false) != "pane_below" {
+		if dispatch.NextTarget(config, "session", false) != "pane_below" {
 			t.Fatal("reverse cycling must wrap to pane below")
 		}
 	}

@@ -6,12 +6,12 @@ import (
 )
 
 func TestAvailableTargets(t *testing.T) {
-	all := []string{"tab", "session", "here", "pane_right", "pane_below"}
+	all := []string{"session", "tab", "here", "pane_right", "pane_below"}
 	for _, cfg := range []Config{Default(), {}} {
 		if got := cfg.AvailableTargets(true); !reflect.DeepEqual(got, all) {
 			t.Fatalf("shared target order: %v", got)
 		}
-		if got := cfg.AvailableTargets(false); !reflect.DeepEqual(got, []string{"tab", "session"}) {
+		if got := cfg.AvailableTargets(false); !reflect.DeepEqual(got, []string{"session", "tab"}) {
 			t.Fatalf("targets without origin pane: %v", got)
 		}
 	}

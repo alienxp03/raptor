@@ -14,18 +14,18 @@ import (
 
 func TestWorktreeFormTargetChoice(t *testing.T) {
 	m := &wtModel{cfg: config.Default(), ctx: rex.Ctx{Block: "origin"}, form: true, field: 2, target: "tab"}
-	for _, want := range []string{"session", "here", "pane_right", "pane_below", "tab"} {
+	for _, want := range []string{"here", "pane_right", "pane_below", "session", "tab"} {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRight})
 		if cmd != nil || m.busy || m.target != want || m.field != 2 {
 			t.Fatalf("target = %q, want %q; selection must not submit", m.target, want)
 		}
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	if m.target != "pane_below" {
+	if m.target != "session" {
 		t.Fatal("Left must cycle backwards")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if m.field != 3 || m.target != "pane_below" {
+	if m.field != 3 || m.target != "session" {
 		t.Fatal("Tab must focus Create without changing the target")
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -38,7 +38,7 @@ func TestWorktreeFormTargetChoice(t *testing.T) {
 	}
 	m.field = 0
 	m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	if m.target != "pane_below" {
+	if m.target != "session" {
 		t.Fatal("Arrows outside target field must not change the target")
 	}
 }

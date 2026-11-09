@@ -10,9 +10,9 @@ import (
 
 func TestCtrlOCyclesListTargets(t *testing.T) {
 	cfg := config.Default()
-	dirs := &dirModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, target: "tab"}
-	trees := &wtModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, target: "tab"}
-	for _, want := range []string{"session", "here", "pane_right", "pane_below", "tab"} {
+	dirs := &dirModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, target: "session"}
+	trees := &wtModel{cfg: cfg, ctx: rex.Ctx{Block: "origin"}, target: "session"}
+	for _, want := range []string{"tab", "here", "pane_right", "pane_below", "session"} {
 		_, dirCmd := dirs.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 		_, treeCmd := trees.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 		if dirs.target != want || trees.target != want || dirCmd != nil || treeCmd != nil {
@@ -25,11 +25,11 @@ func TestCtrlOTargetParity(t *testing.T) {
 	for _, cfg := range []config.Config{config.Default(), {Targets: []string{"tab", "pane_below", "session"}}} {
 		for _, block := range []string{"", "origin"} {
 			ctx := rex.Ctx{Block: block}
-			dirs := &dirModel{cfg: cfg, ctx: ctx, target: "tab"}
-			trees := &wtModel{cfg: cfg, ctx: ctx, target: "tab"}
-			form := &wtModel{cfg: cfg, ctx: ctx, form: true, target: "tab"}
 			// The API uses this same source for native target order.
 			targets := cfg.AvailableTargets(block != "")
+			dirs := &dirModel{cfg: cfg, ctx: ctx, target: targets[0]}
+			trees := &wtModel{cfg: cfg, ctx: ctx, target: targets[0]}
+			form := &wtModel{cfg: cfg, ctx: ctx, form: true, target: targets[0]}
 			for i := 1; i <= len(targets); i++ {
 				want := targets[i%len(targets)]
 				for _, model := range []tea.Model{dirs, trees, form} {
@@ -45,9 +45,9 @@ func TestCtrlOTargetParity(t *testing.T) {
 
 func TestCtrlOCyclesTargetFromAnyFormField(t *testing.T) {
 	for field := 0; field < 4; field++ {
-		m := &wtModel{cfg: config.Default(), ctx: rex.Ctx{Block: "origin"}, form: true, field: field, target: "tab", branch: "feat/test", base: "main"}
+		m := &wtModel{cfg: config.Default(), ctx: rex.Ctx{Block: "origin"}, form: true, field: field, target: "session", branch: "feat/test", base: "main"}
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
-		if m.target != "session" || m.field != field || m.branch != "feat/test" || m.base != "main" || m.busy || cmd != nil {
+		if m.target != "tab" || m.field != field || m.branch != "feat/test" || m.base != "main" || m.busy || cmd != nil {
 			t.Fatalf("field %d: Ctrl+O must change target only", field)
 		}
 	}
