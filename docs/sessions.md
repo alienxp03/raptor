@@ -27,7 +27,7 @@ Raptor records acknowledged session switches and the session from which you open
 
 Go validates the app PID and session/host membership before saving an observation. History is shared by the Mac and terminal interfaces on the same filesystem. Without the Mac observer, confirmed Raptor navigation still records visits.
 
-The rank snapshot stays fixed while the picker is open. Agent reports, title changes, and background work do not change recency. Search keeps fuzzy-match quality first, with recent-use order for ties; a matching current session stays first.
+The rank snapshot stays fixed while the picker is open. Agent reports, title changes, and background work do not change recency. Search prefers exact folder names and session labels, then fuzzy-match quality, with recent-use order for ties. A leading dot does not prevent an exact folder match: `pi` finds `.pi` before scattered path matches. A matching current session stays first.
 
 History builds from observed visits, not inferred past activity. Up to 256 host/session timestamps persist in `$XDG_CACHE_HOME/raptor/session-recency.json`, or `~/Library/Caches/raptor/session-recency.json` by default. The file is private and atomically updated. Missing focus preferences do not clear history.
 

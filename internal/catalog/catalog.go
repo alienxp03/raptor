@@ -278,31 +278,7 @@ func LauncherItems(groups []rex.HostGroup, hostOrder []string, hostDirs map[stri
 	if query == "" {
 		return rows
 	}
-	texts := make([]string, len(rows))
-	for i, row := range rows {
-		path := row.Path
-		if row.Kind == "session" {
-			path = ""
-		}
-		texts[i] = row.Label + " " + paths.HomeRelative(path) + " " + row.Host
-	}
-	// Unsorted fuzzy matches ranked sesh's way: the library docks one point
-	// per unmatched character with no floor, letting a long name lose to a
-	// short one; capping the penalty keeps length as a tiebreaker only.
-	matches := fuzzy.FindFromNoSort(query, launcherTexts(texts))
-	scored := make([]fuzzy.Match, len(matches))
-	scores := make([]int, len(matches))
-	for i, match := range matches {
-		penalty := len(match.MatchedIndexes) - len(match.Str)
-		scored[i] = match
-		scores[i] = match.Score - penalty + max(penalty, -5)
-	}
-	for i := 1; i < len(scored); i++ {
-		for j := i; j > 0 && scores[j] > scores[j-1]; j-- {
-			scored[j], scored[j-1] = scored[j-1], scored[j]
-			scores[j], scores[j-1] = scores[j-1], scores[j]
-		}
-	}
+	scored := rankLauncherItems(rows, query)
 	ranked := make([]LauncherItem, 0, len(scored))
 	for _, match := range scored {
 		ranked = append(ranked, rows[match.Index])
@@ -311,34 +287,13 @@ func LauncherItems(groups []rex.HostGroup, hostOrder []string, hostDirs map[stri
 }
 
 // FilterLauncherItems applies the query to a cached (unfiltered) launcher
-// composition: everything when the query is empty, best fuzzy match first
-// otherwise.
+// composition: everything when the query is empty, exact names then fuzzy
+// quality otherwise.
 func FilterLauncherItems(items []LauncherItem, query, originSession string) []LauncherItem {
 	if query == "" {
 		return items
 	}
-	texts := make([]string, len(items))
-	for i, item := range items {
-		path := item.Path
-		if item.Kind == "session" {
-			path = ""
-		}
-		texts[i] = item.Label + " " + paths.HomeRelative(path) + " " + item.Host
-	}
-	matches := fuzzy.FindFromNoSort(query, launcherTexts(texts))
-	scored := make([]fuzzy.Match, len(matches))
-	scores := make([]int, len(matches))
-	for i, match := range matches {
-		penalty := len(match.MatchedIndexes) - len(match.Str)
-		scored[i] = match
-		scores[i] = match.Score - penalty + max(penalty, -5)
-	}
-	for i := 1; i < len(scored); i++ {
-		for j := i; j > 0 && scores[j] > scores[j-1]; j-- {
-			scored[j], scored[j-1] = scored[j-1], scored[j]
-			scores[j], scores[j-1] = scores[j-1], scores[j]
-		}
-	}
+	scored := rankLauncherItems(items, query)
 	ranked := make([]LauncherItem, 0, len(scored))
 	for _, match := range scored {
 		ranked = append(ranked, items[match.Index])

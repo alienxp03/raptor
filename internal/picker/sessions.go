@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 
 	"github.com/alienxp03/raptor/internal/catalog"
 	"github.com/alienxp03/raptor/internal/config"
@@ -163,24 +162,15 @@ func (m *dirModel) filterLauncher() {
 			m.launcherView[i] = launcherMatch{index: i}
 		}
 	} else {
-		// Unsorted fuzzy matches, ranked sesh's way: the library docks one
-		// point per unmatched character with no floor, which lets a long name
-		// lose to a short one. Capping the penalty keeps length as a
-		// tiebreaker without outweighing where the match landed.
-		matches := fuzzy.FindFromNoSort(m.filter, launcherSource(texts))
-		ranked := make([]fuzzy.Match, len(matches))
-		scored := make([]int, len(matches))
-		for i, match := range matches {
-			penalty := len(match.MatchedIndexes) - len(match.Str)
-			ranked[i] = match
-			scored[i] = match.Score - penalty + max(penalty, -5)
-		}
-		for i := 1; i < len(ranked); i++ {
-			for j := i; j > 0 && scored[j] > scored[j-1]; j-- {
-				ranked[j], ranked[j-1] = ranked[j-1], ranked[j]
-				scored[j], scored[j-1] = scored[j-1], scored[j]
+		names := make([]string, len(rows))
+		for i, row := range rows {
+			if row.session != nil {
+				names[i] = catalog.LauncherMatchName(row.session.Label, "")
+			} else if row.dir != nil {
+				names[i] = catalog.LauncherMatchName(row.dir.Label, row.dir.Path)
 			}
 		}
+		ranked := catalog.RankLauncherMatches(m.filter, texts, names)
 		m.launcherView = make([]launcherMatch, 0, len(ranked))
 		for _, match := range ranked {
 			m.launcherView = append(m.launcherView, launcherMatch{index: match.Index, matches: match.MatchedIndexes})
@@ -206,12 +196,6 @@ func (m *dirModel) filterLauncher() {
 		m.sel = 0
 	}
 }
-
-// launcherSource adapts row texts to fuzzy.Source.
-type launcherSource []string
-
-func (l launcherSource) String(i int) string { return l[i] }
-func (l launcherSource) Len() int            { return len(l) }
 
 func launcherTexts(rows []launcherRow) []string {
 	texts := make([]string, len(rows))
