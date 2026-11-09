@@ -2,7 +2,7 @@ package rex
 
 import (
 	"encoding/json"
-	"fmt"
+	"os"
 	"strings"
 	"sync"
 )
@@ -57,63 +57,110 @@ func LocalHostLabelOr(host string) string {
 	return host
 }
 
-// ClientLabel resolves the calling client's label on its own server. The label
-// is the stable identity across hosts: the same app registers with the same
-// label on every server it joins.
+// ClientLabel returns a unique app label on the local server. A label is only
+// a cross-host routing hint, not device identity. Refuse ambiguous origins.
 func ClientLabel(clientID string) string {
-	var payload string
-	if clientID != "" {
-		payload = fmt.Sprintf(`{"client_id":%q}`, clientID)
+	if !strings.HasPrefix(clientID, "client:") {
+		clientID = resolveHostTarget("", "client", clientID)
 	}
-	out, err := Run("api", "call", "client.inspect", payload)
-	if err != nil {
+	if clientID == "" {
 		return ""
 	}
-	var data struct {
-		Client struct {
-			ClientID string `json:"client_id"`
-			Info     struct {
-				Kind     string `json:"kind"`
-				Platform string `json:"platform"`
-				Label    string `json:"label"`
-			} `json:"info"`
-		} `json:"client"`
+	clients := appClientsOn("")
+	for _, client := range clients {
+		if client.ClientID == clientID && client.ConnectionState != "lost" {
+			label := strings.TrimSpace(client.Info.Label)
+			if label != "" && uniqueAppClient(clients, label) == clientID {
+				return label
+			}
+			return ""
+		}
 	}
-	if json.Unmarshal([]byte(out), &data) != nil {
-		return ""
-	}
-	if data.Client.ClientID != "" && clientID != "" && data.Client.ClientID != clientID {
-		return ""
-	}
-	return strings.TrimSpace(data.Client.Info.Label)
+	return ""
 }
 
-// appClientOn finds the Mac app's client id on one host. Clients match by
-// label, which rex guarantees unique per principal on each server.
+// appClientOn returns a full ID only for one app with this exact label on the
+// target host. Never reuse a local client ID or choose the first duplicate.
 func appClientOn(host, label string) string {
+	label = strings.TrimSpace(label)
 	if label == "" {
 		return ""
 	}
-	out, err := RunOn(host, "api", "call", "client.list")
+	return uniqueAppClient(appClientsOn(host), label)
+}
+
+type hostAppClient struct {
+	ClientID        string `json:"client_id"`
+	ConnectionState string `json:"connection_state"`
+	Info            struct {
+		Kind  string `json:"kind"`
+		Label string `json:"label"`
+	} `json:"info"`
+}
+
+func appClientsOn(host string) []hostAppClient {
+	out, err := RunOn(host, "api", "call", "client.list", `{"kinds":["app"]}`)
+	if err != nil {
+		return nil
+	}
+	var data struct {
+		Clients []hostAppClient `json:"clients"`
+	}
+	if json.Unmarshal([]byte(out), &data) != nil {
+		return nil
+	}
+	return data.Clients
+}
+
+func uniqueAppClient(clients []hostAppClient, label string) string {
+	var id string
+	for _, client := range clients {
+		if client.Info.Kind != "app" || strings.TrimSpace(client.Info.Label) != label {
+			continue
+		}
+		// A lost duplicate may reconnect. It still makes this label unsafe.
+		if id != "" || !strings.HasPrefix(client.ClientID, "client:") || client.ConnectionState == "lost" {
+			return ""
+		}
+		id = client.ClientID
+	}
+	return id
+}
+
+// resolveHostTarget uses the named server's ambiguity rules, without inherited
+// local session/client context. Unknown statuses and malformed replies fail shut.
+func resolveHostTarget(host, kind, query string) string {
+	payload, err := json.Marshal(map[string]any{"kinds": []string{kind}, "queries": []string{query}})
+	if err != nil {
+		return ""
+	}
+	out, err := RunOn(host, "api", "call", "target.resolve", string(payload))
 	if err != nil {
 		return ""
 	}
 	var data struct {
-		Clients []struct {
-			ClientID string `json:"client_id"`
-			Info     struct {
-				Kind  string `json:"kind"`
-				Label string `json:"label"`
-			} `json:"info"`
-		} `json:"clients"`
+		Results []struct {
+			Query  string `json:"query"`
+			Status string `json:"status"`
+			Target struct {
+				Kind      string `json:"kind"`
+				ClientID  string `json:"client_id"`
+				SessionID string `json:"session_id"`
+			} `json:"target"`
+		} `json:"results"`
 	}
-	if json.Unmarshal([]byte(out), &data) != nil {
+	if json.Unmarshal([]byte(out), &data) != nil || len(data.Results) != 1 {
 		return ""
 	}
-	for _, client := range data.Clients {
-		if client.Info.Kind == "app" && strings.TrimSpace(client.Info.Label) == label {
-			return client.ClientID
-		}
+	result := data.Results[0]
+	if result.Query != query || result.Status != "resolved" || result.Target.Kind != kind {
+		return ""
+	}
+	if kind == "client" && strings.HasPrefix(result.Target.ClientID, "client:") {
+		return result.Target.ClientID
+	}
+	if kind == "session" && strings.HasPrefix(result.Target.SessionID, "session:") {
+		return result.Target.SessionID
 	}
 	return ""
 }
@@ -123,29 +170,26 @@ var (
 	localHostnameName string
 )
 
-// LocalHostname resolves the display name of this machine: Rex's local node
-// name when it can answer, else the macOS LocalHostName, else the generic
+// LocalHostname resolves a display name, not server identity: Rex's Tailscale
+// DNS label when available, else the OS hostname, else the generic
 // label. Cached for the process lifetime — badges render it on every row.
 func LocalHostname() string {
 	localHostnameOnce.Do(func() {
 		if out, err := RunOnBounded("", 2, "api", "call", "server.status"); err == nil {
 			var data struct {
-				Hostname  string `json:"hostname"`
 				Tailscale struct {
 					DNSName string `json:"dns_name"`
 				} `json:"tailscale"`
 			}
 			if json.Unmarshal([]byte(out), &data) == nil {
-				if name := strings.TrimSpace(data.Hostname); name != "" {
-					localHostnameName = name
-				} else if label := strings.SplitN(data.Tailscale.DNSName, ".", 2)[0]; label != "" {
+				if label := strings.SplitN(strings.TrimSpace(data.Tailscale.DNSName), ".", 2)[0]; label != "" {
 					localHostnameName = label
 				}
 			}
 		}
 		if localHostnameName == "" {
-			if out, err := RunOnBounded("", 2, "config", "get", "hostname"); err == nil && strings.TrimSpace(out) != "" {
-				localHostnameName = strings.TrimSpace(out)
+			if name, err := os.Hostname(); err == nil {
+				localHostnameName = strings.TrimSpace(name)
 			}
 		}
 		if localHostnameName == "" {
@@ -164,14 +208,25 @@ func IsLocalHost(host string) bool {
 	return strings.EqualFold(host, LocalHostname())
 }
 
-// SameSession reports whether a session id matches an origin reference: rex
-// accepts full ids ("session:01a1...4dad8e") and the short suffix users see
-// ("4dad8e"), so origin flags compare with a suffix match.
+// SameSession compares a local session ID with an origin reference. Non-exact
+// references must resolve uniquely on the local server, never by suffix alone.
 func SameSession(full, origin string) bool {
-	if origin == "" || full == "" {
+	return SameSessionOn("", full, origin)
+}
+
+// SameSessionOn resolves references only on host. Callers must supply IDs from
+// that host; inherited local origin IDs must not be used for remote sessions.
+func SameSessionOn(host, full, origin string) bool {
+	if strings.TrimSpace(origin) == "" || full == "" {
 		return false
 	}
-	return full == origin || strings.HasSuffix(full, origin)
+	if full == origin {
+		return true
+	}
+	if strings.HasPrefix(origin, "session:") {
+		return false
+	}
+	return full == resolveHostTarget(host, "session", origin)
 }
 
 // NormalizeHost collapses a local display name to the empty host so actions

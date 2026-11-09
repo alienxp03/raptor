@@ -34,8 +34,8 @@ case "$*" in
   '-S hades --timeout 3s ls --json') echo '{"sessions":[{"session_id":"r1","label":"wispy-brook"}]}' ;;
   '-S hades --timeout 4s do'*) echo '{"sessions":[]}' ;;
   'do'*) echo '{"sessions":[]}' ;;
-  'api call client.inspect '*) echo '{"client":{"client_id":"client","info":{"kind":"app","label":"azuanz"}}}' ;;
-  '-S hades api call client.list') echo '{"clients":[{"client_id":"remote-app","info":{"kind":"app","label":"azuanz"}}]}' ;;
+  'api call client.list {"kinds":["app"]}') echo '{"clients":[{"client_id":"client:local","info":{"kind":"app","label":"azuanz"}}]}' ;;
+  '-S hades api call client.list {"kinds":["app"]}') echo '{"clients":[{"client_id":"client:remote-app","info":{"kind":"app","label":"azuanz"}}]}' ;;
   'capture -s '* | '-S hades --timeout 2s capture'*) echo 'screen line one' ;;
 esac
 `
@@ -227,7 +227,7 @@ func TestLauncherEnterSessionJumpsCrossHost(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	log := pickerRexLogSessions(t, `{"sessions":[]}`, "")
 	m := launcherModel()
-	m.ctx = rex.Ctx{Client: "client"}
+	m.ctx = rex.Ctx{Client: "client:local"}
 	m.sessions = []rex.HostGroup{
 		{Label: rex.LocalHostLabel, Local: true, Reachable: true, Entries: []rex.SessionEntry{entry("s1", "work", rex.LocalHostLabel, false)}},
 		{Label: "hades", Reachable: true, Entries: []rex.SessionEntry{entry("r1", "wispy-brook", "hades", false)}},
@@ -242,13 +242,13 @@ func TestLauncherEnterSessionJumpsCrossHost(t *testing.T) {
 	if m.jumpSession == nil || m.jumpSession.Host != "hades" {
 		t.Fatalf("remote session Enter must request a jump: %+v", m.jumpSession)
 	}
-	if code, done := finishSessionsResult(rex.Ctx{Client: "client"}, m); !done || code != 0 {
+	if code, done := finishSessionsResult(rex.Ctx{Client: "client:local"}, m); !done || code != 0 {
 		t.Fatalf("finish must jump cleanly: code=%d done=%v", code, done)
 	}
 	got, err := os.ReadFile(log)
-	want := "api call client.inspect {\"client_id\":\"client\"}\n" +
-		"-S hades api call client.list\n" +
-		"-S hades -C remote-app do session.select session_id=r1\n"
+	want := "api call client.list {\"kinds\":[\"app\"]}\n" +
+		"-S hades api call client.list {\"kinds\":[\"app\"]}\n" +
+		"-S hades -C client:remote-app do session.select session_id=r1\n"
 	if err != nil || !strings.Contains(string(got), want) {
 		t.Fatalf("jump calls = %q, want substring %q", got, want)
 	}

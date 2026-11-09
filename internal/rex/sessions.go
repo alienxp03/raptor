@@ -381,7 +381,7 @@ func hostGroup(host Host, originSession string, localAgents []AgentEntry) HostGr
 			agents <- activity{err: err}
 			return
 		}
-		decoded, decodeErr := decodeAgentEntries([]byte(out), "", time.Now())
+		decoded, decodeErr := decodeAgentEntriesWithNames([]byte(out), "", time.Now(), host.Local)
 		agents <- activity{agents: decoded, err: decodeErr}
 	}()
 	listed := <-ls

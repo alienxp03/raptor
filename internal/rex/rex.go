@@ -3,6 +3,7 @@ package rex
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,9 +142,7 @@ func BlockPwd(blockID string) string {
 	if err != nil {
 		return ""
 	}
-	pwd := strings.TrimSpace(out)
-	pwd = strings.TrimPrefix(pwd, "file://")
-	return pwd
+	return reportedDirectory(strings.TrimSpace(out))
 }
 
 // blockCwd returns the cwd of a block's foreground process (works even when
@@ -175,7 +174,20 @@ func BlockCwdInSession(sessionID, blockID string) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimPrefix(strings.TrimSpace(out), "file://")
+	return reportedDirectory(strings.TrimSpace(out))
+}
+
+// reportedDirectory decodes the file URL returned by Rex's pwd method (OSC 7).
+// URL authorities are metadata, not a path prefix. Plain paths stay unchanged.
+func reportedDirectory(value string) string {
+	if !strings.HasPrefix(value, "file:") {
+		return value
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Scheme != "file" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !filepath.IsAbs(u.Path) {
+		return ""
+	}
+	return u.Path
 }
 
 // blockForeground returns the foreground process name of a block.

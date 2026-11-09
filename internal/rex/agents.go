@@ -90,10 +90,7 @@ type agentBlock struct {
 	Title   string        `json:"title"`
 	Records []agentRecord `json:"records"`
 	Process *struct {
-		LastExit   json.RawMessage `json:"last_exit"`
-		Foreground *agentProcess   `json:"foreground"`
-		Child      *agentProcess   `json:"child"`
-		Ancestors  []agentProcess  `json:"ancestors"`
+		Foreground *agentProcess `json:"foreground"`
 	} `json:"process"`
 }
 
@@ -108,6 +105,10 @@ func AgentEntries(originSession string) ([]AgentEntry, error) {
 }
 
 func decodeAgentEntries(data []byte, origin string, now time.Time) ([]AgentEntry, error) {
+	return decodeAgentEntriesWithNames(data, origin, now, true)
+}
+
+func decodeAgentEntriesWithNames(data []byte, origin string, now time.Time, localNames bool) ([]AgentEntry, error) {
 	var snapshot struct {
 		Sessions []struct {
 			SessionID      string `json:"session_id"`
@@ -146,7 +147,9 @@ func decodeAgentEntries(data []byte, origin string, now time.Time) ([]AgentEntry
 					if app == "" {
 						app = normalizeAgentApp(r.App)
 					}
-					if app == "" || !liveAgentRecord(b, r) {
+					// Rex owns record lifetime and emits program_status_removed.
+					// A process snapshot must not override its native status records.
+					if app == "" {
 						continue
 					}
 					state := r.State
@@ -158,7 +161,9 @@ func decodeAgentEntries(data []byte, origin string, now time.Time) ([]AgentEntry
 						state = "idle"
 					}
 					label := strings.TrimSpace(r.Title)
-					if app == "pi" && r.Owner != nil {
+					// Rex's native record title is authoritative. The optional Pi
+					// name bridge only fills names that the program did not report.
+					if label == "" && localNames && app == "pi" && r.Owner != nil {
 						if name := piAgentName(r.Owner.PID, b.BlockID, s.SessionID, now); name != "" {
 							label = name
 						}
@@ -198,34 +203,6 @@ func normalizeAgentApp(app string) string {
 		return "claude"
 	}
 	return ""
-}
-
-func liveAgentRecord(b agentBlock, r agentRecord) bool {
-	if b.Process == nil {
-		return true
-	}
-	p := b.Process
-	if len(p.LastExit) > 0 && string(p.LastExit) != "null" {
-		return false
-	}
-	if r.Owner == nil || p.Foreground == nil {
-		return true
-	}
-	if p.Foreground.PID == r.Owner.PID {
-		return p.Foreground.Name == r.Owner.Name
-	}
-	if p.Child != nil && p.Child.PID == r.Owner.PID {
-		return p.Child.Name == r.Owner.Name
-	}
-	for _, a := range p.Ancestors {
-		if a.PID == r.Owner.PID {
-			return a.Name == r.Owner.Name
-		}
-	}
-	// A complete foreground-to-child chain proves that the old foreground
-	// owner is no longer there. Missing ancestors are not proof of exit.
-	complete := p.Child != nil && (p.Child.PID == p.Foreground.PID || (len(p.Ancestors) > 0 && p.Ancestors[len(p.Ancestors)-1].PID == p.Child.PID))
-	return !complete
 }
 
 func piAgentName(pid int, block, session string, now time.Time) string {

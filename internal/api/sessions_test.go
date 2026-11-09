@@ -174,24 +174,24 @@ func TestSessionsJumpOnHostSelectsThroughRemoteAppClient(t *testing.T) {
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$REX_TEST_LOG"
 case "$*" in
-  'api call client.inspect '*)
-    echo '{"client":{"client_id":"client","info":{"kind":"app","label":"azuanz"}}}' ;;
-  '-S hades api call client.list')
-    echo '{"clients":[{"client_id":"remote-cli","info":{"kind":"cli","label":"other"}},{"client_id":"remote-app","info":{"kind":"app","label":"azuanz"}}]}' ;;
+  'api call client.list {"kinds":["app"]}')
+    echo '{"clients":[{"client_id":"client:local","info":{"kind":"app","label":"azuanz"}}]}' ;;
+  '-S hades api call client.list {"kinds":["app"]}')
+    echo '{"clients":[{"client_id":"client:remote-cli","info":{"kind":"cli","label":"other"}},{"client_id":"client:remote-app","info":{"kind":"app","label":"azuanz"}}]}' ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h := New(rex.Ctx{Client: "client"}, config.Default())
+	h := New(rex.Ctx{Client: "client:local"}, config.Default())
 	params := `{"kind":"session","session_id":"r1","host":"hades"}`
 	if _, err := h.call("sessions.jump", json.RawMessage(params)); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(log)
-	want := "api call client.inspect {\"client_id\":\"client\"}\n" +
-		"-S hades api call client.list\n" +
-		"-S hades -C remote-app do session.select session_id=r1\n"
+	want := "api call client.list {\"kinds\":[\"app\"]}\n" +
+		"-S hades api call client.list {\"kinds\":[\"app\"]}\n" +
+		"-S hades -C client:remote-app do session.select session_id=r1\n"
 	if err != nil || string(got) != want {
 		t.Fatalf("calls = %q, want %q; error = %v", got, want, err)
 	}
@@ -248,16 +248,16 @@ case "$*" in
   '-S hades --timeout 3s ls --json') echo '{"sessions":[]}' ;;
   '-S hades new --json -c /home/azuan/workspace/hnhiring hnhiring')
     echo '{"session_id":"remote-1"}' ;;
-  '-S hades api call client.list')
-    echo '{"clients":[{"client_id":"remote-app","info":{"kind":"app","label":"azuanz"}}]}' ;;
-  'api call client.inspect '*)
-    echo '{"client":{"client_id":"client","info":{"kind":"app","label":"azuanz"}}}' ;;
+  '-S hades api call client.list {"kinds":["app"]}')
+    echo '{"clients":[{"client_id":"client:remote-app","info":{"kind":"app","label":"azuanz"}}]}' ;;
+  'api call client.list {"kinds":["app"]}')
+    echo '{"clients":[{"client_id":"client:local","info":{"kind":"app","label":"azuanz"}}]}' ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(dir, "rex"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h := New(rex.Ctx{Client: "client"}, config.Default())
+	h := New(rex.Ctx{Client: "client:local"}, config.Default())
 	params := `{"host":"hades","dir":"/home/azuan/workspace/hnhiring"}`
 	if _, err := h.call("sessions.create", json.RawMessage(params)); err != nil {
 		t.Fatal(err)
@@ -265,9 +265,9 @@ esac
 	got, err := os.ReadFile(log)
 	want := "-S hades ls --json\n" +
 		"-S hades new --json -c /home/azuan/workspace/hnhiring hnhiring\n" +
-		"api call client.inspect {\"client_id\":\"client\"}\n" +
-		"-S hades api call client.list\n" +
-		"-S hades -C remote-app do session.select session_id=remote-1\n"
+		"api call client.list {\"kinds\":[\"app\"]}\n" +
+		"-S hades api call client.list {\"kinds\":[\"app\"]}\n" +
+		"-S hades -C client:remote-app do session.select session_id=remote-1\n"
 	if err != nil || string(got) != want {
 		t.Fatalf("calls = %q, want %q; error = %v", got, want, err)
 	}

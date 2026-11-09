@@ -7,6 +7,24 @@ import (
 	"testing"
 )
 
+func TestReportedDirectory(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"/workspace/plain path", "/workspace/plain path"},
+		{"file:///workspace/my%20project", "/workspace/my project"},
+		{"file://macbook.local/workspace/my%23project", "/workspace/my#project"},
+		{"file:///workspace/a+b", "/workspace/a+b"},
+		{"file:///workspace/%ZZ", ""},
+		{"file:relative", ""},
+		{"file://macbook.local", ""},
+		{"file:///workspace?query=yes", ""},
+		{"file:///workspace#fragment", ""},
+	} {
+		if got := reportedDirectory(tc.input); got != tc.want {
+			t.Fatalf("reportedDirectory(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestBlockCwdUsesExplicitSession(t *testing.T) {
 	t.Setenv("REX_SESSION", "unrelated-session")
 	dir := t.TempDir()

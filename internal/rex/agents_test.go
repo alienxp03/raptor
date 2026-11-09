@@ -114,28 +114,43 @@ func TestPiAgentNameValidation(t *testing.T) {
 	if err != nil || len(entries) != 3 || entries[0].Label != "Named task" || entries[1].Label != "terminal" || entries[2].Label != "terminal" {
 		t.Fatalf("entries=%+v err=%v", entries, err)
 	}
+	remote, err := decodeAgentEntriesWithNames([]byte(snapshot), "", now, false)
+	if err != nil || len(remote) != 3 || remote[0].Label != "terminal" {
+		t.Fatalf("remote PID used local metadata: %+v (%v)", remote, err)
+	}
 }
 
-func TestAgentStaleOwner(t *testing.T) {
-	for _, tt := range []struct {
-		process string
-		live    bool
-	}{
-		{`null`, true},
-		{`{"last_exit":{"exit_code":0}}`, false},
-		{`{"foreground":{"pid":42,"name":"node"}}`, true},
-		{`{"foreground":{"pid":42,"name":"zsh"}}`, false},
-		{`{"foreground":{"pid":7,"name":"zsh"},"child":{"pid":7,"name":"zsh"}}`, false},
-		{`{"foreground":{"pid":7,"name":"tool"},"child":{"pid":1,"name":"login"},"ancestors":[{"pid":42,"name":"node"},{"pid":1,"name":"login"}]}`, true},
-		{`{"foreground":{"pid":7,"name":"tool"},"child":{"pid":1,"name":"login"}}`, true},
-	} {
-		var b agentBlock
-		if err := json.Unmarshal([]byte(`{"process":`+tt.process+`}`), &b); err != nil {
-			t.Fatal(err)
+func TestNativeAgentTitleOverridesPiNameBridge(t *testing.T) {
+	now := time.Now().UTC()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := filepath.Join(paths.CacheDir(), "agents")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	metadata := `{"pid":42,"app":"pi","name":"Bridge name","block_id":"b","session_id":"s","updated_at":"` + now.Format(time.RFC3339Nano) + `"}`
+	if err := os.WriteFile(filepath.Join(dir, "pi-42.json"), []byte(metadata), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := `{"sessions":[{"session_id":"s","windows":[{"window_id":"w","blocks":[{"block_id":"b","records":[{"app":"pi","title":"Native title","owner":{"pid":42},"state":"idle"}]}]}]}]}`
+	entries, err := decodeAgentEntries([]byte(snapshot), "s", now)
+	if err != nil || len(entries) != 1 || entries[0].Label != "Native title" {
+		t.Fatalf("native title was replaced: %+v (%v)", entries, err)
+	}
+}
+
+func TestNativeAgentLifetimeIsAuthoritative(t *testing.T) {
+	// Process and status snapshots can race. Keep the records returned by Rex;
+	// only a native removal or an absent record ends their lifetime.
+	for _, process := range []string{`null`, `{"last_exit":{"exit_code":0}}`, `{"foreground":{"pid":7,"name":"zsh"}}`} {
+		snapshot := `{"sessions":[{"session_id":"s","windows":[{"window_id":"w","blocks":[{"block_id":"b","process":` + process + `,"records":[{"app":"pi","owner":{"pid":42,"name":"node"},"state":"working"}]}]}]}]}`
+		entries, err := decodeAgentEntries([]byte(snapshot), "s", time.Now())
+		if err != nil || len(entries) != 1 || entries[0].State != "working" {
+			t.Fatalf("native status was suppressed: %+v (%v)", entries, err)
 		}
-		if got := liveAgentRecord(b, agentRecord{Owner: &agentProcess{PID: 42, Name: "node"}}); got != tt.live {
-			t.Fatalf("process=%s live=%v", tt.process, got)
-		}
+	}
+	entries, err := decodeAgentEntries([]byte(`{"sessions":[]}`), "s", time.Now())
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("removed native record survived: %+v (%v)", entries, err)
 	}
 }
 
