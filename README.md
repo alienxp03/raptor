@@ -1,27 +1,23 @@
 # Raptor
 
-Raptor is a directory and Git worktree picker for [Rex](https://www.superlogical.com/rex/docs). It uses a native SwiftUI picker on Mac and Bubble Tea on mobile. Both interfaces use the same Go search, worktree, and Rex action logic.
+Raptor is a project and session launcher for [Rex](https://www.superlogical.com/rex/docs). It uses a native SwiftUI picker on Mac and Bubble Tea on mobile. Both interfaces use the same Go search, worktree creation, and Rex action logic.
 
-Pick a saved directory or worktree, then open it in a tab, session, pane, or the current shell.
+Pick a session to resume, or a directory to open in a session, tab, pane, or the current shell.
 
 ## Screenshots
 
-The screenshots show the native macOS UI over an illustrative Rex workspace. All project names, paths, and terminal output are synthetic.
+The screenshots show native macOS views with synthetic data. All project names, paths, and terminal output are synthetic.
 
 <table>
   <tr>
     <td><img width="100%" src="docs/screenshots/directories.png" alt="Native directory picker with saved paths and open targets"></td>
-    <td><img width="100%" src="docs/screenshots/worktrees.png" alt="Native worktree picker with branches, paths, and safe removal"></td>
-  </tr>
-  <tr>
-    <td><img width="100%" src="docs/screenshots/split-mode.png" alt="Native split mode with keyboard direction hints"></td>
+
     <td><img width="100%" src="docs/screenshots/create-worktree.png" alt="Native Create form with branch, base, destination preview, and open target"></td>
   </tr>
 </table>
 
-- **Sessions:** One sesh-style launcher — live sessions and frecency directories from every host in a single list. Enter switches or creates; Ctrl+O overrides the open target; wide terminals preview the selected session live. See [Sessions](docs/sessions.md).
-- **Agents:** Find Pi, Codex, and Claude agents grouped by Blocked, Working, and Idle, then focus their pane. Working indicators animate across Repos and Agents. See [Agents](docs/agents.md).
-- **Worktrees:** Browse local branches and paths; safe removal keeps the branch.
+- **Sessions:** One sesh-style launcher — live sessions and frecency directories from every host in a single list. The default selection is the most-recent non-current session; the current session stays identifiable and available. Enter switches or creates; Ctrl+O overrides the open target; wide terminals preview the selected session live. See [Sessions](docs/sessions.md).
+- **Activity:** Compact session indicators show reported working/blocked status.
 - **Pane splits:** Press Ctrl+P, then H/J/K/L or arrows. Escape cancels.
 - **Create:** Search local base branches, preview the path, then create and open in one action.
 
@@ -63,7 +59,6 @@ For a fresh Rex setup, append the packaged module to the Lua search path:
 package.path = package.path .. ";/opt/homebrew/opt/raptor/share/?/init.lua"
 require("raptor").setup{}
 rex.bind("shift+cmd+o", "raptor")
-rex.bind("shift+cmd+t", "raptor_worktree_list")
 rex.bind("ctrl+n", "raptor_worktree_new")
 ```
 
@@ -91,11 +86,10 @@ Add setup and your own key bindings to `~/.config/rex/init.lua`:
 ```lua
 require("raptor").setup{}
 rex.bind("shift+cmd+o", "raptor")
-rex.bind("shift+cmd+t", "raptor_worktree_list")
 rex.bind("ctrl+n", "raptor_worktree_new")
 ```
 
-These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_worktree_list`, `raptor_worktree_new`, and `raptor_session_last` to the Rex command palette. Reload the Rex config after you change it.
+These are example bindings. Change them to keys that work for you. Raptor also adds `raptor`, `raptor_worktree_new`, `raptor_pr_open`, and `raptor_session_last` to the Rex command palette. Reload the Rex config after you change it.
 
 The plugin uses the native app for local macOS clients and the terminal picker for iPhone/iPad or remote Mac clients. The Mac picker opens centered over the terminal window that invoked it (near its top, like a command palette) and stays warm while hidden. Escape dismisses it. The installed resident host keeps the Go backend warm across navigation; reopening supplies fresh Rex context. An event-driven Mac focus observer records recent session use, including Rex sidebar switches. See [session ordering](docs/sessions.md#recent-use-order). If the app is missing or its launch command fails, it uses the terminal picker. Force the terminal UI with `require("raptor").setup{ ui = "terminal" }`. Set `ui = "gui"` to force the server’s Mac app, including from CLI or iOS; a missing app or failed launch reports an error instead of falling back.
 
@@ -130,7 +124,7 @@ after Pi exits or fails, so startup errors remain visible.
 separate from the normal terminal picker and native Mac UI. Search a directory,
 press Enter to choose an action, then Enter again to run it. Escape returns to
 the path list without losing the search or selection. Actions respect configured
-`targets`; Git repositories also offer New Worktree and Browse Worktrees.
+`targets`; Git repositories also offer New Worktree.
 Existing direct-open and worktree shortcuts are unchanged.
 
 For iOS onscreen modifiers, use a function binding:
@@ -165,11 +159,6 @@ rex.bind("ctrl+p", "raptor_session_last")
 validates the host, and skips deleted sessions. The legacy single session ID is
 used only as a fallback.
 
-Canonical names use resource + action, except `raptor`, which remains the default
-launcher. Old action names are no longer registered. Update existing bindings:
-`raptor_wt` → `raptor_worktree_list`, `raptor_create` → `raptor_worktree_new`,
-and `raptor_last_session` / `raptor_last` → `raptor_session_last`.
-
 ## Directory picker
 
 Use the `raptor` Rex action for the platform-appropriate UI. `raptor dirs` always opens the terminal picker. Both show live sessions and frequent directories. The current session comes first, then other sessions in recent-use order. Directory order remains based on frecency and pins.
@@ -178,39 +167,25 @@ Use the `raptor` Rex action for the platform-appropriate UI. `raptor dirs` alway
 | --- | --- |
 | Type | Filter saved directory paths |
 | ↑ / ↓, Ctrl+J / Ctrl+K | Move through results |
-| Ctrl+O; Tab / Shift+Tab also work in terminal lists | Change the open target |
+| Ctrl+O | Change the open target |
 | Enter | Open the selected directory |
 | Ctrl+P, then H/J/K/L or arrow | Open in a pane split |
-| Ctrl+T | Open worktrees for the selected Git repository |
 | Ctrl+N / F2 | Open Create worktree directly for the selected Git repository |
 | Esc | Clear the filter, then close the picker |
 
 `here` changes directory only when the current pane is at a shell prompt. Session mode reuses a matching session or creates one.
 
-## Worktree picker
+## Create a worktree
 
-Use the `raptor_worktree_list` Rex action for native Mac worktrees or the mobile terminal picker. Run `raptor wt` to use the terminal UI with the current Git repository. Use `raptor wt --repo /path/to/repo` to choose a repository directly. Use `raptor wt --create` for the terminal form, or the `raptor_worktree_new` Rex action to open Create directly using the configured `ui` (`auto` prefers the local Mac app; `terminal` always uses the terminal). Both use the origin pane's repository. Bind it with `rex.bind("ctrl+n", "raptor_worktree_new")` to use it from Pi or a shell. Without a repository in the current pane, Raptor shows a repository picker.
-
-| Key | Action |
-| --- | --- |
-| Type | Filter worktree branches and paths |
-| ↑ / ↓, Ctrl+J / Ctrl+K | Move through worktrees |
-| Ctrl+O; Tab / Shift+Tab also work in terminal lists | Change the open target |
-| Enter | Open the selected worktree with that target |
-| Ctrl+P, then H/J/K/L or arrow | Open in a pane split |
-| Cmd+N / Ctrl+N on Mac; Ctrl+N / F2 in terminal | Create a worktree |
-| Cmd+Backspace / Ctrl+X on Mac; Ctrl+X / Delete in terminal | Remove a worktree after confirmation |
-| Esc | Clear the filter, then return to directories |
+Use `raptor wt --create` for the terminal form, or the `raptor_worktree_new` Rex action to open Create using the configured `ui` (`auto` prefers the local Mac app; `terminal` always uses the terminal). Both use the origin pane's repository. Bind it with `rex.bind("ctrl+n", "raptor_worktree_new")` to use it from Pi or a shell. Without a repository in the current pane, Raptor shows a repository picker. Use `wt list` for Git worktree administration.
 
 When creation hooks are configured, New Worktree and Instant Pi Worktree also defer setup to a new terminal. Installs run visibly before Pi starts. A failed setup leaves a usable shell and a printed retry command. **Here** cannot run pending setup; choose Session, Tab, or a new pane. Repositories without creation hooks keep their existing open behavior.
 
 Both create forms show labeled **Repo** and **Destination** paths, the branch, base, and open target. Direct Create launches render before repository metadata loads; typing and Escape stay available. Escape closes a directly launched form (or first dismisses its base chooser); forms opened from a list return to that list. The create form prefills an available two-word branch name, such as `otter-falcon`, using the same generator as Instant Pi worktree. The name stays editable. Suggesting a name creates no files or Git references. Go supplies the destination preview and validation in both interfaces. In the terminal UI, Tab moves through Branch name → Base branch → Open in → Create. Ctrl+O cycles the target from any form field. The visible **Open in** field also uses Left/Right to choose a tab, session, current shell, or pane direction (when a source pane is available). Enter on Open in moves to Create without submitting. Once the form is ready, Enter in Branch name accepts the default name, base, and target, then creates and opens the worktree. Enter on Create does the same. Git validates the name and destination again before creation.
 
-On Mac, Cmd+N or Ctrl+N opens the native form. Tab / Shift+Tab moves between enabled controls. Search local base branches in **From branch**; Enter selects and Escape returns to the form. Ctrl+O changes the **Open in** target. Press Enter in the branch field to use the default fields, click **Create**, or press Cmd+Enter. If opening fails after creation, **Retry opening** reuses the created worktree, never creates it again. Hiding and reopening preserves this recovery state. **Discard recovery** clears the recovery screen but keeps the worktree. Use Cmd+Backspace or Ctrl+X to request removal; confirmation defaults to Cancel.
+On Mac, the `raptor_worktree_new` action opens the native form; bind it to your preferred key. Tab / Shift+Tab moves between enabled controls. Search local base branches in **From branch**; Enter selects and Escape returns to the form. Ctrl+O changes the **Open in** target. Press Enter in the branch field to use the default fields, click **Create**, or press Cmd+Enter. If opening fails after creation, **Retry opening** reuses the created worktree, never creates it again. Hiding and reopening preserves this recovery state. **Discard recovery** clears the recovery screen but keeps the worktree. Use Worktrunk directly for worktree administration.
 
-Raptor lists local worktrees only. It keeps the branch when you remove a worktree. Git blocks removal when the worktree has uncommitted changes or is locked. You cannot remove the primary worktree.
-
-Worktrunk (`wt`) manages creation and removal. Its configured `worktree-path` owns destination paths; Raptor does not move existing worktrees or override the template. For example, in `~/.config/worktrunk/config.toml`:
+Worktrunk (`wt`) manages creation. Its configured `worktree-path` owns destination paths; Raptor does not move existing worktrees or override the template. For example, in `~/.config/worktrunk/config.toml`:
 
 ```toml
 worktree-path = "~/workspace/worktrees/{{ repo }}/{{ branch | sanitize }}"
@@ -220,9 +195,9 @@ With this template, `feat/login` in `raptor` uses `~/workspace/worktrees/raptor/
 
 ## Open a pull request (Mac)
 
-While the native picker is open, press **Cmd+Shift+P**, or paste a GitHub PR URL into main search and select **Open PR #123 — owner/repo**. Both open a confirmation form; pasting alone creates nothing. There is no separate Open PR button or terminal PR form.
+While the native picker is open, press **Cmd+Shift+P**, or paste a GitHub PR URL into main search and select **Open PR #123 — owner/repo**. Both open a confirmation form; pasting alone creates nothing. A clickable **⇧⌘P PR** footer hint opens the same form. There is no terminal PR form.
 
-Use a full GitHub URL anywhere. A PR number needs repository context. Raptor reuses a matching local clone or clones the base repository into `~/workspace/<owner>/<repo>`, then uses Worktrunk to create or reuse the PR worktree. Fork PRs keep their branch names. Occupied paths and branch conflicts are not overwritten.
+Use a full GitHub URL in the native form. Query strings, fragments, and PR tabs are normalized away; bare numbers are rejected. An empty form prefills a valid GitHub PR URL from the clipboard. Raptor reuses a matching local clone or clones the base repository into `~/workspace/<owner>/<repo>`, then uses Worktrunk to create or reuse the PR worktree. Fork PRs keep their branch names. Closed or merged PRs with deleted branches offer **Check out PR commit…** with confirmation; this uses isolated local branch `pr/N`, without restoring or pushing the deleted branch. Occupied paths and branch conflicts are not overwritten.
 
 The form opens a Session (default) or Tab. New destination labels use `<repo>-pr-<number>-<branch>`, with branch slashes replaced by hyphens; for example `aurora-pr-10990-fix-cancellation-page-back-navigation`. Worktree paths stay under Worktrunk's control. Reopening the same PR with the same target reuses its worktree and recorded Rex destination; completed setup does not run again. A concurrent operation reports busy instead of creating duplicates. Existing destination labels are not renamed.
 
@@ -240,16 +215,16 @@ Safety limits: repositories with `pre-switch` hooks need an interactive Worktrun
 
 ## Open targets
 
-On Mac, use Ctrl+O / Ctrl+Shift+O or the **Open in** dropdown. In the terminal picker, use Ctrl+O. Tab / Shift+Tab also cycle targets in lists; in the create form they move between fields. Tab on Mac keeps normal focus navigation. The default target list is:
+On Mac, use Ctrl+O / Ctrl+Shift+O or the **Open in** dropdown. In the terminal picker, use Ctrl+O. In the create form, Tab / Shift+Tab move between fields; on Mac they keep normal focus navigation. The default target list is:
 
 | Target | Opens the worktree or directory… |
 | --- | --- |
-| `tab` | In a new tab |
 | `session` | In a matching or new session |
+| `tab` | In a new tab |
 | `here` | In the current shell |
-| `pane`, `pane_left`, `pane_above`, `pane_below` | In a pane split |
+| `pane_right`, `pane_below` | In a pane split |
 
-The default order is tab → session → cd here → pane right → left → above → below. Ctrl+P also opens the selected item in a pane split; choose the direction with H/J/K/L or arrow keys.
+The default order is session → tab → cd here → pane right → pane below. Ctrl+P also opens the selected item in a pane split; choose the direction with H/J/K/L or arrow keys.
 
 ## Configuration
 
@@ -257,14 +232,14 @@ All settings are optional. Save them in `~/.config/raptor/config.toml`:
 
 ```toml
 enter = "tab"
-targets = ["tab", "session", "here", "pane", "pane_left", "pane_above", "pane_below"]
+targets = ["session", "tab", "here", "pane_right", "pane_below"]
 ```
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `worktree_root` | Legacy | Ignored for new paths; configure Worktrunk `worktree-path` instead |
 | `enter` | `tab` | Target selected when a picker opens |
-| `targets` | `tab`, `session`, `here`, `pane`, `pane_left`, `pane_above`, `pane_below` | Available open targets |
+| `targets` | `session`, `tab`, `here`, `pane_right`, `pane_below` | Available open targets |
 
 The Rex plugin also accepts UI selection and terminal popup settings:
 
@@ -274,7 +249,7 @@ require("raptor").setup{
   -- app = "/custom/path/Raptor.app",
   bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
   mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },
-  bin = os.getenv("HOME") .. "/.local/bin/raptor",
+  -- bin = "/custom/path/raptor", -- Only for an intentional override.
 }
 ```
 

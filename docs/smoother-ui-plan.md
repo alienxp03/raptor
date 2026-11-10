@@ -84,7 +84,7 @@ Shared layout top→bottom: **search field · view pills · result rows · foote
 - `show_picker` gui branch: run `cfg.bin panel open …` via `rex.exec`; on failure fall back to
   existing `open -g -a` URL flow; terminal/ios/ssh paths unchanged (keep `cfg.bounds` for the
   terminal layer path only).
-- Keep key bindings and action names (`raptor`, `raptor_worktree_list`) stable.
+- Keep key bindings and action names (`raptor`, `raptor_worktree_new`) stable.
 
 ## 7 · Testing & validation
 

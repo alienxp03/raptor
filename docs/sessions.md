@@ -2,13 +2,13 @@
 
 The Sessions view is the launcher: one flat list where you pick where to work, and Enter always gets you there — sesh-style select-or-create.
 
-Use **Sessions · Agents** to switch views. Tab moves between them; Shift+Tab goes back; Ctrl+S selects Sessions from any view. In the Mac picker, Cmd+Shift+S does the same. Escape dismisses the launcher.
+There is one session/directory launcher. Ctrl+S selects Sessions from a nested terminal view; in the Mac picker, Cmd+Shift+S does the same. Escape dismisses the launcher.
 
 To open the launcher directly from Rex, bind the action:
 
 ```lua
-rex.bind("cmd+shift+s", function()
-  rex.invoke("raptor_sessions")
+rex.bind("cmd+shift+o", function()
+  rex.invoke("raptor")
 end)
 ```
 
@@ -26,6 +26,8 @@ Pinned local directories float to the top of the directory block (Ctrl+G toggles
 Raptor records acknowledged session switches and the session from which you open the picker. On macOS, a small adapter also watches Rex's private `Workspace.lastFocusedSession` preference while the app is frontmost. This includes switches made in Rex's sidebar, not just Raptor. The installed Rex API has no last-used timestamp or selected-session event.
 
 Go validates the app PID and session/host membership before saving an observation. History is shared by the Mac and terminal interfaces on the same filesystem. Without the Mac observer, confirmed Raptor navigation still records visits.
+
+On an empty-query open or reopen, the default selection is the most-recent non-current live session. If none exists, select a directory before falling back to the current session. The current session remains marked and available; its top-of-list position does not make it the default destination. A nonempty search selects its top ranked match, and live refreshes preserve the user's selection.
 
 The rank snapshot stays fixed while the picker is open. Agent reports, title changes, and background work do not change recency. Search prefers exact folder names and session labels, then fuzzy-match quality, with recent-use order for ties. A leading dot does not prevent an exact folder match: `pi` finds `.pi` before scattered path matches. A matching current session stays first.
 
@@ -48,9 +50,9 @@ rex.bind("ctrl+p", "raptor_session_last")
 
 Local directory rows can skip session creation: Ctrl+O cycles the open target (session → tab → cd here → pane right → pane below), and Enter dispatches with it, exactly like the old directory picker. Remote rows always launch sessions on their host.
 
-## Worktrees
+## Worktree creation
 
-Ctrl+T opens the worktree browser for the selected Git repository; Ctrl+N opens the create-worktree form directly.
+In the terminal picker, Ctrl+N opens the create-worktree form directly. On Mac, invoke `raptor_worktree_new` from Rex or bind it to a key. Instant Pi worktrees and PR checkout provide additional ways to start work. Use Worktrunk directly for listing/removal.
 
 ## Close
 
