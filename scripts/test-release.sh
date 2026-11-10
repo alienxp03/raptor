@@ -20,7 +20,9 @@ done
 grep -Fq 'libexec.install "Raptor.app"' "$work/raptor.rb"
 grep -Fq 'bin.install_symlink libexec/"Raptor.app/Contents/MacOS/raptor-cli" => "raptor"' "$work/raptor.rb"
 grep -Fq 'pkgshare.install libexec/"Raptor.app/Contents/Resources/rex/init.lua"' "$work/raptor.rb"
-grep -Fq 'require("raptor").setup{}' "$work/raptor.rb"
+grep -Fq 'license "MIT"' "$work/raptor.rb"
+grep -Fq 'dofile("#{opt_share}/raptor/init.lua")' "$work/raptor.rb"
+! grep -Fq 'package.path' "$work/raptor.rb"
 ! grep -Fq 'raptor_sessions' "$work/raptor.rb"
 grep -Fq 'rex.bind("ctrl+n", "raptor_worktree_new")' "$work/raptor.rb"
 if grep -Eq 'raptor_agents|raptor_worktree_list|bin[[:space:]]*=[[:space:]]*.*\.local/bin|app[[:space:]]*=[[:space:]]*.*Applications' "$work/raptor.rb"; then

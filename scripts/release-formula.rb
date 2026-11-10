@@ -10,7 +10,7 @@ archive = File.join(directory, "Raptor-#{version}-universal.zip")
 abort "Missing archive: #{archive}" unless File.file?(archive)
 checksum = Digest::SHA256.file(archive).hexdigest
 formula = File.read(File.expand_path("../packaging/homebrew/raptor.rb", __dir__))
-anchor = "  license :cannot_represent\n"
+anchor = "  license \"MIT\"\n"
 abort "Expected one license declaration" unless formula.scan(anchor).length == 1
 stable = <<~RUBY
 

@@ -52,18 +52,21 @@ These are development builds, not stable releases. Building requires macOS 14+,
 Xcode 26+, and Go 1.27.1+ (Homebrew installs Go, zoxide, Worktrunk, and gh). The formula downloads
 Go modules before its offline build. Source access uses your Git credentials.
 
-For a fresh Rex setup, append the packaged module to the Lua search path:
+For a fresh Rex setup, load the packaged module directly — like resh, no
+search-path edits:
 
 ```lua
 -- Apple Silicon; use /usr/local for standard Intel Homebrew.
-package.path = package.path .. ";/opt/homebrew/opt/raptor/share/?/init.lua"
-require("raptor").setup{}
+local raptor = dofile("/opt/homebrew/opt/raptor/share/raptor/init.lua")
+raptor.setup{}
 rex.bind("shift+cmd+o", "raptor")
 rex.bind("ctrl+n", "raptor_worktree_new")
 ```
 
 Then run `rex config reload`. Existing plugin checkouts and Rex settings are
 not overwritten. Update an existing checkout once to get package discovery.
+A checkout or installer-owned plugin under `~/.config/rex/raptor` also loads
+with plain `require("raptor")` — no path line needed there.
 The plugin prefers a detected Homebrew app/CLI pair through stable `opt` paths,
 so upgrades need no config edits. Explicit `bin` and `app` options still win.
 A previous `~/.local/bin/raptor` can shadow Homebrew's CLI on PATH; use
@@ -271,3 +274,7 @@ make install-cli  # Standalone CLI only
 make test         # Go and Lua checks
 make test-macos   # Swift 6 model/transport checks and UI type-check
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

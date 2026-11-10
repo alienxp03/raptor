@@ -4,7 +4,7 @@
 class Raptor < Formula
   desc "Keyboard-driven Rex picker with native Mac and terminal interfaces"
   homepage "https://github.com/alienxp03/raptor"
-  license :cannot_represent
+  license "MIT"
   head "https://github.com/alienxp03/raptor.git", branch: "master"
 
   if build.head?
@@ -77,8 +77,8 @@ class Raptor < Formula
       Existing Rex config, plugin checkouts, and local apps are not overwritten.
 
       For a fresh Rex setup, append this to ~/.config/rex/init.lua:
-        package.path = package.path .. ";#{opt_share}/?/init.lua"
-        require("raptor").setup{}
+        local raptor = dofile("#{opt_share}/raptor/init.lua")
+        raptor.setup{}
         rex.bind("shift+cmd+o", "raptor")
         rex.bind("ctrl+n", "raptor_worktree_new")
 
