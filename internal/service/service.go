@@ -25,17 +25,17 @@ func PlistPath() string { return filepath.Join(paths.CacheDir(), "launcher.plist
 // ThrottleInterval prevents crash loops from spinning.
 func Definition(appExecutable string) map[string]any {
 	return map[string]any{
-		"Label":             Label,
-		"ProgramArguments":  []string{appExecutable, "serve"},
+		"Label":            Label,
+		"ProgramArguments": []string{appExecutable, "serve"},
 		"EnvironmentVariables": map[string]any{
 			"PATH": servicePath(),
 		},
-		"KeepAlive":          true, // Always keep the panel host up; stop = bootout.
-		"ThrottleInterval":   2,
-		"ExitTimeOut":        1,
-		"ProcessType":        "Interactive",
-        "StandardOutPath":    "/dev/null",
-		"StandardErrorPath":  filepath.Join(paths.CacheDir(), "service.log"),
+		"KeepAlive":         true, // Always keep the panel host up; stop = bootout.
+		"ThrottleInterval":  2,
+		"ExitTimeOut":       1,
+		"ProcessType":       "Interactive",
+		"StandardOutPath":   "/dev/null",
+		"StandardErrorPath": filepath.Join(paths.CacheDir(), "service.log"),
 	}
 }
 

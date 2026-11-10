@@ -18,6 +18,7 @@ import (
 	"github.com/alienxp03/raptor/internal/picker"
 	"github.com/alienxp03/raptor/internal/pullrequest"
 	"github.com/alienxp03/raptor/internal/rex"
+	"github.com/alienxp03/raptor/internal/rexconfig"
 	"github.com/alienxp03/raptor/internal/service"
 	"github.com/alienxp03/raptor/internal/task"
 )
@@ -39,7 +40,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|sessions|launcher|wt|task|setup|api|direct|last-session|panel|service> [command flags]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <init|dirs|sessions|launcher|wt|task|setup|api|direct|last-session|panel|service> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -123,6 +124,31 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "init":
+		// resh-style setup: wire the Rex config's managed block. Bindings live
+		// only inside it; anything else in the file is never touched.
+		rest := flag.NewFlagSet("init", flag.ExitOnError)
+		force := rest.Bool("force", false, "replace an existing non-managed raptor config")
+		config := rest.String("config", "", "Rex config file (default: REX_CONFIG, then ~/.config/rex/init.lua)")
+		_ = rest.Parse(fs.Args()[1:])
+		target := *config
+		if target == "" {
+			target = rexconfig.ConfigPath()
+		}
+		plugin := rexconfig.LocatePlugin()
+		created, err := rexconfig.Apply(target, plugin, rexconfig.DefaultOptions(), *force)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if plugin != "" {
+			fmt.Printf("Wired plugin: %s\n", plugin)
+		} else {
+			fmt.Println("Wired plugin: require(\"raptor\") from the Rex plugin directory")
+		}
+		fmt.Printf("Rex config: %s%s\n", target, map[bool]string{true: " (created)", false: " (managed block updated)"}[created])
+		fmt.Println("Bindings: shift+cmd+o opens Raptor; ctrl+n creates a worktree.")
+		fmt.Println("Finish with: rex config reload")
 	case "panel":
 		// Open (or toggle) the resident native panel over IPC.
 		rest := flag.NewFlagSet("panel", flag.ExitOnError)

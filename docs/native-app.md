@@ -30,7 +30,7 @@ The launcher (`raptor`) and `raptor_worktree_new` use this setting. `raptor_work
 
 `raptor_pr_open` is Mac-only. It sends `mode=pr` and opens the PR form without executing it. There is no terminal fallback for this action. Inside the native picker, Cmd+Shift+P opens the same form. Pasting a GitHub PR URL into main search adds a selectable action; it does not create resources until form confirmation. A clickable `⇧⌘P PR` footer hint makes the shortcut visible in the launcher.
 
-Normal installations use `require("raptor").setup{}` without `bin` or `app` paths. The plugin pairs the CLI and app from the same Homebrew installation through stable `opt/raptor` paths. For standalone apps installed elsewhere, Launch Services can resolve bundle ID `com.alienxp03.raptor`; no disk scan or fixed Applications directory is required. Explicit paths remain optional overrides. Your bindings remain in your Rex `init.lua`; the installer does not change them.
+Normal installations run `raptor init`, which writes one managed block loading the packaged plugin by stable opt path; no `bin`/`app` options. The plugin pairs the CLI and app from the same Homebrew installation through stable `opt/raptor` paths. For standalone apps installed elsewhere, Launch Services can resolve bundle ID `com.alienxp03.raptor`; no disk scan or fixed Applications directory is required. Explicit paths remain optional overrides. Your bindings remain in your Rex `init.lua`; the installer does not change them.
 
 ## Reopening and performance
 

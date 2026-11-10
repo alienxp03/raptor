@@ -76,15 +76,20 @@ class Raptor < Formula
       Rex, Git, and your key bindings remain external.
       Existing Rex config, plugin checkouts, and local apps are not overwritten.
 
-      For a fresh Rex setup, append this to ~/.config/rex/init.lua:
-        local raptor = dofile("#{opt_share}/raptor/init.lua")
-        raptor.setup{}
-        rex.bind("shift+cmd+o", "raptor")
-        rex.bind("ctrl+n", "raptor_worktree_new")
+      For a fresh Rex setup, run:
+        raptor init
+        rex config reload
 
-      Then run: rex config reload
+      That writes one managed block (plugin, setup, bindings) between
+      `-- >>> raptor >>>` markers; rerun any time to refresh it. The block
+      loads the plugin with dofile from this stable opt path — no Lua
+      search-path edits, resh-style. ctrl+n needs the raptor_worktree_new
+      action; remove that bind line if you do not want it.
+
       An existing plugin checkout must be updated to use automatic Homebrew discovery.
       The packaged plugin selects its matching CLI/app without relying on PATH.
+      A config that already wires raptor outside the managed block is left
+      alone; rerun with --force after removing the old lines.
     EOS
   end
 

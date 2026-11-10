@@ -61,7 +61,7 @@ are upgraded only when their recorded SHA-256 still matches. Existing untracked
 plugin copies are kept; review updates manually. A checkout symlink already uses
 that checkout's plugin. CLI/app destination
 symlinks are rejected. Only an existing app with Raptor's bundle ID is replaced.
-Custom standalone CLI prefixes can use an explicit plugin `setup{bin = "/path/to/raptor"}` override. Normal installs use `require("raptor").setup{}`; the plugin discovers packaged CLI/app pairs automatically, and Launch Services resolves a registered standalone app by bundle ID even outside Applications directories.
+Custom standalone CLI prefixes can use an explicit plugin `setup{bin = "/path/to/raptor"}` override. Normal installs run `raptor init` (one managed Rex config block); the plugin discovers packaged CLI/app pairs automatically, and Launch Services resolves a registered standalone app by bundle ID even outside Applications directories.
 Use `make install-cli` for terminal-only or remote-server use.
 
 Make targets:

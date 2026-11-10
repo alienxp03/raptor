@@ -52,18 +52,25 @@ These are development builds, not stable releases. Building requires macOS 14+,
 Xcode 26+, and Go 1.27.1+ (Homebrew installs Go, zoxide, Worktrunk, and gh). The formula downloads
 Go modules before its offline build. Source access uses your Git credentials.
 
-For a fresh Rex setup, load the packaged module directly — like resh, no
-search-path edits:
+Then set up Rex with two commands — resh-style; setup writes one managed
+block (plugin, setup, bindings) into your Rex config:
+
+```sh
+raptor init
+rex config reload
+```
+
+**shift+cmd+o** opens Raptor; **ctrl+n** creates a worktree. Edit or rebind
+inside the `-- >>> raptor >>>` block, or rerun `raptor init` to refresh it.
+Manual alternative without init: load the module directly, like resh:
 
 ```lua
 -- Apple Silicon; use /usr/local for standard Intel Homebrew.
 local raptor = dofile("/opt/homebrew/opt/raptor/share/raptor/init.lua")
 raptor.setup{}
-rex.bind("shift+cmd+o", "raptor")
-rex.bind("ctrl+n", "raptor_worktree_new")
 ```
 
-Then run `rex config reload`. Existing plugin checkouts and Rex settings are
+Existing plugin checkouts and Rex settings are
 not overwritten. Update an existing checkout once to get package discovery.
 A checkout or installer-owned plugin under `~/.config/rex/raptor` also loads
 with plain `require("raptor")` — no path line needed there.
