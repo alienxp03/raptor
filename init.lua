@@ -2,24 +2,50 @@
 --
 --   require("raptor").setup{}
 --   rex.bind("shift+cmd+o", "raptor")
---   rex.bind("shift+cmd+t", "raptor_worktree_list")
+--   rex.bind("ctrl+n", "raptor_worktree_new")
 
 local M = {}
 
+-- Capture the loaded module, not the caller of setup. Rex may omit debug;
+-- searchpath provides the same location in restricted Lua environments.
+local source = debug and debug.getinfo and debug.getinfo(1, "S").source
+if source and source:sub(1, 1) == "@" then
+	source = source:sub(2)
+elseif package and package.searchpath then
+	source = package.searchpath("raptor", package.path)
+else
+	source = nil
+end
+local module_root = source and source:match("^(/.*)/share/raptor/init%.lua$")
+if module_root then
+	-- A resolved Cellar path must still track upgrades through stable opt.
+	local prefix = module_root:match("^(/.*)/Cellar/raptor/[^/]+$")
+	if prefix then module_root = prefix .. "/opt/raptor" end
+end
+
+local function exists(path)
+	local file = io.open(path, "rb")
+	if not file then return false end
+	file:close()
+	return true
+end
+
 function M.setup(options)
-	-- Stable Homebrew opt paths follow upgrades without rewriting user config.
+	options = options or {}
+	-- Prefer this plugin's package over another Homebrew installation. Never
+	-- mix its CLI/app with a different prefix, even if its CLI is missing.
 	local brew_bin, brew_app
-	local prefixes = { os.getenv("HOMEBREW_PREFIX") or "", "/opt/homebrew", "/usr/local" }
-	for _, prefix in ipairs(prefixes) do
-		if prefix ~= "" then
-			local bin = prefix .. "/opt/raptor/bin/raptor"
-			local file = io.open(bin, "rb")
-			if file then
-				file:close()
-				brew_bin = bin
-				brew_app = prefix .. "/opt/raptor/libexec/Raptor.app"
-				break
-			end
+	local roots = module_root and { module_root } or {}
+	if not module_root then
+		for _, prefix in ipairs({ os.getenv("HOMEBREW_PREFIX") or "", "/opt/homebrew", "/usr/local" }) do
+			if prefix ~= "" then roots[#roots + 1] = prefix .. "/opt/raptor" end
+		end
+	end
+	for _, root in ipairs(roots) do
+		local bin = root .. "/bin/raptor"
+		if module_root or exists(bin) then
+			brew_bin, brew_app = bin, root .. "/libexec/Raptor.app"
+			break
 		end
 	end
 	local cfg = {
@@ -29,11 +55,23 @@ function M.setup(options)
 		ui = "auto", -- auto, terminal, or gui (force the server's Mac app).
 		app = brew_app or "", -- Explicit options override automatic package discovery.
 	}
-	for key, value in pairs(options or {}) do
+	for key, value in pairs(options) do
 		if cfg[key] == nil then
 			error("raptor: unknown option " .. tostring(key), 0)
 		end
 		cfg[key] = value
+	end
+
+	-- A CLI override must not silently launch a different package's app.
+	if options.bin ~= nil and options.app == nil and options.bin ~= brew_bin then
+		cfg.app = ""
+	end
+	-- An app override is authoritative. Prefer its own backend over the
+	-- discovered package's IPC client; explicit bin+app remains an escape hatch.
+	local panel_bin = cfg.bin
+	if options.app ~= nil and options.bin == nil then
+		local bundled_bin = cfg.app .. "/Contents/MacOS/raptor-cli"
+		panel_bin = cfg.app ~= "" and exists(bundled_bin) and bundled_bin or nil
 	end
 
 	if cfg.ui ~= "auto" and cfg.ui ~= "terminal" and cfg.ui ~= "gui" then
@@ -179,7 +217,7 @@ function M.setup(options)
 			-- Fast path: the resident panel host answers over a local socket.
 			-- No process spawn, no app activation, no flicker. Failure falls
 			-- back to Launch Services, which starts the host when installed.
-			local panel_args = { cfg.bin }
+			local panel_args = { panel_bin or cfg.bin }
 			for _, pair in ipairs({
 				{ "-session", ctx.session_id },
 				{ "-block", ctx.block_id },
@@ -194,24 +232,25 @@ function M.setup(options)
 			table.insert(panel_args, "panel")
 			table.insert(panel_args, "--mode")
 			table.insert(panel_args, mode)
-			local panel_result = rex.exec(panel_args, { timeout = 5 })
+			local panel_result = panel_bin and rex.exec(panel_args, { timeout = 5 })
 			if panel_result ~= nil and panel_result.ok then
 				return { ui = "native" }
 			end
-			local apps = cfg.app ~= "" and { cfg.app }
-				or { os.getenv("HOME") .. "/Applications/Raptor.app", "/Applications/Raptor.app" }
-			for _, app in ipairs(apps) do
-				local info = io.open(app .. "/Contents/Info.plist", "r")
-				if info ~= nil then
-					info:close()
-					-- Do not use -n: Launch Services reuses the warm Mac app. The
-					-- URL delivers fresh context even when the app is already open.
-					local cmd = { "/usr/bin/open", "-g", "-a", app, picker_url(ctx, mode) }
-					local result = rex.exec(cmd, { timeout = 5 })
-					if result ~= nil and result.ok then
-						return { ui = "native" }
-					end
+			-- Do not use -n: reuse the resident host and deliver fresh context.
+			-- Explicit/package paths stay authoritative (including launch failure).
+			-- Only unpaired discovery uses the bundle ID, so relocated dev apps
+			-- work without guessing a name, scanning disks, or invoking brew.
+			local cmd
+			if cfg.app ~= "" then
+				if exists(cfg.app .. "/Contents/Info.plist") then
+					cmd = { "/usr/bin/open", "-g", "-a", cfg.app, picker_url(ctx, mode) }
 				end
+			elseif options.app == nil then
+				cmd = { "/usr/bin/open", "-g", "-b", "com.alienxp03.raptor", picker_url(ctx, mode) }
+			end
+			local result = cmd and rex.exec(cmd, { timeout = 5 })
+			if result ~= nil and result.ok then
+				return { ui = "native" }
 			end
 		end
 		if mode == "pr" then
@@ -234,9 +273,9 @@ function M.setup(options)
 	rex.action({
 		name = "raptor",
 		title = "Raptor",
-		description = "Fuzzy-find a zoxide directory; open as session, tab, pane, or cd here.",
+		description = "Resume a recent session or find a project directory; open as session, tab, pane, or cd here.",
 		category = "Navigate",
-		keywords = "zoxide sesh fzf picker project directory",
+		keywords = "sessions resume recent zoxide sesh fzf picker project directory",
 		args = { target = "string?", dir = "string?" },
 		run = function(ctx, args)
 			if ctx.session_id == nil then
@@ -260,64 +299,6 @@ function M.setup(options)
 			end
 
 			return show_picker(ctx, "dirs")
-		end,
-	})
-
-	rex.action({
-		name = "raptor_agents",
-		title = "Open Agents",
-		description = "Find and jump to a running agent pane.",
-		category = "Navigate",
-		keywords = "agents pi codex claude",
-		run = function(ctx)
-			if ctx.session_id == nil then
-				error("raptor: no session context", 0)
-			end
-			if ctx.block_id then
-				local origin = rex.session.describe_block({ block_id = ctx.block_id })
-				if origin and origin.block and origin.block.label == "raptor" then
-					-- Internal forwarding only: never create a nested picker layer.
-					rex.client.queue("pane.send_key", { key = "ctrl+a" })
-					return { ui = "terminal" }
-				end
-			end
-			return show_picker(ctx, "agents")
-		end,
-	})
-
-	rex.action({
-		name = "raptor_sessions",
-		title = "Open Sessions",
-		description = "Switch, create, or close sessions across every connected host.",
-		category = "Navigate",
-		keywords = "sessions switch hosts create close",
-		run = function(ctx)
-			if ctx.session_id == nil then
-				error("raptor: no session context", 0)
-			end
-			if ctx.block_id then
-				local origin = rex.session.describe_block({ block_id = ctx.block_id })
-				if origin and origin.block and origin.block.label == "raptor" then
-					-- Internal forwarding only: never create a nested picker layer.
-					rex.client.queue("pane.send_key", { key = "ctrl+s" })
-					return { ui = "terminal" }
-				end
-			end
-			return show_picker(ctx, "sessions")
-		end,
-	})
-
-	rex.action({
-		name = "raptor_worktree_list",
-		title = "Raptor Worktrees",
-		description = "Browse local worktrees or create one with a branch name and full path preview.",
-		category = "Navigate",
-		keywords = "worktree git local branch create",
-		run = function(ctx)
-			if ctx.session_id == nil then
-				error("raptor: no session context", 0)
-			end
-			return show_picker(ctx, "wt")
 		end,
 	})
 

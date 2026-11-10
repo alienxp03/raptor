@@ -80,12 +80,11 @@ class Raptor < Formula
         package.path = package.path .. ";#{opt_share}/?/init.lua"
         require("raptor").setup{}
         rex.bind("shift+cmd+o", "raptor")
-        rex.bind("shift+cmd+t", "raptor_worktree_list")
         rex.bind("ctrl+n", "raptor_worktree_new")
 
       Then run: rex config reload
       An existing plugin checkout must be updated to use automatic Homebrew discovery.
-      A manual ~/.local/bin/raptor can shadow Homebrew's CLI on PATH.
+      The packaged plugin selects its matching CLI/app without relying on PATH.
     EOS
   end
 

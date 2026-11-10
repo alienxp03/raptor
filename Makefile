@@ -7,7 +7,10 @@ build:
 	go build -o $(BIN) ./cmd/raptor
 
 ifeq ($(shell uname -s),Darwin)
-install: install-app install-cli
+# Install the app, its matching bundled CLI, and unmodified installer-owned
+# Rex plugin together. --app-only intentionally skips plugin upgrades.
+install: app
+	PREFIX="$(PREFIX)" ./scripts/install-macos.sh
 else
 install: install-cli
 endif

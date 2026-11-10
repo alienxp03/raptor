@@ -61,14 +61,14 @@ are upgraded only when their recorded SHA-256 still matches. Existing untracked
 plugin copies are kept; review updates manually. A checkout symlink already uses
 that checkout's plugin. CLI/app destination
 symlinks are rejected. Only an existing app with Raptor's bundle ID is replaced.
-Custom CLI prefix requires a matching plugin `setup{bin = "/path/to/raptor"}`.
+Custom standalone CLI prefixes can use an explicit plugin `setup{bin = "/path/to/raptor"}` override. Normal installs use `require("raptor").setup{}`; the plugin discovers packaged CLI/app pairs automatically, and Launch Services resolves a registered standalone app by bundle ID even outside Applications directories.
 Use `make install-cli` for terminal-only or remote-server use.
 
 Make targets:
 
 - `make app`: build the local app.
 - `make package`: build, ZIP, and checksum the local app.
-- `make install`: build/install app plus CLI on Mac; CLI only elsewhere.
+- `make install`: build/install the app, its matching bundled CLI, and an unchanged installer-owned Rex plugin on Mac; CLI only elsewhere.
 - `make install-app`: build/install the Mac app plus CLI explicitly.
 - `make test-macos`: run native model/transport tests and strict Swift UI checks.
 
@@ -139,7 +139,9 @@ It does not run the local installer, replace checkout symlinks, write user confi
 or overwrite `~/Applications/Raptor.app`. Rex's Lua search path must include the
 packaged plugin for a fresh install; see the README or `brew info` caveats.
 An updated plugin automatically selects the Homebrew app and CLI through stable
-`opt` paths. Explicit `bin`/`app` overrides remain supported.
+`opt` paths. Normal user config is `require("raptor").setup{}`: no per-user `bin` or `app` paths. Explicit `bin`/`app` overrides remain supported for intentional development/custom installs. Standalone GUI discovery also uses Launch Services bundle ID `com.alienxp03.raptor`, so a registered app need not live in `~/Applications` or `/Applications`.
+
+This formula layout is the distribution contract: one app bundle owns the backend, `bin/raptor` links to that same backend, and the Lua module resolves the package as a pair. Do not independently discover arbitrary CLI and app copies by filename, or store versioned Cellar paths in user config. Homebrew's `opt` symlink follows upgrades. A cask can be considered later for a standalone drag-and-drop app, but is not required for the CLI-first tap.
 
 Quit the app before upgrading, then reopen it to start the new backend. A manual
 CLI earlier on PATH can shadow the package. The source repository currently has

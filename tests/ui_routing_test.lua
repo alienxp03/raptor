@@ -15,7 +15,8 @@ local function check(case)
 	end
 	rex = {
 		action = function(action)
-			if action.name == "raptor_agents" then assert(action.title == "Open Agents") end
+			assert(action.name ~= "raptor_agents" and action.name ~= "raptor_worktree_list",
+				"Obsolete browsers must not be registered")
 			actions[action.name] = action.run
 		end,
 		call = function(method, args)
@@ -79,14 +80,20 @@ local function check(case)
 			return { ok = ok }
 		end,
 	}
-	dofile("init.lua").setup({ app = app, ui = case.ui or "auto" })
+	dofile("init.lua").setup({ bin = bin, app = app, ui = case.ui or "auto" })
 	assert(actions.raptor_wt == nil, "Legacy worktree list must not clutter the palette")
 	assert(actions.raptor_create == nil, "Legacy create must not clutter the palette")
 	local ctx = { session_id = "session:demo&safe", block_id = "block:demo space", client_id = "demo-client" }
 	if case.function_binding then ctx.client_id = nil end
-	for _, mode in ipairs({ "dirs", "agents", "wt", "wt-create" }) do
-		local action = ({ dirs = "raptor", agents = "raptor_agents", wt = "raptor_worktree_list", ["wt-create"] = "raptor_worktree_new" })[mode]
+	assert(actions.raptor_sessions == nil, "The launcher must have one action")
+	for _, mode in ipairs({ "dirs", "wt-create", "pr" }) do
+		local action = ({ dirs = "raptor", ["wt-create"] = "raptor_worktree_new", pr = "raptor_pr_open" })[mode]
 		local ok, result = pcall(actions[action], ctx, {})
+		if mode == "pr" and case.expected ~= "native" then
+			assert(not ok and tostring(result):find("native Mac app", 1, true), case.name .. ": PR must stay native-only")
+			assert(#layers == 2, "PR must not add a terminal layer")
+			break
+		end
 		if case.expected_error then
 			assert(not ok and tostring(result):find("GUI requested", 1, true), case.name .. ": expected GUI error")
 			assert(#layers == 0, "Forced GUI must not fall back to terminal")
@@ -141,14 +148,6 @@ local function check(case)
 	actions.raptor_worktree_new(ctx)
 	assert(#layers == layer_count, "Ctrl+N inside a picker must not nest layers")
 	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+n")
-	local execution_count = #executions
-	local queue_count = #queued
-	local agents_result = actions.raptor_agents(ctx)
-	assert(agents_result.ui == "terminal")
-	assert(#layers == layer_count, "Ctrl+A inside a picker must not nest layers")
-	assert(#executions == execution_count, "Ctrl+A inside a picker must not launch native UI")
-	assert(#queued == queue_count + 1, "Ctrl+A must forward exactly once")
-	assert(queued[#queued].action == "pane.send_key" and queued[#queued].args.key == "ctrl+a")
 	if case.ui ~= "gui" and (case.platform ~= "macos" or case.kind == "cli" or case.ui == "terminal" or (not case.installed and not case.host_running) or case.transport == "tls") then
 		for _, ok in ipairs(native_results) do
 			assert(not ok, case.name .. ": native process unexpectedly started")
