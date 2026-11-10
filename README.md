@@ -2,7 +2,7 @@
 
 A session and project launcher for [Rex](https://www.superlogical.com/rex/docs). One sesh-style list to resume a session or open a project directory — as a session, tab, pane split, or the current shell. Create Git worktrees and open GitHub pull requests without leaving the keyboard.
 
-Native SwiftUI picker on Mac, Bubble Tea on iPhone and iPad. Both share one Go backend.
+Native SwiftUI picker on Mac over one shared Go backend.
 
 <p align="center">
   <img width="72%" src="docs/screenshots/directories.png" alt="Raptor session launcher">
@@ -45,15 +45,14 @@ rex config reload
 
 The launcher lists live sessions first (the current session pinned and marked), then frecency directories per host. Enter switches to a session or creates one from a directory; `Ctrl+O` cycles the open target first; `Esc` dismisses. A directory row always opens with the default target — `session` reuses any matching session instead of duplicating it.
 
-| Key (terminal) | Key (Mac) | Action |
-| --- | --- | --- |
-| Type | Type | Filter sessions and directories |
-| `↑`/`↓`, `Ctrl+J`/`Ctrl+K` | same | Move through results |
-| `Ctrl+O` | `Ctrl+O` / dropdown | Change the open target |
-| `Enter` | `Enter` | Switch or open |
-| `Ctrl+P`, then `H J K L` | same | Open in a pane split |
-| `Ctrl+N` / `F2` | — | Create a worktree |
-| `Esc` | `Esc` | Clear filter, then dismiss |
+| Key | Action |
+| --- | --- |
+| Type | Filter sessions and directories |
+| `↑`/`↓`, `Ctrl+J`/`Ctrl+K` | Move through results |
+| `Ctrl+O` | Change the open target |
+| `Enter` | Switch or open |
+| `Ctrl+P`, then `H J K L` | Open in a pane split |
+| `Esc` | Clear filter, then dismiss |
 
 ### Worktrees
 
@@ -72,7 +71,7 @@ Press `⇧⌘P` (or paste a PR URL into search) and confirm. Raptor resolves met
 
 ### Instant Pi worktree
 
-Bind `raptor_task_new` for a formless flow: a two-word branch (`otter-falcon`) is created from the origin repo's committed HEAD, a new tab opens, and fresh `pi` starts — on Mac, iOS, and CLI alike (`raptor task`).
+Bind `raptor_task_new` for a formless flow: a two-word branch (`otter-falcon`) is created from the origin repo's committed HEAD, a new tab opens, and fresh `pi` starts — no picker involved, from any Rex client (`raptor task`).
 
 ```lua
 rex.bind("ctrl+shift+n", "raptor_task_new")
@@ -90,9 +89,7 @@ targets = ["session", "tab", "here", "pane_right", "pane_below"]
 
 ```lua
 require("raptor").setup{
-  ui = "auto", -- "terminal" or "gui" to force an interface
   bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
-  mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },
 }
 ```
 
@@ -101,9 +98,9 @@ Direct open without the picker: `rex do raptor target=tab dir=/path/to/project`.
 ## How it works
 
 ```
-macOS Rex action → Raptor.app (SwiftUI)  → bundled raptor api ┐
-mobile Rex action → raptor (Bubble Tea)  ────────────────────┴→ shared Go backend
-                                                         → Rex sessions, dispatch, history
+Rex action on this Mac → Raptor.app (SwiftUI) → bundled raptor api
+                                            → shared Go backend
+                                            → Rex sessions, dispatch, history
 ```
 
 The resident Mac host keeps the panel and backend warm between opens (~125 ms warm reopen). Session order follows shared recency history, including sidebar switches observed on Mac. See [sessions](docs/sessions.md), [the native app](docs/native-app.md), and [packaging](packaging/macos.md).

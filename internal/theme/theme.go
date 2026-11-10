@@ -483,3 +483,16 @@ func sRGBEncode(v float64) float64 {
 	}
 	return 1.055*math.Pow(v, 1/2.4) - 0.055
 }
+
+// ThemeJSON is the api `theme` payload: the resolved palette for the native
+// picker, or an error map when resolution is disabled or fails.
+func ThemeJSON() any {
+	if os.Getenv("RAPTOR_THEME") == "ansi" {
+		return map[string]any{"error": "disabled by RAPTOR_THEME=ansi"}
+	}
+	t, err := Resolve(Options{})
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	return t
+}

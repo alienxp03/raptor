@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 class Raptor < Formula
-  desc "Keyboard-driven Rex picker with native Mac and terminal interfaces"
+  desc "Keyboard-driven Rex session and project launcher with a native Mac picker"
   homepage "https://github.com/alienxp03/raptor"
   license "MIT"
   head "https://github.com/alienxp03/raptor.git", branch: "master"

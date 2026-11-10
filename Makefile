@@ -31,7 +31,6 @@ package:
 test:
 	go test ./...
 	lua tests/history_test.lua
-	lua tests/ui_routing_test.lua
 	lua tests/homebrew_routing_test.lua
 	lua tests/task_action_test.lua
 	lua tests/pr_action_test.lua

@@ -15,7 +15,6 @@ import (
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/panel"
-	"github.com/alienxp03/raptor/internal/picker"
 	"github.com/alienxp03/raptor/internal/pullrequest"
 	"github.com/alienxp03/raptor/internal/rex"
 	"github.com/alienxp03/raptor/internal/rexconfig"
@@ -40,7 +39,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <init|dirs|sessions|launcher|wt|task|setup|api|direct|last-session|panel|service> [command flags]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <init|task|setup|api|direct|last-session|panel|service> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -67,29 +66,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-	case "dirs":
-		picker.ApplyTheme()
-		os.Exit(picker.RunDirs(ctx, cfg))
-	case "agents":
-		picker.ApplyTheme()
-		os.Exit(picker.RunSessions(ctx, cfg))
-	case "sessions":
-		picker.ApplyTheme()
-		os.Exit(picker.RunSessions(ctx, cfg))
-	case "launcher":
-		picker.ApplyTheme()
-		os.Exit(picker.RunLauncher(ctx, cfg))
-	case "wt":
-		rest := flag.NewFlagSet("wt", flag.ExitOnError)
-		repo := rest.String("repo", "", "repo path (default: origin block's cwd, else picker)")
-		create := rest.Bool("create", false, "open the create-worktree form directly")
-		_ = rest.Parse(fs.Args()[1:])
-		if *create {
-			picker.ApplyTheme()
-			os.Exit(picker.RunCreateWorktree(ctx, cfg, *repo))
-		}
-		fmt.Fprintln(os.Stderr, "worktree browser removed; use raptor wt --create to create a worktree")
-		os.Exit(2)
 	case "task":
 		rest := flag.NewFlagSet("task", flag.ExitOnError)
 		repo := rest.String("repo", "", "origin repository (default: current pane)")

@@ -25,7 +25,7 @@ Pinned local directories float to the top of the directory block (Ctrl+G toggles
 
 Raptor records acknowledged session switches and the session from which you open the picker. On macOS, a small adapter also watches Rex's private `Workspace.lastFocusedSession` preference while the app is frontmost. This includes switches made in Rex's sidebar, not just Raptor. The installed Rex API has no last-used timestamp or selected-session event.
 
-Go validates the app PID and session/host membership before saving an observation. History is shared by the Mac and terminal interfaces on the same filesystem. Without the Mac observer, confirmed Raptor navigation still records visits.
+Go validates the app PID and session/host membership before saving an observation. History persists on the same filesystem for the Mac app and CLI backend. Without the Mac observer, confirmed Raptor navigation still records visits.
 
 On an empty-query open or reopen, the default selection is the most-recent non-current live session. If none exists, select a directory before falling back to the current session. The current session remains marked and available; its top-of-list position does not make it the default destination. A nonempty search selects its top ranked match, and live refreshes preserve the user's selection.
 
@@ -35,15 +35,12 @@ History builds from observed visits, not inferred past activity. Up to 256 host/
 
 ## Last Session
 
-Use **Cmd+P** on Mac or **Ctrl+P** on mobile for Last Session
-(`raptor_session_last`). It uses the same shared session-recency history as the
-Sessions list, validates the host, and skips deleted sessions. The legacy single
-session ID is used only as a fallback.
+**Cmd+P** runs Last Session (`raptor_session_last`). It uses the same shared
+session-recency history as the Sessions list, validates the host, and skips
+deleted sessions. The legacy single session ID is used only as a fallback.
 
 ```lua
 rex.bind("cmd+p", "raptor_session_last")
--- Mobile:
-rex.bind("ctrl+p", "raptor_session_last")
 ```
 
 ## Open-target override
@@ -52,7 +49,7 @@ Local directory rows can skip session creation: Ctrl+O cycles the open target (s
 
 ## Worktree creation
 
-In the terminal picker, Ctrl+N opens the create-worktree form directly. On Mac, invoke `raptor_worktree_new` from Rex or bind it to a key. Instant Pi worktrees and PR checkout provide additional ways to start work. Use Worktrunk directly for listing/removal.
+Invoke `raptor_worktree_new` from Rex or bind it to a key; Instant Pi worktrees and PR checkout provide additional ways to start work. Use Worktrunk directly for listing/removal.
 
 ## Close
 

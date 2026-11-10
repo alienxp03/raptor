@@ -18,7 +18,7 @@ import (
 	"github.com/alienxp03/raptor/internal/config"
 	"github.com/alienxp03/raptor/internal/dispatch"
 	"github.com/alienxp03/raptor/internal/paths"
-	"github.com/alienxp03/raptor/internal/picker"
+	"github.com/alienxp03/raptor/internal/theme"
 	"github.com/alienxp03/raptor/internal/pullrequest"
 	"github.com/alienxp03/raptor/internal/rex"
 	"github.com/alienxp03/raptor/internal/worktree"
@@ -508,7 +508,7 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 	// validation for the selected method.
 	switch method {
 	case "theme":
-		return map[string]any{"theme": picker.ThemeJSON()}, nil
+		return map[string]any{"theme": theme.ThemeJSON()}, nil
 	case "sessions.visit":
 		return h.observeFocus(params)
 	case "context":

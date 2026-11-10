@@ -1,4 +1,5 @@
--- Raptor Rex plugin. Keep key bindings in the user's init.lua.
+-- Raptor Rex plugin. The picker renders in the native Mac app; keep key
+-- bindings in the user's init.lua.
 --
 --   require("raptor").setup{}
 --   rex.bind("shift+cmd+o", "raptor")
@@ -50,9 +51,7 @@ function M.setup(options)
 	end
 	local cfg = {
 		bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
-		mobile_bounds = { x = 0.04, y = 0.10, w = 0.92, h = 0.78 },
 		bin = brew_bin or (os.getenv("HOME") .. "/.local/bin/raptor"),
-		ui = "auto", -- auto, terminal, or gui (force the server's Mac app).
 		app = brew_app or "", -- Explicit options override automatic package discovery.
 	}
 	for key, value in pairs(options) do
@@ -72,10 +71,6 @@ function M.setup(options)
 	if options.app ~= nil and options.bin == nil then
 		local bundled_bin = cfg.app .. "/Contents/MacOS/raptor-cli"
 		panel_bin = cfg.app ~= "" and exists(bundled_bin) and bundled_bin or nil
-	end
-
-	if cfg.ui ~= "auto" and cfg.ui ~= "terminal" and cfg.ui ~= "gui" then
-		error("raptor: ui must be auto, terminal, or gui", 0)
 	end
 
 	local function client_platform(ctx)
@@ -98,21 +93,12 @@ function M.setup(options)
 		return (p:gsub("(.*/)(.-)$", "%2"))
 	end
 
-	local function base_cmd(ctx, with_title)
+	local function base_cmd(ctx)
 		local args = { cfg.bin }
-		-- Keep the sidebar title when focus moves into the floating picker.
-		local title
-		if with_title ~= false and ctx.block_id then
-			local ok, r = pcall(rex.block.call, "com.superlogical.terminal", "title", { block_id = ctx.block_id })
-			if ok and r ~= nil then
-				title = r.title
-			end
-		end
 		local flags = {
 			{ "-session", ctx.session_id },
 			{ "-block", ctx.block_id },
 			{ "-client", ctx.client_id },
-			{ "-title", title },
 		}
 		for _, f in ipairs(flags) do
 			if f[2] ~= nil and f[2] ~= "" then
@@ -121,60 +107,6 @@ function M.setup(options)
 			end
 		end
 		return args
-	end
-
-	local function open_layer(ctx, args)
-		-- anchor the picker over the window the user is looking at
-		local win_id
-		if ctx.block_id then
-			local d = rex.session.describe_block({ block_id = ctx.block_id })
-			if d ~= nil and d.block ~= nil then
-				win_id = d.block.window_id
-			end
-		end
-
-		local bounds = cfg.bounds
-		local platform = client_platform(ctx)
-		if platform == "ios" or platform == "ipados" then
-			bounds = cfg.mobile_bounds
-		end
-
-		local layer, err = rex.session.new_layer({
-			window_id = win_id,
-			bounds = { bounds.x, bounds.y, bounds.w, bounds.h },
-			focus = true,
-			layout = rex.layout.block({
-				flavor = "com.superlogical.terminal.shell",
-				options = {
-					command = args,
-					shell = "none",
-				},
-			}),
-		})
-		if layer == nil then
-			error(err, 0)
-		end
-
-		if layer.block_ids ~= nil and layer.block_ids[1] ~= nil then
-			rex.session.set_block_label({ block_id = layer.block_ids[1], label = "raptor" })
-			rex.session.focus_block({ block_id = layer.block_ids[1] })
-		end
-		if ctx.client_id ~= nil and win_id ~= nil then
-			local selection = { session_id = ctx.session_id, window_id = win_id }
-			if ctx.owner_client then
-				-- queue targets the original caller, whose identity is absent in
-				-- this path. Explicitly target the recovered terminal owner.
-				rex.call("client.perform", {
-					client_id = ctx.client_id,
-					action = "session.select",
-					args = selection,
-					session_id = ctx.session_id,
-					block_id = layer.block_ids and layer.block_ids[1],
-				})
-			else
-				rex.client.queue("session.select", selection)
-			end
-		end
 	end
 
 	local function picker_url(ctx, mode)
@@ -212,62 +144,55 @@ function M.setup(options)
 
 	local function show_picker(ctx, mode)
 		ctx = resolve_context(ctx)
+		-- The native picker renders in Raptor.app, which only a client viewing
+		-- this Mac can show. CLI clients may serve remote viewers, so their
+		-- platform/transport alone is not proof.
 		local platform, local_client = client_platform(ctx)
-		if mode ~= "launcher" and (cfg.ui == "gui" or (cfg.ui == "auto" and platform == "macos" and local_client)) then
-			-- Fast path: the resident panel host answers over a local socket.
-			-- No process spawn, no app activation, no flicker. Failure falls
-			-- back to Launch Services, which starts the host when installed.
-			local panel_args = { panel_bin or cfg.bin }
-			for _, pair in ipairs({
-				{ "-session", ctx.session_id },
-				{ "-block", ctx.block_id },
-				{ "-client", ctx.client_id },
-			}) do
-				if pair[2] ~= nil and pair[2] ~= "" then
-					table.insert(panel_args, pair[1])
-					table.insert(panel_args, pair[2])
-				end
+		if platform ~= "macos" or not local_client then
+			error("raptor: requires the Raptor Mac app on this Mac", 0)
+		end
+		-- Fast path: the resident panel host answers over a local socket.
+		-- No process spawn, no app activation, no flicker. Failure falls
+		-- back to Launch Services, which starts the host when installed.
+		local panel_args = { panel_bin or cfg.bin }
+		for _, pair in ipairs({
+			{ "-session", ctx.session_id },
+			{ "-block", ctx.block_id },
+			{ "-client", ctx.client_id },
+		}) do
+			if pair[2] ~= nil and pair[2] ~= "" then
+				table.insert(panel_args, pair[1])
+				table.insert(panel_args, pair[2])
 			end
-			-- Global context flags must precede the panel subcommand.
-			table.insert(panel_args, "panel")
-			table.insert(panel_args, "--mode")
-			table.insert(panel_args, mode)
-			local panel_result = panel_bin and rex.exec(panel_args, { timeout = 5 })
-			if panel_result ~= nil and panel_result.ok then
-				return { ui = "native" }
+		end
+		-- Global context flags must precede the panel subcommand.
+		table.insert(panel_args, "panel")
+		table.insert(panel_args, "--mode")
+		table.insert(panel_args, mode)
+		local panel_result = panel_bin and rex.exec(panel_args, { timeout = 5 })
+		if panel_result ~= nil and panel_result.ok then
+			return { ui = "native" }
+		end
+		-- Do not use -n: reuse the resident host and deliver fresh context.
+		-- Explicit/package paths stay authoritative (including launch failure).
+		-- Only unpaired discovery uses the bundle ID, so relocated dev apps
+		-- work without guessing a name, scanning disks, or invoking brew.
+		local cmd
+		if cfg.app ~= "" then
+			if exists(cfg.app .. "/Contents/Info.plist") then
+				cmd = { "/usr/bin/open", "-g", "-a", cfg.app, picker_url(ctx, mode) }
 			end
-			-- Do not use -n: reuse the resident host and deliver fresh context.
-			-- Explicit/package paths stay authoritative (including launch failure).
-			-- Only unpaired discovery uses the bundle ID, so relocated dev apps
-			-- work without guessing a name, scanning disks, or invoking brew.
-			local cmd
-			if cfg.app ~= "" then
-				if exists(cfg.app .. "/Contents/Info.plist") then
-					cmd = { "/usr/bin/open", "-g", "-a", cfg.app, picker_url(ctx, mode) }
-				end
-			elseif options.app == nil then
-				cmd = { "/usr/bin/open", "-g", "-b", "com.alienxp03.raptor", picker_url(ctx, mode) }
-			end
-			local result = cmd and rex.exec(cmd, { timeout = 5 })
-			if result ~= nil and result.ok then
-				return { ui = "native" }
-			end
+		elseif options.app == nil then
+			cmd = { "/usr/bin/open", "-g", "-b", "com.alienxp03.raptor", picker_url(ctx, mode) }
+		end
+		local result = cmd and rex.exec(cmd, { timeout = 5 })
+		if result ~= nil and result.ok then
+			return { ui = "native" }
 		end
 		if mode == "pr" then
-			error("raptor: Open pull request requires the native Mac app; no terminal PR form is available", 0)
+			error("raptor: Open pull request requires the native Mac app", 0)
 		end
-		if cfg.ui == "gui" and mode ~= "launcher" then
-			error("raptor: GUI requested, but Raptor.app was not found or could not be launched", 0)
-		end
-		local args = base_cmd(ctx)
-		if mode == "wt-create" then
-			table.insert(args, "wt")
-			table.insert(args, "--create")
-		else
-			table.insert(args, mode)
-		end
-		open_layer(ctx, args)
-		return { ui = "terminal" }
+		error("raptor: Raptor.app was not found or could not be launched", 0)
 	end
 
 	rex.action({
@@ -284,7 +209,7 @@ function M.setup(options)
 
 			-- direct mode: open a known directory without the picker
 			if args.dir then
-				local cmd = base_cmd(ctx, false)
+				local cmd = base_cmd(ctx)
 				table.insert(cmd, "direct")
 				table.insert(cmd, args.target or "session")
 				table.insert(cmd, args.dir)
@@ -305,19 +230,11 @@ function M.setup(options)
 	rex.action({
 		name = "raptor_worktree_new",
 		title = "Raptor: Create Worktree",
-		description = "Open the create-worktree form for the origin pane's repository using the configured UI.",
+		description = "Open the create-worktree form for the origin pane's repository in the Mac app.",
 		category = "Navigate",
 		run = function(ctx)
 			if ctx.session_id == nil then
 				error("raptor: no session context", 0)
-			end
-			if ctx.block_id then
-				local origin = rex.session.describe_block({ block_id = ctx.block_id })
-				if origin and origin.block and origin.block.label == "raptor" then
-					-- Let an existing picker handle Ctrl+N instead of nesting layers.
-					rex.client.queue("pane.send_key", { key = "ctrl+n" })
-					return { ui = "terminal" }
-				end
 			end
 			return show_picker(ctx, "wt-create")
 		end,
@@ -338,17 +255,6 @@ function M.setup(options)
 	})
 
 	rex.action({
-		name = "raptor_launcher",
-		title = "Raptor: Experimental Launcher",
-		description = "Search paths, then choose an action. Terminal-only preview.",
-		category = "Navigate",
-		run = function(ctx)
-			if ctx.session_id == nil then error("raptor: no session context", 0) end
-			return show_picker(ctx, "launcher")
-		end,
-	})
-
-	rex.action({
 		name = "raptor_task_new",
 		title = "Raptor: Instant Pi Worktree",
 		description = "Auto-name a branch/worktree from HEAD, open a tab, and start fresh Pi without a prompt.",
@@ -360,7 +266,7 @@ function M.setup(options)
 			end
 			ctx = resolve_context(ctx)
 			if ctx.client_id == nil then error("raptor: cannot identify the app client", 0) end
-			local command = base_cmd(ctx, false)
+			local command = base_cmd(ctx)
 			table.insert(command, "task")
 			local result, err = rex.exec(command, { timeout = 30 })
 			if result == nil then error(err, 0) end
@@ -381,7 +287,7 @@ function M.setup(options)
 			if ctx.client_id == nil or ctx.session_id == nil then
 				error("raptor: no client or session context", 0)
 			end
-			local command = base_cmd(ctx, false)
+			local command = base_cmd(ctx)
 			table.insert(command, "last-session")
 			local result, err = rex.exec(command, { timeout = 30 })
 			if result == nil then error(err, 0) end

@@ -20,7 +20,7 @@ backend start + `NSApp.activate(ignoringOtherApps:)` focus yank = the Rex flicke
 - Scope: **smoothness architecture + resh-style design, together** (one arc of work).
 - Mac app: **resident service like resh** (launchd host, pre-created nonactivating panel, IPC toggle,
   pre-warmed catalog). Go backend stays the shared logic layer.
-- Terminal UI: **keep + restyle** to the same design language (box-drawing limits). Stays fallback for
+- Terminal UI: **removed** later in favor of the native picker as the single interface; was kept as fallback for
   SSH/iOS. Parity rule holds.
 - Adopt: **⌘1–9 direct-open + pins**.
 - Dropped: Recents (zoxide) — user doesn't care.
