@@ -25,7 +25,7 @@ type Options struct {
 func DefaultOptions() Options {
 	return Options{Bindings: [][2]string{
 		{"shift+cmd+o", "raptor"},
-		{"ctrl+n", "raptor_worktree_new"},
+		{"shift+cmd+n", "raptor_worktree_new"},
 	}}
 }
 

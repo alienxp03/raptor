@@ -83,7 +83,7 @@ class Raptor < Formula
       That writes one managed block (plugin, setup, bindings) between
       `-- >>> raptor >>>` markers; rerun any time to refresh it. The block
       loads the plugin with dofile from this stable opt path — no Lua
-      search-path edits, resh-style. ctrl+n needs the raptor_worktree_new
+      search-path edits, resh-style. shift+cmd+n needs the raptor_worktree_new
       action; remove that bind line if you do not want it.
 
       An existing plugin checkout must be updated to use automatic Homebrew discovery.

@@ -32,13 +32,13 @@ raptor init
 rex config reload
 ```
 
-`raptor init` writes one managed `-- >>> raptor >>>` block into your Rex config — plugin, setup, and default bindings (`shift+cmd+o` open, `ctrl+n` worktree). Rerun it any time to refresh; nothing outside the markers is touched. Rebind inside the block like any other Rex config.
+`raptor init` writes one managed `-- >>> raptor >>>` block into your Rex config — plugin, setup, and default bindings (`shift+cmd+o` open, `shift+cmd+n` worktree). Rerun it any time to refresh; nothing outside the markers is touched. Rebind inside the block like any other Rex config.
 
 | Key | Action |
 | --- | --- |
 | `shift+cmd+o` | Open the launcher |
 | `cmd+p` | Return to the last session |
-| `ctrl+n` | Create a worktree |
+| `shift+cmd+n` | Create a worktree |
 | `shift+cmd+p` | Open the pull request form (optional, add inside the block) |
 
 ## Usage

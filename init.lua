@@ -3,7 +3,7 @@
 --
 --   require("raptor").setup{}
 --   rex.bind("shift+cmd+o", "raptor")
---   rex.bind("ctrl+n", "raptor_worktree_new")
+--   rex.bind("shift+cmd+n", "raptor_worktree_new")
 
 local M = {}
 
