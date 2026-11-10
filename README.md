@@ -41,26 +41,6 @@ rex config reload
 | `ctrl+n` | Create a worktree |
 | `shift+cmd+p` | Open the pull request form (optional, add inside the block) |
 
-### Development builds
-
-Track `master` with the HEAD formula (needs repo access, Xcode 26+, and Go):
-
-```sh
-brew install --HEAD alienxp03/tap/raptor
-brew upgrade --fetch-HEAD alienxp03/tap/raptor
-```
-
-Details on private-repo credentials: [packaging](packaging/macos.md).
-
-### From a checkout
-
-```sh
-git clone https://github.com/alienxp03/raptor ~/.config/rex/raptor
-cd ~/.config/rex/raptor && make install
-```
-
-`make install` on Mac installs `~/Applications/Raptor.app`, its bundled backend as `~/.local/bin/raptor`, and an unchanged installer-owned Rex plugin. Then `require("raptor").setup{}` plus your bindings in `~/.config/rex/init.lua`.
-
 ## Usage
 
 The launcher lists live sessions first (the current session pinned and marked), then frecency directories per host. Enter switches to a session or creates one from a directory; `Ctrl+O` cycles the open target first; `Esc` dismisses. A directory row always opens with the default target — `session` reuses any matching session instead of duplicating it.
@@ -129,6 +109,24 @@ mobile Rex action → raptor (Bubble Tea)  ────────────�
 The resident Mac host keeps the panel and backend warm between opens (~125 ms warm reopen). Session order follows shared recency history, including sidebar switches observed on Mac. See [sessions](docs/sessions.md), [the native app](docs/native-app.md), and [packaging](packaging/macos.md).
 
 ## Development
+
+Build and test from a checkout:
+
+```sh
+git clone https://github.com/alienxp03/raptor ~/.config/rex/raptor
+cd ~/.config/rex/raptor && make install
+```
+
+`make install` on Mac installs `~/Applications/Raptor.app`, its bundled backend as `~/.local/bin/raptor`, and an unchanged installer-owned Rex plugin. Then `require("raptor").setup{}` plus your bindings in `~/.config/rex/init.lua`. Other systems install the CLI only.
+
+Track `master` without a checkout using the HEAD formula (needs repo access, Xcode 26+, and Go):
+
+```sh
+brew install --HEAD alienxp03/tap/raptor
+brew upgrade --fetch-HEAD alienxp03/tap/raptor
+```
+
+Details on private-repo credentials: [packaging](packaging/macos.md).
 
 ```sh
 make test         # Go and Lua checks
