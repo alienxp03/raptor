@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RaptorRexconfigTests-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RaptorRexconfigTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RaptorRexconfigTests-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RaptorRexconfigTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RaptorRexconfigTests-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorRexconfigTests/RexconfigTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RexconfigTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RexconfigTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RexconfigTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RexconfigTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RexconfigTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RexconfigTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RexconfigTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorRexconfigTests-p.build/Objects-normal/arm64/RexconfigTests~partial.swiftmodule"
+  }
+}

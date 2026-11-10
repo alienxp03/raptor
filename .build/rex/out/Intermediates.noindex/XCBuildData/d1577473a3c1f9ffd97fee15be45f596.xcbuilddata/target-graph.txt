@@ -1,0 +1,9 @@
+Target dependency graph (4 targets)
+Target 'RaptorRex' in project 'raptor'
+➜ Explicit dependency on target 'RaptorExecx' in project 'raptor'
+➜ Explicit dependency on target 'RaptorPaths' in project 'raptor'
+➜ Explicit dependency on target 'RaptorLauncherupdate' in project 'raptor'
+Target 'RaptorLauncherupdate' in project 'raptor'
+➜ Explicit dependency on target 'RaptorPaths' in project 'raptor'
+Target 'RaptorPaths' in project 'raptor' (no dependencies)
+Target 'RaptorExecx' in project 'raptor' (no dependencies)

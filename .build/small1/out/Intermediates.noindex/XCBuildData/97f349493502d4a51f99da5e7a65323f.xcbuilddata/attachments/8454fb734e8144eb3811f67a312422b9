@@ -1,0 +1,4 @@
+module RaptorRex {
+header "RaptorRex-Swift.h"
+export *
+}

@@ -1,0 +1,4 @@
+module RaptorDispatch {
+header "RaptorDispatch-Swift.h"
+export *
+}

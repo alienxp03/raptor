@@ -1,0 +1,109 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/RaptorCatalogTests-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/RaptorCatalogTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/RaptorCatalogTests-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/RaptorCatalogTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/RaptorCatalogTests-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/ActivityTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/ActivityTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/ActivityTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/ActivityTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/ActivityTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/ActivityTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/ActivityTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/ActivityTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/ActivityTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/AgentsTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/AgentsTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/AgentsTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/AgentsTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/AgentsTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/AgentsTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/AgentsTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/AgentsTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/AgentsTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/BranchesTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/BranchesTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/BranchesTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/BranchesTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/BranchesTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/BranchesTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/BranchesTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/BranchesTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/BranchesTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/CatalogTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/CatalogTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/CatalogTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/CatalogTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/CatalogTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/CatalogTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/CatalogTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/CatalogTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/CatalogTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/LauncherSearchTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/LauncherSearchTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/LauncherSearchTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/LauncherSearchTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/LauncherSearchTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/LauncherSearchTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/LauncherSearchTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/LauncherSearchTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/LauncherSearchTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/PreferredLauncherTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/PreferredLauncherTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/PreferredLauncherTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/PreferredLauncherTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/PreferredLauncherTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/PreferredLauncherTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/PreferredLauncherTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/PreferredLauncherTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/PreferredLauncherTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/SessionOrderTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionOrderTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionOrderTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionOrderTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionOrderTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionOrderTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionOrderTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionOrderTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionOrderTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/SessionsTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionsTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionsTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionsTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionsTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionsTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionsTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionsTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/SessionsTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorCatalogTests/TestSupport.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/TestSupport.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/TestSupport.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/TestSupport.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/TestSupport.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/TestSupport.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/TestSupport.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/TestSupport.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalogTests-p.build/Objects-normal/arm64/TestSupport~partial.swiftmodule"
+  }
+}

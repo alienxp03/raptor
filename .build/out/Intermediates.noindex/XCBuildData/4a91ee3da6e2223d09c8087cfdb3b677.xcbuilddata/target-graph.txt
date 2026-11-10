@@ -1,0 +1,7 @@
+Target dependency graph (3 targets)
+Target 'RaptorPanel' in project 'raptor'
+➜ Explicit dependency on target 'RaptorPaths' in project 'raptor'
+➜ Explicit dependency on target 'RaptorService' in project 'raptor'
+Target 'RaptorService' in project 'raptor'
+➜ Explicit dependency on target 'RaptorPaths' in project 'raptor'
+Target 'RaptorPaths' in project 'raptor' (no dependencies)

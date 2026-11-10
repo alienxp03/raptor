@@ -25,7 +25,9 @@ struct Flags {
     }
 
     /// Returns (string values by flag, bool flags, positionals).
-    static func parse(_ argv: [String], valueFlags: Set<String>, boolFlags: Set<String> = []) -> (values: [String: String], bools: Set<String>, positional: [String]) {
+    /// Go's flag.Parse stops collecting flags at the first positional; pass
+    /// `continuePastPositional: true` only for service-style mixed parsing.
+    static func parse(_ argv: [String], valueFlags: Set<String>, boolFlags: Set<String> = [], continuePastPositional: Bool = false) -> (values: [String: String], bools: Set<String>, positional: [String]) {
         var values: [String: String] = [:]
         var bools = Set<String>()
         var positional: [String] = []
@@ -35,6 +37,12 @@ struct Flags {
             guard arg.hasPrefix("-"), arg != "-" else {
                 positional.append(arg)
                 i += 1
+                if !continuePastPositional {
+                    while i < argv.count {
+                        positional.append(argv[i])
+                        i += 1
+                    }
+                }
                 continue
             }
             let key = String(arg.drop(while: { $0 == "-" }))
@@ -150,7 +158,7 @@ case "task":
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))
     } catch let e as StartError {
-        fail(e.cause.map(String.init) ?? String(describing: e))
+        fail(String(describing: e.cause))
     } catch {
         fail(String(describing: error))
     }
@@ -177,10 +185,10 @@ case "direct":
     }
 case "init":
     let (values, bools, _) = Flags.parse(sub, valueFlags: ["config"], boolFlags: ["force"])
-    let target = values["config"].flatMap { $0.isEmpty ? nil : $0 } ?? RaptorRexconfig.configPath()
-    let plugin = RaptorRexconfig.locatePlugin()
+    let target = values["config"].flatMap { $0.isEmpty ? nil : $0 } ?? Rexconfig.configPath()
+    let plugin = Rexconfig.locatePlugin()
     do {
-        let created = try RaptorRexconfig.apply(configPath: target, plugin: plugin, options: RaptorRexconfig.defaultOptions(), force: bools.contains("force"))
+        let created = try Rexconfig.apply(configPath: target, plugin: plugin, options: Rexconfig.defaultOptions(), force: bools.contains("force"))
         if plugin.isEmpty {
             out("Wired plugin: require(\"raptor\") from the Rex plugin directory")
         } else {
@@ -213,7 +221,7 @@ case "panel":
         fail(String(describing: error))
     }
 case "service":
-    let (values, bools, positional) = Flags.parse(sub, valueFlags: ["app", "config"], boolFlags: ["debug", "yes"])
+    let (values, bools, positional) = Flags.parse(sub, valueFlags: ["app", "config"], boolFlags: ["debug", "yes"], continuePastPositional: true)
     let app = values["app"] ?? ""
     let command2 = positional.first ?? ""
     do {

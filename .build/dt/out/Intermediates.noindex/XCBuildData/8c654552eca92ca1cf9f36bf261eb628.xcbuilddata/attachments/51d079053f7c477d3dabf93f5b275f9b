@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/RaptorPaths-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/RaptorPaths-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/RaptorPaths-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/RaptorPaths-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/RaptorPaths-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorPaths/Paths.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/Paths.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/Paths.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/Paths.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/Paths.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/Paths.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/Paths.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/Paths.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorPaths-t.build/Objects-normal/arm64/Paths~partial.swiftmodule"
+  }
+}

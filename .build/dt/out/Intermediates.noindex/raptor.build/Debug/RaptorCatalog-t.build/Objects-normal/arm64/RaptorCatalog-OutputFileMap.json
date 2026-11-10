@@ -1,0 +1,89 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/Agents.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Agents.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Agents.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Agents.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Agents.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Agents.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Agents.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Agents.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Agents~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/Catalog.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Catalog.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Catalog.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Catalog.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Catalog.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Catalog.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Catalog.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Catalog.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Catalog~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/Fuzzy.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Fuzzy.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Fuzzy.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Fuzzy.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Fuzzy.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Fuzzy.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Fuzzy.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Fuzzy.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Fuzzy~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/GoPath.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoPath.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoPath.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoPath.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoPath.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoPath.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoPath.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoPath.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoPath~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/GoSort.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoSort.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoSort.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoSort.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoSort.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoSort.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoSort.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoSort.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/GoSort~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/Launcher.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Launcher.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Launcher.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Launcher.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Launcher.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Launcher.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Launcher.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Launcher.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Launcher~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/LauncherSearch.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/LauncherSearch.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/LauncherSearch.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/LauncherSearch.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/LauncherSearch.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/LauncherSearch.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/LauncherSearch.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/LauncherSearch.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/LauncherSearch~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/SessionOrder.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/SessionOrder.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/SessionOrder.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/SessionOrder.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/SessionOrder.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/SessionOrder.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/SessionOrder.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/SessionOrder.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/dt/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/SessionOrder~partial.swiftmodule"
+  }
+}

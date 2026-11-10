@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/RaptorPathsTests-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/RaptorPathsTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/RaptorPathsTests-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/RaptorPathsTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/RaptorPathsTests-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorPathsTests/PathsTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/PathsTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/PathsTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/PathsTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/PathsTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/PathsTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/PathsTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/PathsTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorPathsTests-p.build/Objects-normal/arm64/PathsTests~partial.swiftmodule"
+  }
+}

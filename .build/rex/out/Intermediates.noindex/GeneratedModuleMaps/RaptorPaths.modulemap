@@ -1,0 +1,4 @@
+module RaptorPaths {
+header "RaptorPaths-Swift.h"
+export *
+}

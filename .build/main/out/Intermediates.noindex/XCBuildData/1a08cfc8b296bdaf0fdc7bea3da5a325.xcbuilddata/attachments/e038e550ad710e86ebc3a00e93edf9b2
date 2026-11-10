@@ -1,0 +1,109 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/RaptorAPI-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/RaptorAPI-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/RaptorAPI-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/RaptorAPI-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/RaptorAPI-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/Handler.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Handler.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Handler.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Handler.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Handler.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Handler.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Handler.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Handler.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Handler~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/JSON.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/JSON.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/JSON.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/JSON.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/JSON.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/JSON.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/JSON.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/JSON.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/JSON~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/LauncherUpdates.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/LauncherUpdates.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/LauncherUpdates.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/LauncherUpdates.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/LauncherUpdates.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/LauncherUpdates.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/LauncherUpdates.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/LauncherUpdates.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/LauncherUpdates~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/Methods.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Methods.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Methods.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Methods.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Methods.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Methods.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Methods.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Methods.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Methods~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/Pins.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Pins.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Pins.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Pins.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Pins.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Pins.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Pins.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Pins.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Pins~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/PullrequestMethod.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/PullrequestMethod.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/PullrequestMethod.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/PullrequestMethod.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/PullrequestMethod.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/PullrequestMethod.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/PullrequestMethod.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/PullrequestMethod.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/PullrequestMethod~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/Recency.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Recency.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Recency.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Recency.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Recency.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Recency.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Recency.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Recency.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Recency~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/Results.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Results.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Results.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Results.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Results.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Results.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Results.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Results.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Results~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/Snapshots.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Snapshots.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Snapshots.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Snapshots.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Snapshots.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Snapshots.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Snapshots.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Snapshots.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Snapshots~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorAPI/Wire.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Wire.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Wire.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Wire.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Wire.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Wire.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Wire.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Wire.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorAPI-t.build/Objects-normal/arm64/Wire~partial.swiftmodule"
+  }
+}

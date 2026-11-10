@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/RaptorCatalog-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorCatalog/Placeholder.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Placeholder.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Placeholder.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Placeholder.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Placeholder.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Placeholder.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Placeholder.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Placeholder.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/small1/out/Intermediates.noindex/raptor.build/Debug/RaptorCatalog-t.build/Objects-normal/arm64/Placeholder~partial.swiftmodule"
+  }
+}

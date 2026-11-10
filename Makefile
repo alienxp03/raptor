@@ -4,7 +4,8 @@ PREFIX := $(HOME)/.local
 .PHONY: build app package install install-cli install-app test test-macos clean
 
 build:
-	go build -o $(BIN) ./cmd/raptor
+	@swift build -c release --product raptor --scratch-path .build/cli
+	@cp "$$(swift build -c release --product raptor --scratch-path .build/cli --show-bin-path)/raptor" $(BIN)
 
 ifeq ($(shell uname -s),Darwin)
 # Install the app, its matching bundled CLI, and unmodified installer-owned
@@ -29,7 +30,7 @@ package:
 	./scripts/package-macos.sh
 
 test:
-	go test ./...
+	swift test --parallel
 	lua tests/history_test.lua
 	lua tests/homebrew_routing_test.lua
 	lua tests/task_action_test.lua

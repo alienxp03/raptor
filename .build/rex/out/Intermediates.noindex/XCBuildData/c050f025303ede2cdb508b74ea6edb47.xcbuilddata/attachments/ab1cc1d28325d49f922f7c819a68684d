@@ -1,0 +1,79 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/RaptorWorktreeTests-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/RaptorWorktreeTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/RaptorWorktreeTests-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/RaptorWorktreeTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/RaptorWorktreeTests-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorWorktreeTests/PreviewTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/PreviewTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/PreviewTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/PreviewTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/PreviewTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/PreviewTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/PreviewTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/PreviewTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/PreviewTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorWorktreeTests/SwitchPRTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/SwitchPRTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/SwitchPRTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/SwitchPRTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/SwitchPRTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/SwitchPRTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/SwitchPRTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/SwitchPRTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/SwitchPRTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorWorktreeTests/TaskTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TaskTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TaskTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TaskTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TaskTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TaskTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TaskTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TaskTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TaskTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorWorktreeTests/TestSupport.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TestSupport.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TestSupport.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TestSupport.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TestSupport.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TestSupport.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TestSupport.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TestSupport.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/TestSupport~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorWorktreeTests/WorktreeTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WorktreeTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WorktreeTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WorktreeTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WorktreeTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WorktreeTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WorktreeTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WorktreeTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WorktreeTests~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorWorktreeTests/WtTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WtTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WtTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WtTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WtTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WtTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WtTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WtTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/rex/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktreeTests-p.build/Objects-normal/arm64/WtTests~partial.swiftmodule"
+  }
+}

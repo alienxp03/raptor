@@ -1,0 +1,4 @@
+module RaptorLauncherupdate {
+header "RaptorLauncherupdate-Swift.h"
+export *
+}

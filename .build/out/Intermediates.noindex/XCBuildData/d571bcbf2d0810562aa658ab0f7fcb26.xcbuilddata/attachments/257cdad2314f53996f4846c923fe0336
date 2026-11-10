@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorConfig/RaptorConfig.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/out/Intermediates.noindex/raptor.build/Debug/RaptorConfig-t.build/Objects-normal/arm64/RaptorConfig~partial.swiftmodule"
+  }
+}

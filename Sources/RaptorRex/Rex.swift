@@ -115,14 +115,14 @@ public extension Rex {
 
     /// DoOn targets a client on one host's server.
     static func doOn(_ host: String, _ client: String, _ action: String, kv: String...) throws {
+        try doOn(host, client, action, kv: kv)
+    }
+
+    static func doOn(_ host: String, _ client: String, _ action: String, kv: [String]) throws {
         var args = ["-C", client, "do", action]
         args.append(contentsOf: kv)
         _ = try runOn(host, args)
         recordSelectedSession(host, action, kv)
-    }
-
-    static func doOn(_ host: String, _ client: String, _ action: String, kv: [String]) throws {
-        try doOn(host, client, action, kv: kv)
     }
 
     static func sessions() -> [RexSession]? {

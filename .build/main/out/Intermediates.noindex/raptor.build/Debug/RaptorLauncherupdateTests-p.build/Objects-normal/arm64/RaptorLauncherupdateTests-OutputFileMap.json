@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/RaptorLauncherupdateTests-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/RaptorLauncherupdateTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/RaptorLauncherupdateTests-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/RaptorLauncherupdateTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/RaptorLauncherupdateTests-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Tests/RaptorLauncherupdateTests/LauncherupdateTests.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/LauncherupdateTests.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/LauncherupdateTests.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/LauncherupdateTests.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/LauncherupdateTests.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/LauncherupdateTests.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/LauncherupdateTests.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/LauncherupdateTests.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/main/out/Intermediates.noindex/raptor.build/Debug/RaptorLauncherupdateTests-p.build/Objects-normal/arm64/LauncherupdateTests~partial.swiftmodule"
+  }
+}

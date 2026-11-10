@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/RaptorWorktree-primary.dia",
+    "emit-module-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/RaptorWorktree-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/RaptorWorktree-primary-emit-module.dia",
+    "pch" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/RaptorWorktree-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/RaptorWorktree-primary.swiftdeps"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorWorktree/Placeholder.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Placeholder.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Placeholder.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Placeholder.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Placeholder.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Placeholder.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Placeholder.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Placeholder.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Placeholder~partial.swiftmodule"
+  },
+  "/Users/azuan/Workspace/Projects/raptor/Sources/RaptorWorktree/Util.swift" : {
+    "const-values" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Util.swiftconstvalues",
+    "dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Util.d",
+    "diagnostics" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Util.dia",
+    "index-unit-output-path" : "/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Util.o",
+    "llvm-bc" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Util.bc",
+    "object" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Util.o",
+    "swift-dependencies" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Util.swiftdeps",
+    "swiftmodule" : "/Users/azuan/Workspace/Projects/raptor/.build/theme/out/Intermediates.noindex/raptor.build/Debug/RaptorWorktree-t.build/Objects-normal/arm64/Util~partial.swiftmodule"
+  }
+}

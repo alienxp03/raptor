@@ -1,0 +1,4 @@
+module RaptorPanel {
+header "RaptorPanel-Swift.h"
+export *
+}

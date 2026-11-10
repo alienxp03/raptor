@@ -70,25 +70,40 @@ public enum Launcherupdate {
     /// successful post-creation discovery has yet reached a warm reader.
     public static let ttl: TimeInterval = 2 * 60
 
+    static let plainFormatter = ISO8601DateFormatter()
+
     static let fractionFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    static let plainFormatter = ISO8601DateFormatter()
-
-    /// Go's time.Time JSON form: RFC3339 with fractional seconds when nonzero.
+    /// Go's time.Time JSON form: RFC3339Nano — fractional seconds to
+    /// nanosecond precision with trailing zeros trimmed, none when zero.
     static func encodeDate(_ date: Date) -> String {
-        let seconds = date.timeIntervalSince1970
-        if seconds.truncatingRemainder(dividingBy: 1) != 0 {
-            return fractionFormatter.string(from: date)
-        }
-        return plainFormatter.string(from: date)
+        let base = plainFormatter.string(from: date)
+        var nanos = Int((date.timeIntervalSince1970.truncatingRemainder(dividingBy: 1)) * 1_000_000_000)
+        if nanos <= 0 { return base }
+        if nanos >= 1_000_000_000 { nanos = 999_999_999 }
+        var frac = String(nanos)
+        frac = String(repeating: "0", count: 9 - frac.count) + frac
+        while frac.hasSuffix("0") { frac.removeLast() }
+        // Insert before the zone suffix: numeric offsets are "+HH:MM" (6),
+        // UTC is "Z" (1).
+        let offsetWidth = base.hasSuffix("Z") ? 1 : 6
+        guard offsetWidth < base.count, let idx = base.index(base.endIndex, offsetBy: -offsetWidth, limitedBy: base.startIndex) else { return base }
+        return String(base[..<idx]) + "." + frac + String(base[idx...])
     }
 
     static func decodeDate(_ raw: String) -> Date? {
-        fractionFormatter.date(from: raw) ?? plainFormatter.date(from: raw)
+        // RFC3339Nano input can carry up to 9 fractional digits; the strict
+        // formatter handles at most 6, so trim longer fractions first.
+        var normalized = raw
+        if let range = normalized.range(of: #"[.]\d{7,9}"#, options: .regularExpression) {
+            let digits = normalized[range].dropFirst().prefix(6)
+            normalized = normalized.replacingCharacters(in: range, with: "." + digits)
+        }
+        return fractionFormatter.date(from: normalized) ?? plainFormatter.date(from: normalized)
     }
 
     static func directory() -> String {
