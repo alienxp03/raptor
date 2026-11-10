@@ -255,11 +255,11 @@ function M.setup(options)
 	})
 
 	rex.action({
-		name = "raptor_task_new",
-		title = "Raptor: Instant Pi Worktree",
-		description = "Auto-name a branch/worktree from HEAD, open a tab, and start fresh Pi without a prompt.",
+		name = "raptor_worktree_agent",
+		title = "Raptor: Instant Agent Worktree",
+		description = "Auto-name a branch and worktree from HEAD, open a tab, and start a fresh agent (pi) without a prompt.",
 		category = "Navigate",
-		keywords = "task pi instant branch worktree tab",
+		keywords = "agent pi task instant branch worktree tab",
 		run = function(ctx)
 			if ctx.session_id == nil or ctx.block_id == nil then
 				error("raptor: instant task needs a session and origin pane", 0)

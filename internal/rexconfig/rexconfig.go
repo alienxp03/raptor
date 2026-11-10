@@ -26,6 +26,7 @@ func DefaultOptions() Options {
 	return Options{Bindings: [][2]string{
 		{"shift+cmd+o", "raptor"},
 		{"shift+cmd+n", "raptor_worktree_new"},
+		{"ctrl+shift+n", "raptor_worktree_agent"},
 	}}
 }
 

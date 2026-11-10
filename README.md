@@ -38,7 +38,8 @@ rex config reload
 | --- | --- |
 | `shift+cmd+o` | Open the launcher |
 | `cmd+p` | Return to the last session |
-| `shift+cmd+n` | Create a worktree |
+| `shift+cmd+n` | Create a worktree (form) |
+| `ctrl+shift+n` | Instant agent worktree (pi) |
 | `shift+cmd+p` | Open the pull request form (optional, add inside the block) |
 
 ## Usage
@@ -71,10 +72,10 @@ Press `⇧⌘P` (or paste a PR URL into search) and confirm. Raptor resolves met
 
 ### Instant Pi worktree
 
-Bind `raptor_task_new` for a formless flow: a two-word branch (`otter-falcon`) is created from the origin repo's committed HEAD, a new tab opens, and fresh `pi` starts — no picker involved, from any Rex client (`raptor task`).
+Bind `raptor_worktree_agent` for a formless flow: a two-word branch (`otter-falcon`) is created from the origin repo's committed HEAD, a new tab opens, and fresh `pi` starts — no picker involved, from any Rex client (`raptor task`).
 
 ```lua
-rex.bind("ctrl+shift+n", "raptor_task_new")
+rex.bind("ctrl+shift+n", "raptor_worktree_agent")
 ```
 
 ## Configuration

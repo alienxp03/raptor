@@ -123,7 +123,8 @@ func main() {
 			fmt.Println("Wired plugin: require(\"raptor\") from the Rex plugin directory")
 		}
 		fmt.Printf("Rex config: %s%s\n", target, map[bool]string{true: " (created)", false: " (managed block updated)"}[created])
-		fmt.Println("Bindings: shift+cmd+o opens Raptor; shift+cmd+n creates a worktree.")
+		fmt.Println("Bindings: shift+cmd+o opens Raptor; shift+cmd+n opens the worktree form;")
+		fmt.Println("ctrl+shift+n starts an instant agent worktree (pi).")
 		fmt.Println("Finish with: rex config reload")
 	case "panel":
 		// Open (or toggle) the resident native panel over IPC.

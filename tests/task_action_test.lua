@@ -15,7 +15,7 @@ rex = {
  end,
 }
 dofile("init.lua").setup({ bin = "/demo/raptor" })
-local run = actions.raptor_task_new
+local run = actions.raptor_worktree_agent
 assert(run ~= nil)
 local result = run({ session_id = "session", block_id = "origin" })
 assert(result.branch == "otter")
