@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/macos-common.sh"
 macos_only
 need xcrun
-need go
+need swift
 mkdir -p "$SCRIPT_ROOT/aux"
 work=$(mktemp -d "$SCRIPT_ROOT/aux/macos-tests.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -32,8 +32,11 @@ xcrun swiftc "${common[@]}" -framework SwiftUI -framework AppKit \
 xcrun swiftc "${common[@]}" "$SCRIPT_ROOT/macos/Tests/TransportFixture.swift" \
   -o "$app/Contents/MacOS/raptor-cli"
 "$app/Contents/MacOS/NativeChecks" --transport-fixture
-# Exercise the real Go response envelope through ProcessBackend, not a mock.
-(cd "$SCRIPT_ROOT" && go build -o "$app/Contents/MacOS/raptor-cli" ./cmd/raptor)
+# Exercise the real Swift response envelope through ProcessBackend, not a mock.
+(cd "$SCRIPT_ROOT" && swift build -c release --product raptor --scratch-path "$work/spm" \
+  && rm -f "$app/Contents/MacOS/raptor-cli" \
+  && cp "$(swift build -c release --product raptor --scratch-path "$work/spm" --show-bin-path)/raptor" \
+  "$app/Contents/MacOS/raptor-cli")
 theme_app="$work/Rex.app"
 theme_resources="$theme_app/Contents/Resources/SuperUI_SuperDesignTokens.bundle/Contents/Resources"
 mkdir -p "$theme_resources" "$work/theme-bin"

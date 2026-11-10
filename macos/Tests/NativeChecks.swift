@@ -2369,7 +2369,7 @@ struct NativeChecks {
         let result = try await backend.request("theme", params: [:])
         require(result.theme?.name == "Wire Forest" && result.theme?.background == "#102030" &&
                      result.theme?.ui?.selection == "#bfbfbf",
-                     "Real Go NDJSON must decode result.theme, not silently drop a flat palette")
+                     "Real backend NDJSON must decode result.theme, not silently drop a flat palette")
         let model = PickerModel(options: options, backend: backend)
         await model.refreshTheme()?.value
         require(model.themeRevision == 1 && model.themeLoaded && PickerPalette.isDark,
@@ -2391,7 +2391,7 @@ struct NativeChecks {
                          "Real backend colors must reach the panel material")
         }
         model.close()
-        print("PASS: real Go backend → NDJSON → Swift decoding → model → selected text and native panel tint")
+        print("PASS: real backend → NDJSON → Swift decoding → model → selected text and native panel tint")
     }
 
     private static func queuedSearchChecks(_ options: LaunchOptions) async throws {

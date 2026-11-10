@@ -1,16 +1,16 @@
 # Native Mac app
 
-Raptor has two interfaces and one Go implementation of picker behavior:
+Raptor has one interface and one Swift implementation of picker behavior:
 
 ```text
 Rex action on this Mac -> Raptor.app (SwiftUI) -> bundled raptor api
                                              |
-                        shared Go catalog, worktree, dispatch, Rex history
+                        shared Swift catalog, worktree, dispatch, Rex history
 ```
 
 The Mac app is a separate floating window, not a Rex-rendered popup. It requires macOS 14 or later. The picker opens 72 points below the active screen's usable top edge and grows downward as results change.
 
-The installed resident host keeps the panel, model, and Go backend warm between uses. Escape or Cmd+Q hides the resident panel and stops its live Rex subscription. Use `raptor service stop` to stop the resident host. Each reopening supplies fresh Rex context. A live mutation or removal confirmation cannot have its context replaced.
+The installed resident host keeps the panel, model, and backend warm between uses. Escape or Cmd+Q hides the resident panel and stops its live Rex subscription. Use `raptor service stop` to stop the resident host. Each reopening supplies fresh Rex context. A live mutation or removal confirmation cannot have its context replaced.
 
 ## Client routing
 
@@ -30,9 +30,9 @@ Normal installations run `raptor init`, which writes one managed block loading t
 
 ## Reopening and performance
 
-The resident app keeps its panel and backend warm while hidden. A new request supplies session, pane, and client IDs. Cached rows appear before revalidation; context-bound actions remain gated until the new context is ready. Empty-query opens and warm reopens select the most-recent non-current session, or a directory when no other session exists. Go returns `selected_id`; manual selection stays stable during live updates. Successful session navigation and dispatch hide the resident panel without closing its backend. This avoids a new process and catalog scan on the next opening.
+The resident app keeps its panel and backend warm while hidden. A new request supplies session, pane, and client IDs. Cached rows appear before revalidation; context-bound actions remain gated until the new context is ready. Empty-query opens and warm reopens select the most-recent non-current session, or a directory when no other session exists. The backend returns `selected_id`; manual selection stays stable during live updates. Successful session navigation and dispatch hide the resident panel without closing its backend. This avoids a new process and catalog scan on the next opening.
 
-While visible, the panel receives native Rex events through Go. Status changes update rows without reopening or resetting selection, scroll, search, or target. Search filters Go's in-memory catalog, not a new Rex scan. A live refresh runs separately and publishes its completed snapshot. Typing retains the current rows until matching results arrive; actions on an older query stay gated. Subscription cleanup and reconnect recovery are separate from dot animation. See [Rex API integration](rex-api.md).
+While visible, the panel receives native Rex events through the backend. Status changes update rows without reopening or resetting selection, scroll, search, or target. Search filters the backend's in-memory catalog, not a new Rex scan. A live refresh runs separately and publishes its completed snapshot. Typing retains the current rows until matching results arrive; actions on an older query stay gated. Subscription cleanup and reconnect recovery are separate from dot animation. See [Rex API integration](rex-api.md).
 
 Local measurements from the launch command to a visible window were about 125–140 ms for warm reopens versus 230–280 ms for fresh processes. Populated results took about 170–180 ms warm. These are local measurements, not timing guarantees; the first launch after installation can take longer.
 
@@ -44,7 +44,7 @@ The **Open in** control uses the shared target order: session → tab → cd her
 
 Home-directory labels use `~/…`; tooltips and backend requests retain the full absolute paths. Paths outside the current home directory stay absolute.
 
-Swift draws the UI, manages keyboard focus, and displays confirmations. It does not calculate worktree names, validate branches, run Git, or dispatch Rex actions. Those operations run in shared Go packages:
+Swift draws the UI, manages keyboard focus, and displays confirmations. It does not calculate worktree names, validate branches, run Git, or dispatch Rex actions. Those operations run in shared Swift packages:
 
 - `internal/catalog`: directory/repository discovery, fuzzy matching, worktree data.
 - `internal/worktree`: destination paths, validation, creation, safe removal.
@@ -62,14 +62,14 @@ The app starts the bundled `Contents/MacOS/raptor-cli` executable with the origi
 {"id":1,"result":{"items":[{"path":"/demo/project","label":"project"}],"targets":["session","tab","here","pane_right","pane_below"],"target":"tab"}}
 ```
 
-Errors have an `error` string instead of `result`. IDs identify requests; they do not identify directories or worktrees. Paths returned by Go identify selectable entries.
+Errors have an `error` string instead of `result`. IDs identify requests; they do not identify directories or worktrees. Paths returned by the backend identify selectable entries.
 
 | Method | Parameters | Result |
 | --- | --- | --- |
 | `sessions` | `query` | Unified session/directory items, hosts, targets, and preferred `selected_id` |
 | `directories` | `query`, `repos_only` | Directory or repository items and open targets |
 | `worktrees.list` | `repo`, `query` | Internal creation metadata: local base branches, current base, targets; `needs_repo` if origin has no repository. No browser UI is exposed |
-| `worktrees.branches` | `repo`, `query` | Local base branches ranked by the shared Go fuzzy search; no network access |
+| `worktrees.branches` | `repo`, `query` | Local base branches ranked by the shared fuzzy search; no network access |
 | `worktrees.preview` | `repo`, `branch`, `base` | Destination `path` and `validation_error` |
 | `worktrees.create` | `repo`, `branch`, `base` | Created `path`; does not open it automatically |
 | `pullrequests.resolve` | `repo`, `input` | Read-only PR metadata, clone location, existing/predicted worktree path |
@@ -89,11 +89,11 @@ Worktrunk owns all new worktree destinations. Raptor's legacy `worktree_root` do
 
 ## Rex theme colors
 
-The native app takes its colors from the active Rex theme instead of hardcoding them. The Go resolver reads `Workspace.appearance`, `Workspace.interfaceStyle`, `Workspace.darkThemeID`/`Workspace.lightThemeID`, and `Workspace.customThemes` from the `com.superlogical.rex` preferences, then looks the theme up in the Rex app bundle's `SuperUI_SuperDesignTokens` catalog. Tinted interface styles (`blendTheme`, `useTheme`) fall back to built-in colors, as does any resolution failure. The native app requests the resolved palette over the `theme` method and repaints.
+The native app takes its colors from the active Rex theme instead of hardcoding them. The backend resolver reads `Workspace.appearance`, `Workspace.interfaceStyle`, `Workspace.darkThemeID`/`Workspace.lightThemeID`, and `Workspace.customThemes` from the `com.superlogical.rex` preferences, then looks the theme up in the Rex app bundle's `SuperUI_SuperDesignTokens` catalog. Tinted interface styles (`blendTheme`, `useTheme`) fall back to built-in colors, as does any resolution failure. The native app requests the resolved palette over the `theme` method and repaints.
 
 Set `RAPTOR_THEME=ansi` to force the built-in palette (tests do this for deterministic output), and `RAPTOR_REX_APP` to point at a Rex installation outside the standard `/Applications` and `~/Applications` paths.
 
-The creation form labels the source **Repo** and new **Destination** paths, with branch, searchable local base branch, and open target fields. Direct `wt-create` launches display the form before metadata loads. Escape closes a directly opened form; it returns to the parent list for a form opened from that list. A base-branch popover is dismissed first. Branch matching and validation run in Go. An untouched branch field shows guidance, not a validation error. Tab / Shift+Tab skips disabled controls; Cmd+Enter submits. The branch popover owns its keyboard events: Enter selects, Escape closes it and restores form focus; neither submits nor closes the form beneath it.
+The creation form labels the source **Repo** and new **Destination** paths, with branch, searchable local base branch, and open target fields. Direct `wt-create` launches display the form before metadata loads. Escape closes a directly opened form; it returns to the parent list for a form opened from that list. A base-branch popover is dismissed first. Branch matching and validation run in the backend. An untouched branch field shows guidance, not a validation error. Tab / Shift+Tab skips disabled controls; Cmd+Enter submits. The branch popover owns its keyboard events: Enter selects, Escape closes it and restores form focus; neither submits nor closes the form beneath it.
 
 ## Releases
 

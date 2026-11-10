@@ -1,7 +1,7 @@
 # Local macOS packaging
 
 Run from any directory. Requires macOS, Xcode command-line tools with the macOS
-26+ SDK (Xcode 26+), and Go compatible with `go.mod`. `GO` selects a Go executable; normal
+26+ SDK (Xcode 26+). Swift builds both binaries from Package.swift; normal
 `GOTOOLCHAIN` behavior is kept. No sandbox: the backend needs Rex CLI access.
 No entitlements are needed. No network icon downloads.
 
@@ -13,8 +13,8 @@ scripts/install-macos.sh                 # explicit local install, never automat
 
 App: `dist/Raptor.app`. ZIP: `dist/Raptor-VERSION-ARCH.zip`, with a `.sha256`
 sidecar. ARCH is `arm64`, `x86_64`, or `universal`, read from both executables.
-Universal builds compile Swift and Go separately for each architecture, then
-combine each executable with `lipo`. Go uses `CGO_ENABLED=0`; macOS minimum is 14.
+Universal builds compile the UI and the Swift package separately for each architecture, then
+combine each executable with `lipo`; macOS minimum is 14.
 Tests on both hardware architectures are still needed.
 
 Overrides:
@@ -26,14 +26,13 @@ Overrides:
   Homebrew sandbox stays enabled.
 - `DIST_DIR`: output directory. Relative paths resolve from the caller's directory.
 - `ARCH` or `--arch arm64|x86_64`, or `--universal`: target architecture.
-- `GO`: executable path, including paths with spaces (not a command plus flags).
 - `APP_SIGN_IDENTITY`: signing identity; default `-` (ad hoc).
 - `NOTARY_PROFILE`: opt-in `notarytool` keychain profile. Package script only.
 - `APP_DESTINATION`: app install directory, default `$HOME/Applications`.
 - `PREFIX`: CLI install prefix, default `$HOME/.local`.
 - `REX_PLUGIN_DIR`: default `$HOME/.config/rex/raptor`.
 
-Signing proceeds inside out: Go backend, then app. No `--deep` signing; deep,
+Signing proceeds inside out: backend, then app. No `--deep` signing; deep,
 strict verification is used. A configured identity enables hardened runtime and
 a secure timestamp. Use a **Developer ID Application** identity for distribution.
 The script never creates certificates or stores credentials.
@@ -75,7 +74,7 @@ Make targets:
 ## Prebuilt Homebrew releases
 
 `.github/workflows/release.yml` builds a universal app on a `vMAJOR.MINOR.PATCH`
-tag from `master`. It runs Go, Lua, native Mac, and formula-generation checks;
+tag from `master`. It runs Swift, Lua, native Mac, and formula-generation checks;
 then creates a **draft** GitHub release with the ZIP, SHA-256 checksum, and
 `raptor.rb` formula. Both Intel and Apple Silicon executables are included;
 the runner tests only its host architecture. No Apple credentials are needed.
@@ -95,7 +94,7 @@ brew install alienxp03/tap/raptor
 brew test alienxp03/tap/raptor
 ```
 
-Stable installs need neither Go nor Xcode. The formula installs `Raptor.app`,
+Stable installs need neither build tools nor Xcode. The formula installs `Raptor.app`,
 its bundled CLI, and its bundled Rex plugin. It does not remove quarantine
 attributes, disable Gatekeeper, or change user configuration. Keeping the `.app`
 bundle is intentional. This is not Apple notarization or a guarantee that every
@@ -126,9 +125,8 @@ brew upgrade --fetch-HEAD alienxp03/tap/raptor
 brew test --HEAD alienxp03/tap/raptor
 ```
 
-Homebrew 7+ runs the formula's `fetch` method with network access to download Go
-modules, then builds offline. The formula needs Xcode 26+ to compile the guarded
-macOS 26 glass API; the app still targets macOS 14+. Go 1.27.1+ is required.
+The formula builds from source with the Xcode toolchain (needed for the Swift
+package and the guarded macOS 26 glass API; the app still targets macOS 14+).
 
 The package owns only Homebrew paths:
 - `opt/raptor/libexec/Raptor.app`: signed native app and bundled backend.

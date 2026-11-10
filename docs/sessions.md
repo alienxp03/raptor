@@ -25,7 +25,7 @@ Pinned local directories float to the top of the directory block (Ctrl+G toggles
 
 Raptor records acknowledged session switches and the session from which you open the picker. On macOS, a small adapter also watches Rex's private `Workspace.lastFocusedSession` preference while the app is frontmost. This includes switches made in Rex's sidebar, not just Raptor. The installed Rex API has no last-used timestamp or selected-session event.
 
-Go validates the app PID and session/host membership before saving an observation. History persists on the same filesystem for the Mac app and CLI backend. Without the Mac observer, confirmed Raptor navigation still records visits.
+The backend validates the app PID and session/host membership before saving an observation. History persists on the same filesystem for the Mac app and CLI backend. Without the Mac observer, confirmed Raptor navigation still records visits.
 
 On an empty-query open or reopen, the default selection is the most-recent non-current live session. If none exists, select a directory before falling back to the current session. The current session remains marked and available; its top-of-list position does not make it the default destination. A nonempty search selects its top ranked match, and live refreshes preserve the user's selection.
 

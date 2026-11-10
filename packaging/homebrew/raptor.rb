@@ -8,29 +8,12 @@ class Raptor < Formula
   head "https://github.com/alienxp03/raptor.git", branch: "master"
 
   if build.head?
-    depends_on "go" => :build
     depends_on xcode: ["26.0", :build]
   end
   depends_on macos: :sonoma
   depends_on "zoxide"
   depends_on "worktrunk"
   depends_on "gh"
-
-  def setup_go_environment
-    ENV["GOENV"] = "off"
-    ENV["GOWORK"] = "off"
-    ENV["GOTOOLCHAIN"] = "local"
-    ENV["GOFLAGS"] = "-mod=readonly"
-    ENV["GOMODCACHE"] = HOMEBREW_CACHE/"go_mod_cache/pkg/mod"
-    ENV["GOCACHE"] = buildpath/".go-build-cache"
-  end
-
-  def fetch
-    return unless build.head?
-
-    setup_go_environment
-    system formula_opt_bin("go")/"go", "mod", "download"
-  end
 
   def install
     if build.stable?
@@ -40,10 +23,6 @@ class Raptor < Formula
       return
     end
 
-    setup_go_environment
-    ENV["GOPROXY"] = "off"
-    ENV["GOSUMDB"] = "off"
-    ENV["GO"] = formula_opt_bin("go")/"go"
     ENV["VERSION"] = "0.0.1"
     ENV["CLI_VERSION"] = version.to_s
     ENV["APP_SIGN_IDENTITY"] = "-"

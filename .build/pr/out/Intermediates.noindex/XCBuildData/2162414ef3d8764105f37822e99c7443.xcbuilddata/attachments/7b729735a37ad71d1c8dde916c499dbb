@@ -1,4 +1,0 @@
-module RaptorCatalog {
-header "RaptorCatalog-Swift.h"
-export *
-}

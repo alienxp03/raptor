@@ -1,4 +1,0 @@
-module RaptorWorktree {
-header "RaptorWorktree-Swift.h"
-export *
-}

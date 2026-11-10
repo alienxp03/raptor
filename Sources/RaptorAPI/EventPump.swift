@@ -5,8 +5,8 @@ import RaptorRex
 /// hosts.go (the Rex equivalents are module-internal). One process-wide cache,
 /// like Go's localHostnameOnce.
 extension Rex {
-    private static let apiHostnameLock = NSLock()
-    private static var apiHostnameCache: String?
+    static let apiHostnameLock = NSLock()
+    static var apiHostnameCache: String?
 
     /// LocalHostname resolves a display name, not server identity: Rex's Tailscale
     /// DNS label when available, else the OS hostname, else the generic label.

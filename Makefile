@@ -31,10 +31,10 @@ package:
 
 test:
 	swift test --parallel
-	lua tests/history_test.lua
-	lua tests/homebrew_routing_test.lua
-	lua tests/task_action_test.lua
-	lua tests/pr_action_test.lua
+	lua Tests/history_test.lua
+	lua Tests/homebrew_routing_test.lua
+	lua Tests/task_action_test.lua
+	lua Tests/pr_action_test.lua
 
 test-macos:
 	./scripts/test-macos.sh

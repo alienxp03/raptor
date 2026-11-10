@@ -146,6 +146,7 @@ final class SessionsTests: APITestCase {
 
     func testSessionsJumpOnHostSelectsThroughRemoteAppClient() throws {
         env.set("XDG_CACHE_HOME", makeTempDir())
+        _ = Rex.apiLocalHostname()
         let dir = makeTempDir()
         let log = dir + "/calls"
         env.set("PATH", dir + ":" + (env.get("PATH") ?? ""))
@@ -211,6 +212,9 @@ final class SessionsTests: APITestCase {
 
     func testSessionsCreateOnRemoteHost() throws {
         env.set("XDG_CACHE_HOME", makeTempDir())
+        // Prime the process-wide hostname cache first (Go's sync.Once fired in
+        // an earlier test); otherwise the fake rex log gains a server.status line.
+        _ = Rex.apiLocalHostname()
         let dir = makeTempDir()
         let log = dir + "/calls"
         env.set("PATH", dir + ":" + (env.get("PATH") ?? ""))

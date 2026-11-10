@@ -6,8 +6,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/macos-common.sh"
 usage() {
   printf '%s\n' 'Usage: scripts/build-macos.sh [--arch arm64|x86_64 | --universal]' \
     'Build dist/Raptor.app; macOS 14 minimum. Default: host architecture.' \
-    'Environment: VERSION=0.0.1, DIST_DIR, GO=go, APP_SIGN_IDENTITY (default: ad hoc).' \
-    'Go uses go.mod and normal GOTOOLCHAIN settings. No install or publishing.'
+    'Environment: VERSION=0.0.1, DIST_DIR, CLI_VERSION, APP_SIGN_IDENTITY (default: ad hoc).' \
+    'Swift builds both binaries from Package.swift. No install or publishing.'
 }
 ARCH=${ARCH:-$(uname -m)}
 while [[ $# -gt 0 ]]; do
@@ -21,8 +21,8 @@ done
 case "$ARCH" in arm64|x86_64|universal) ;; *) fail "Unsupported architecture: $ARCH" ;; esac
 macos_only
 version_value
-GO=${GO:-go}
-for tool in "$GO" xcrun /usr/bin/codesign /usr/bin/plutil; do need "$tool"; done
+for tool in swift xcrun /usr/bin/codesign /usr/bin/plutil; do need "$tool"; done
+[[ -f $SCRIPT_ROOT/Package.swift ]] || fail 'Missing Package.swift (Swift backend).'
 sources=("$SCRIPT_ROOT"/macos/Sources/Raptor/*.swift)
 [[ -f ${sources[0]} ]] || fail 'Swift sources are not ready: macos/Sources/Raptor/*.swift'
 grep -Eq '^[[:space:]]*@main([[:space:]]|$)' "${sources[@]}" || fail 'Swift app entry point (@main) is not ready.'
@@ -51,14 +51,23 @@ swift_flags=()
 if [[ ${RAPTOR_EXTERNAL_SANDBOX:-0} == 1 ]]; then
   swift_flags=(-disable-sandbox)
 fi
+# Version is baked into the CLI through a generated source file (the Swift
+# stand-in for Go's -ldflags -X). Restore the placeholder after building.
+version_file="$SCRIPT_ROOT/Sources/raptor/VersionGenerated.swift"
+restore_version() { git -C "$SCRIPT_ROOT" checkout -- "$version_file" 2>/dev/null || true; }
+printf 'let raptorVersion = "%s"\n' "${CLI_VERSION:-$VERSION}" > "$version_file"
+trap 'restore_version; rm -rf "$work"' EXIT
+
 for arch in "${archs[@]}"; do
-  case "$arch" in arm64) goarch=arm64 ;; x86_64) goarch=amd64 ;; esac
-  printf 'Building %s (Go: %s)\n' "$arch" "$("$GO" version)"
+  printf 'Building %s backend (Swift %s)\n' "$arch" "$(swift --version | head -1)"
   xcrun --sdk macosx swiftc ${swift_flags[@]+"${swift_flags[@]}"} -parse-as-library -O -sdk "$sdk" \
     -target "$arch-apple-macosx14.0" -framework SwiftUI -framework AppKit \
     "${sources[@]}" -o "$work/RaptorUI-$arch"
-  (cd "$SCRIPT_ROOT" && CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch \
-    "$GO" build -trimpath -ldflags "-X main.version=${CLI_VERSION:-$VERSION}" -o "$work/raptor-cli-$arch" ./cmd/raptor)
+  (cd "$SCRIPT_ROOT" && swift build -c release --product raptor --arch "$arch" \
+    --scratch-path "$work/spm-$arch" ${swift_flags[@]+"${swift_flags[@]}"} >/dev/null) || exit 1
+  bin_dir=$(cd "$SCRIPT_ROOT" && swift build -c release --product raptor --arch "$arch" \
+    --scratch-path "$work/spm-$arch" --show-bin-path)
+  cp "$bin_dir/raptor" "$work/raptor-cli-$arch"
 done
 if [[ $ARCH == universal ]]; then
   xcrun lipo -create "$work/RaptorUI-arm64" "$work/RaptorUI-x86_64" -output "$app/Contents/MacOS/Raptor"

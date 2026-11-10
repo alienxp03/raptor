@@ -1,4 +1,0 @@
-module RaptorService {
-header "RaptorService-Swift.h"
-export *
-}

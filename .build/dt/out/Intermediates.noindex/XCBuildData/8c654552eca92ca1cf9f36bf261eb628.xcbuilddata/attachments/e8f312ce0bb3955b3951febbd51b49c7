@@ -1,4 +1,0 @@
-module RaptorTask {
-header "RaptorTask-Swift.h"
-export *
-}

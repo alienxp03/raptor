@@ -2,7 +2,7 @@
 
 A session and project launcher for [Rex](https://www.superlogical.com/rex/docs). Resume a session or open a project directory — as a session, tab, pane split, or the current shell — and create Git worktrees or open GitHub pull requests without leaving the keyboard.
 
-Native Mac app over one shared Go backend.
+Native Mac app over one shared Swift backend.
 
 <p align="center">
   <img width="72%" src="docs/screenshots/directories.png" alt="Raptor session launcher">
@@ -96,7 +96,7 @@ Skip the picker entirely: `rex do raptor target=tab dir=/path/to/project`.
 
 ## How it works
 
-The Rex plugin talks to a Go backend that keeps the panel and its data warm between opens, so reopening takes about 125 ms. Session order follows shared recency history, including sidebar switches. Details: [sessions](docs/sessions.md), [the native app](docs/native-app.md), [packaging](packaging/macos.md).
+The Rex plugin talks to a Swift backend that keeps the panel and its data warm between opens, so reopening takes about 125 ms. Session order follows shared recency history, including sidebar switches. Details: [sessions](docs/sessions.md), [the native app](docs/native-app.md), [packaging](packaging/macos.md).
 
 ## Development
 
@@ -107,7 +107,7 @@ cd ~/.config/rex/raptor && make install
 
 On Mac this installs `~/Applications/Raptor.app`, the CLI as `~/.local/bin/raptor`, and the Rex plugin. Other systems install the CLI only.
 
-Track `master` without a checkout:
+Track `master` without a checkout (builds from source; Xcode 26+):
 
 ```sh
 brew install --HEAD alienxp03/tap/raptor
@@ -116,7 +116,7 @@ brew install --HEAD alienxp03/tap/raptor
 Private-repo credentials: [packaging](packaging/macos.md).
 
 ```sh
-make test         # Go and Lua checks
+make test         # Swift and Lua checks
 make test-macos   # Swift checks
 make app          # dist/Raptor.app (requires Xcode 26+)
 ```

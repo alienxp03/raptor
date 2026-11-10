@@ -1,4 +1,0 @@
-module RaptorAPI {
-header "RaptorAPI-Swift.h"
-export *
-}

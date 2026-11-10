@@ -1,4 +1,0 @@
-module RaptorPullrequest {
-header "RaptorPullrequest-Swift.h"
-export *
-}

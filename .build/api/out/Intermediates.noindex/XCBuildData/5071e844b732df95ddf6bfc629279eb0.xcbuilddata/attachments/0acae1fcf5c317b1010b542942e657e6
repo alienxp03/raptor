@@ -1,4 +1,0 @@
-module RaptorExecx {
-header "RaptorExecx-Swift.h"
-export *
-}

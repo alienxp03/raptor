@@ -1,4 +1,0 @@
-module RaptorRexconfig {
-header "RaptorRexconfig-Swift.h"
-export *
-}
