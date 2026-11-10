@@ -20,7 +20,7 @@ public extension Rex {
     /// SelectLast uses the same history as both pickers. Failed host queries and
     /// selections stop navigation; they must not turn an unavailable session into
     /// a deleted session or report a server-only focus as a successful app switch.
-    static func selectLast(_ ctx: Ctx) throws -> String {
+    public static func selectLast(_ ctx: Ctx) throws -> String {
         if ctx.client.isEmpty || ctx.session.isEmpty {
             throw RexError("no client or session context")
         }
