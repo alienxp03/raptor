@@ -2,7 +2,7 @@
 
 Run from any directory. Requires macOS, Xcode command-line tools with the macOS
 26+ SDK (Xcode 26+). Swift builds both binaries from Package.swift; normal
-`GOTOOLCHAIN` behavior is kept. No sandbox: the backend needs Rex CLI access.
+No sandbox: the backend needs Rex CLI access.
 No entitlements are needed. No network icon downloads.
 
 ```sh
