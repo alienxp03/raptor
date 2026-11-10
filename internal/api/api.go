@@ -324,18 +324,20 @@ type agentsResult struct {
 }
 
 type sessionsResult struct {
-	Items   []catalog.LauncherItem `json:"items"`
-	Hosts   []hostHeader           `json:"hosts"`
-	Targets []string               `json:"targets"`
-	Target  string                 `json:"target"`
+	SelectedID string                 `json:"selected_id,omitempty"`
+	Items      []catalog.LauncherItem `json:"items"`
+	Hosts      []hostHeader           `json:"hosts"`
+	Targets    []string               `json:"targets"`
+	Target     string                 `json:"target"`
 }
 
 // launcherCacheEntry is the on-disk stale-while-revalidate payload: the full
 // unfiltered composition plus its host headers, stamped when fetched.
 type launcherCacheEntry struct {
-	Timestamp time.Time              `json:"timestamp"`
-	Items     []catalog.LauncherItem `json:"items"`
-	Hosts     []hostHeader           `json:"hosts"`
+	Timestamp   time.Time              `json:"timestamp"`
+	ScanStarted time.Time              `json:"scan_started,omitempty"`
+	Items       []catalog.LauncherItem `json:"items"`
+	Hosts       []hostHeader           `json:"hosts"`
 }
 
 // launcherSoftTTL is sesh's stale-while-revalidate window: within it the
@@ -351,7 +353,7 @@ func (h *Handler) readLauncherCache() (launcherCacheEntry, bool) {
 	h.cacheMu.Lock()
 	defer h.cacheMu.Unlock()
 	if h.launcherLoaded {
-		return h.launcher, true
+		return overlayLauncher(h.launcher), true
 	}
 	data, err := os.ReadFile(h.launcherCachePath())
 	if err != nil {
@@ -362,13 +364,13 @@ func (h *Handler) readLauncherCache() (launcherCacheEntry, bool) {
 		return launcherCacheEntry{}, false
 	}
 	h.launcher, h.launcherLoaded = entry, true
-	return entry, true
+	return overlayLauncher(entry), true
 }
 
 // writeLauncherCache replaces the cache atomically so a crashed write never
 // leaves a truncated file behind.
 func (h *Handler) writeLauncherCache(items []catalog.LauncherItem, hosts []hostHeader) {
-	entry := launcherCacheEntry{Timestamp: time.Now(), Items: items, Hosts: hosts}
+	entry := launcherCacheEntry{Timestamp: time.Now(), ScanStarted: h.launcher.ScanStarted, Items: items, Hosts: hosts}
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return
@@ -377,11 +379,16 @@ func (h *Handler) writeLauncherCache(items []catalog.LauncherItem, hosts []hostH
 	if os.MkdirAll(filepath.Dir(path), 0o755) != nil {
 		return
 	}
-	tmp := path + ".tmp"
-	if os.WriteFile(tmp, data, 0o644) != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), ".launcher-*")
+	if err != nil {
 		return
 	}
-	_ = os.Rename(tmp, path)
+	defer os.Remove(f.Name())
+	_, err = f.Write(data)
+	closeErr := f.Close()
+	if err == nil && closeErr == nil {
+		_ = os.Rename(f.Name(), path)
+	}
 }
 
 // hostHeader tells native clients which group headers to render, including
@@ -606,7 +613,7 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 		// reference resolver from making native calls for each candidate.
 		items = catalog.PinLauncherOrigin(items, "")
 		items = catalog.FilterLauncherItems(items, p.Query, "")
-		return sessionsResult{Items: items, Hosts: cached.Hosts, Targets: h.targets(), Target: "session"}, nil
+		return sessionsResult{SelectedID: catalog.PreferredLauncherID(items, p.Query), Items: items, Hosts: cached.Hosts, Targets: h.targets(), Target: "session"}, nil
 	case "sessions.jump":
 		_, entry, err := decodeSessionAction(params)
 		if err != nil {
@@ -633,10 +640,12 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 		if err != nil {
 			return nil, err
 		}
+		result := map[string]any{"session_id": sid, "existing": existing}
 		if err := rex.SelectOnHost(p.Host, sid, h.ctx.Client); err != nil {
-			return nil, fmt.Errorf("created %s on %s, but could not switch to it: %w", sid, rex.LocalHostLabelOr(p.Host), err)
+			result["error"] = fmt.Sprintf("created %s on %s, but could not switch to it: %v", sid, rex.LocalHostLabelOr(p.Host), err)
 		}
-		return map[string]any{"session_id": sid, "existing": existing}, nil
+		h.addLauncherItems(result)
+		return result, nil
 	case "sessions.close":
 		_, entry, err := decodeSessionAction(params)
 		if err != nil {
@@ -813,10 +822,11 @@ func (h *Handler) callContext(ctx context.Context, method string, params json.Ra
 		if p.Path == "" {
 			return nil, fmt.Errorf("path is required")
 		}
-		if err := dispatch.Dispatch(p.Target, p.Path, h.ctx, h.cfg); err != nil {
+		result, err := dispatch.DispatchResult(p.Target, p.Path, h.ctx, h.cfg)
+		if err != nil && result.SessionID == "" {
 			return nil, err
 		}
-		return struct{}{}, nil
+		return h.openLauncherResult(result, err), nil
 	default:
 		return nil, fmt.Errorf("unknown method %q", method)
 	}

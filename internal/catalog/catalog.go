@@ -300,7 +300,28 @@ func FilterLauncherItems(items []LauncherItem, query, originSession string) []La
 	for _, match := range scored {
 		ranked = append(ranked, items[match.Index])
 	}
-	return pinOriginFirst(ranked, originSession)
+	return ranked
+}
+
+// PreferredLauncherID chooses a default without hiding the current session.
+// Items must already be MRU ordered (empty query) or search ranked.
+func PreferredLauncherID(items []LauncherItem, query string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	if query == "" {
+		for _, item := range items {
+			if item.Kind == "session" && !item.Active {
+				return item.ID
+			}
+		}
+		for _, item := range items {
+			if item.Kind == "dir" {
+				return item.ID
+			}
+		}
+	}
+	return items[0].ID
 }
 
 // PinLauncherOrigin moves the origin session to the front of already-composed

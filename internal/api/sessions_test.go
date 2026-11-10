@@ -82,6 +82,16 @@ esac
 					}
 				}
 			}
+			wantSelected := ""
+			if len(tt.ids) != 0 {
+				wantSelected = tt.ids[0]
+				if tt.query == "" {
+					wantSelected = "b"
+				}
+			}
+			if result.SelectedID != wantSelected {
+				t.Fatalf("selected_id=%q, want %q", result.SelectedID, wantSelected)
+			}
 			labels := make([]string, 0, len(result.Hosts))
 			for _, host := range result.Hosts {
 				labels = append(labels, host.Label)

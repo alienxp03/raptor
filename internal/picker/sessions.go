@@ -135,6 +135,13 @@ func (m *dirModel) loadAllLauncherDirs(force bool) tea.Cmd {
 // live session on the same host are skipped: selecting the session is the same
 // action, and duplicate rows only add noise.
 func (m *dirModel) applyLauncher() {
+	selection := m.sel
+	defer func() {
+		if m.viewMode != 0 {
+			m.sel = selection
+		}
+	}()
+	selected := m.selectedLauncher()
 	rows := m.composeLauncher()
 	m.launcher = rows
 	m.projectActivity(m.activityEntries)
@@ -149,6 +156,53 @@ func (m *dirModel) applyLauncher() {
 		}
 	}
 	m.filterLauncher()
+	if m.launcherSelectionManual && selected != nil {
+		for position, match := range m.launcherView {
+			fresh := m.launcher[match.index]
+			if fresh.identity == selected.identity && launcherRowID(fresh) == launcherRowID(*selected) {
+				m.sel = position
+				return
+			}
+		}
+	}
+	m.selectPreferredLauncher()
+}
+
+func launcherRowID(r launcherRow) string {
+	if r.session != nil {
+		return r.session.ID
+	}
+	if r.dir != nil {
+		return r.dir.Path
+	}
+	return ""
+}
+
+func (m *dirModel) selectPreferredLauncher() {
+	m.launcherSelectionManual = false
+	items := make([]catalog.LauncherItem, 0, len(m.launcherView))
+	for _, match := range m.launcherView {
+		r := m.launcher[match.index]
+		item := catalog.LauncherItem{ID: launcherRowID(r), Kind: "dir"}
+		if r.session != nil {
+			item.Kind, item.Active = "session", r.session.Active
+		}
+		items = append(items, item)
+	}
+	id := catalog.PreferredLauncherID(items, m.filter)
+	m.sel = 0
+	for i, item := range items {
+		if item.ID == id {
+			m.sel = i
+			break
+		}
+	}
+}
+
+func (m *dirModel) refilterLauncher() {
+	m.launcherSelectionManual = false
+	m.filterLauncher()
+	m.selectPreferredLauncher()
 }
 
 // Filtering uses the materialized rows only. Typing must not recompose the
@@ -174,19 +228,6 @@ func (m *dirModel) filterLauncher() {
 		m.launcherView = make([]launcherMatch, 0, len(ranked))
 		for _, match := range ranked {
 			m.launcherView = append(m.launcherView, launcherMatch{index: match.Index, matches: match.MatchedIndexes})
-		}
-		// The session you're in always leads, whatever the score says.
-		if len(m.launcherView) > 1 {
-			if row := m.launcher[m.launcherView[0].index]; !(row.session != nil && row.session.Active) {
-				for position, match := range m.launcherView[1:] {
-					if row := m.launcher[match.index]; row.session != nil && row.session.Active {
-						pinnedMatch := m.launcherView[position+1]
-						copy(m.launcherView[1:position+2], m.launcherView[1:position+1])
-						m.launcherView[0] = pinnedMatch
-						break
-					}
-				}
-			}
 		}
 	}
 	if m.sel >= len(m.launcherView) {
@@ -307,7 +348,7 @@ func (m *dirModel) acceptLauncherSessions(msg launcherSessionsMsg) {
 		}
 	}()
 	var selected *launcherRow
-	if m.viewMode == 0 {
+	if m.viewMode == 0 && m.launcherSelectionManual {
 		selected = m.selectedLauncher()
 	}
 	m.launcherSessionsLoading = false
@@ -399,19 +440,21 @@ func (m *dirModel) updateLauncher(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.filter != "" {
 			r := []rune(m.filter)
 			m.filter = string(r[:len(r)-1])
-			m.filterLauncher()
+			m.refilterLauncher()
 		}
 		return m, nil
 	case "ctrl+u":
 		m.filter = ""
-		m.filterLauncher()
+		m.refilterLauncher()
 		return m, nil
 	case "up", "ctrl+k":
+		m.launcherSelectionManual = true
 		if m.sel > 0 {
 			m.sel--
 		}
 		return m, nil
 	case "down", "ctrl+j":
+		m.launcherSelectionManual = true
 		if m.sel < len(m.launcherView)-1 {
 			m.sel++
 		}
@@ -473,16 +516,15 @@ func (m *dirModel) updateLauncher(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.splitMode = true
 		return m, nil
-	case "ctrl+t", "ctrl+n", "f2":
+	case "ctrl+t":
+		return m, nil
+	case "ctrl+n", "f2":
 		r := m.selectedLauncher()
 		if r == nil || r.dir == nil {
 			return m, nil
 		}
 		if worktreepkg.IsGitRepo(r.dir.Path) {
-			m.next = "wt"
-			if msg.String() != "ctrl+t" {
-				m.next = "wt-create"
-			}
+			m.next = "wt-create"
 			m.nextRepo = worktreepkg.RepoRoot(r.dir.Path)
 			return m, tea.Quit
 		}
@@ -493,7 +535,7 @@ func (m *dirModel) updateLauncher(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 			m.filter += string(msg.Runes)
-			m.filterLauncher()
+			m.refilterLauncher()
 			return m, nil
 		}
 	}
@@ -770,12 +812,12 @@ func (m *dirModel) launcherFooter(width int) string {
 		}
 	}
 	splitHint := pickerText.Render("^p") + pickerMuted.Render(" split")
-	right := pickerText.Render("^x") + pickerMuted.Render(" close") + "  " + pickerText.Render("^t") + pickerMuted.Render(" worktrees") + "  " + splitHint + "  " + pickerText.Render("⇥") + pickerMuted.Render(" agents")
+	right := pickerText.Render("^x") + pickerMuted.Render(" close") + "  " + pickerText.Render("^n") + pickerMuted.Render(" new worktree") + "  " + splitHint
 	if width-lipgloss.Width(left)-lipgloss.Width(right) < 2 {
-		right = splitHint + "  " + pickerText.Render("⇥") + pickerMuted.Render(" agents")
+		right = splitHint
 	}
 	if width-lipgloss.Width(left)-lipgloss.Width(right) < 2 {
-		right = pickerText.Render("⇥") + pickerMuted.Render(" agents")
+		right = ""
 	}
 	if m.launcherMode {
 		return pickerMuted.Render(ansi.Truncate(ansi.Strip("enter Actions · esc Back/close"), width, ""))
@@ -813,7 +855,7 @@ func (m *dirModel) viewPreview(cols int, rows int) []string {
 		body := []string{
 			pickerMuted.Render("session: ") + pickerText.Render(r.dir.Label),
 			pickerMuted.Render("host:    ") + pickerText.Render(r.host),
-			pickerMuted.Render("↵ open · ^o target · ^t worktrees"),
+			pickerMuted.Render("↵ open · ^o target · ^n new worktree"),
 		}
 		for _, line := range body {
 			if len(lines)-1 >= rows {

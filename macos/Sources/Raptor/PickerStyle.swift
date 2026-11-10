@@ -18,7 +18,6 @@ enum PickerStyle {
     static let createHeight: CGFloat = 240
     static let searchHeight: CGFloat = 40
     static let searchFieldHeight: CGFloat = 30
-    static let pillsHeight: CGFloat = 34
     static let createHeaderHeight: CGFloat = searchHeight
     static let footerHeight: CGFloat = 34
     static let rowHeight: CGFloat = 32
@@ -77,9 +76,20 @@ enum PickerStyle {
         return measured > width - 2 * rowInset - 30 ? 2 : 1
     }
 
+    static func errorSummary(_ error: String) -> String {
+        // Worktrunk prints fetch progress before the actual failure. JSON parse
+        // failures after an empty switch result are secondary, not the cause.
+        let lines = error.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+        return lines.last { !$0.isEmpty && !$0.hasPrefix("parse wt switch:") } ?? error
+    }
+
     @MainActor static func height(for model: PickerModel) -> CGFloat {
         if model.page == .pr {
-            return 330 + (model.error == nil && model.notice == nil ? 0 : 32)
+            // Status is available once GitHub metadata resolves; progress gets
+            // a separate row only while an operation is in flight.
+            let state: CGFloat = model.pullRequest?.state?.isEmpty == false ? 24 : 0
+            return 276 + state + (model.prStage == nil ? 0 : 24)
+                + (model.error == nil && model.notice == nil ? 0 : 32)
         }
         if model.page == .create {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
@@ -90,12 +100,11 @@ enum PickerStyle {
         let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count, 2), 8)
         let rows = CGFloat(rowCount)
         let status: CGFloat = model.error == nil && model.notice == nil ? 0 : 32
-        let pills: CGFloat = model.showsPills ? pillsHeight : 0
         let detail = model.view == .sessions && model.page == .worktrees ? selectedPathHeight : 0
         let wrappedRow = model.view == .sessions && model.page == .worktrees && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
         let groupCount = model.view == .agents ? model.agentSections.count : 0
         let groups = CGFloat(groupCount) * agentGroupHeight + CGFloat(max(groupCount - 1, 0)) * agentGroupSpacing
-        let content = searchHeight + pills + rows * rowHeight + groups + wrappedRow + 8 + detail + footerHeight + status
+        let content = searchHeight + rows * rowHeight + groups + wrappedRow + 8 + detail + footerHeight + status
         let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
         return min(content, max(available, 180))
     }

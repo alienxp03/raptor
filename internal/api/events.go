@@ -36,6 +36,10 @@ func (h *Handler) storeLauncher(generation uint64, items []catalog.LauncherItem,
 
 // cacheMu must be held. Published slices are never changed after this call.
 func (h *Handler) commitLauncher(items []catalog.LauncherItem, hosts []hostHeader) {
+	h.commitLauncherAt(items, hosts, h.launcher.ScanStarted)
+}
+
+func (h *Handler) commitLauncherAt(items []catalog.LauncherItem, hosts []hostHeader, started time.Time) {
 	// A failed host must not erase its last usable rows. Host headers still
 	// report the error; successful empty hosts do replace their old rows.
 	failed := make(map[string]bool)
@@ -73,7 +77,7 @@ func (h *Handler) commitLauncher(items []catalog.LauncherItem, hosts []hostHeade
 	if items == nil {
 		items = []catalog.LauncherItem{}
 	}
-	h.launcher = launcherCacheEntry{Timestamp: time.Now(), Items: items, Hosts: hosts}
+	h.launcher = launcherCacheEntry{Timestamp: time.Now(), ScanStarted: started, Items: items, Hosts: hosts}
 	h.launcherLoaded = true
 	h.launcherGeneration = h.generation
 	h.writeLauncherCache(items, hosts)
@@ -195,6 +199,7 @@ func (h *Handler) refresh() {
 				return agents, items, hosts, err
 			}
 		}
+		started := time.Now()
 		agents, items, hosts, err := load(origin, launcher)
 
 		h.cacheMu.Lock()
@@ -205,7 +210,7 @@ func (h *Handler) refresh() {
 				h.activityAt, h.activityGeneration = time.Now(), generation
 			}
 			if launcher {
-				h.commitLauncher(items, hosts)
+				h.commitLauncherAt(items, hosts, started)
 			}
 			close(h.snapshotChanged)
 			h.snapshotChanged = make(chan struct{})

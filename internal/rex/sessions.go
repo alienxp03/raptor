@@ -459,6 +459,7 @@ func CreateSessionOn(host, dir string) (string, bool, error) {
 	if json.Unmarshal([]byte(out), &res) != nil || res.SessionID == "" {
 		return "", false, fmt.Errorf("could not create session for %s on %s", dir, host)
 	}
+	RecordLauncherCreation(host, res.SessionID, name, dir)
 	return res.SessionID, false, nil
 }
 

@@ -4,11 +4,24 @@ import SwiftUI
 final class PickerModel: ObservableObject {
     enum Page: Hashable { case directories, worktrees, create, pr }
     var isForm: Bool { page == .create || page == .pr }
-    @Published var prInput = "" { didSet { if prInput != oldValue { resolvePullRequest() } } }
+    @Published var prInput = "" {
+        didSet {
+            if prInput != oldValue {
+                if let canonical = Self.normalizedPullRequestURL(prInput), canonical != prInput {
+                    prInput = canonical
+                }
+                resolvePullRequest()
+            }
+        }
+    }
     @Published private(set) var pullRequest: APIResult?
     @Published private(set) var prStage: String?
+    @Published var prCommitConfirmationPresented = false
+    private var prCheckoutCommit = false
+    private var prCommitConfirmationInput: String?
     private var prGeneration = 0
     private var prTask: Task<Void, Never>?
+    private let pullRequestClipboard: () -> String?
     private var prReturn: (page: Page, view: ViewKind, repo: String?, query: String, selected: String?, scroll: String?, targets: [String], target: String, items: [PickerItem])?
     enum ViewKind: Hashable, CaseIterable { case sessions, agents }
     private(set) var options: LaunchOptions
@@ -140,6 +153,7 @@ final class PickerModel: ObservableObject {
     private var reconfigureGeneration = 0
     private var warmReconfigure: Int?
     private var queryKey: CacheKey?
+    private var reopenedSelection: (generation: Int, id: String?)?
     private let cacheTTL: TimeInterval
     @Published private(set) var contextReady = true
     private var started = false
@@ -230,7 +244,7 @@ final class PickerModel: ObservableObject {
                     // Rows only. Do not replay target, form, popover or busy state.
                     self.items = self.orderedAgents(result.items ?? [], key: key)
                     if !self.items.contains(where: { $0.id == self.selectedID }) {
-                        self.selectedID = self.items.first?.id
+                        self.selectedID = Self.preferredSelection(in: result, query: key.query)
                     }
                     if !self.items.contains(where: { $0.id == self.scrollID }) { self.scrollID = nil }
                     if key.view == .sessions, key.page == .directories {
@@ -256,16 +270,11 @@ final class PickerModel: ObservableObject {
         return CacheKey(view: view, page: page, repo: repo, query: query)
     }
 
-    /// "dirs" is the legacy alias for the unified Sessions launcher.
-    private static func initialView(for options: LaunchOptions) -> ViewKind {
-        options.mode == "agents" ? .agents : .sessions
-    }
+    /// Legacy agents/wt modes are normalized by LaunchOptions.
+    private static func initialView(for options: LaunchOptions) -> ViewKind { .sessions }
 
-    /// A direct Agents/Sessions request must route from another visible view, not hide it.
     func shouldToggle(for options: LaunchOptions) -> Bool {
-        self.options.matches(options)
-            && (options.mode != "agents" || view == .agents)
-            && (options.mode != "sessions" || view == .sessions)
+        self.options.matches(options) && (options.mode != "sessions" || view == .sessions)
     }
 
     private func saveListPosition() {
@@ -287,6 +296,20 @@ final class PickerModel: ObservableObject {
         refreshing = false
     }
 
+    /// A completed mutation already knows its resource IDs. Publish its backend
+    /// snapshot before hiding, rather than replaying a pre-creation cached list.
+    private func acceptLauncherMutation(_ result: APIResult) {
+        let key = CacheKey(view: .sessions, page: .directories, repo: nil, query: "")
+        let prior = cache[key]?.result
+        invalidateLists()
+        guard let rows = result.launcherItems, !rows.isEmpty else { return }
+        let snapshot = APIResult(items: rows, hosts: prior?.hosts, targets: prior?.targets, target: prior?.target)
+        // Display immediately, but revalidate origin-bound targets on reopening.
+        // The backend's write-through cache makes that a fast in-memory read.
+        cache[key] = CachedList(result: snapshot, refreshedAt: .distantPast,
+                                selectedID: nil, scrollID: nil, target: "")
+    }
+
     private func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         try Task.checkCancellation()
         guard !closed, contextReady else { throw CancellationError() }
@@ -297,12 +320,14 @@ final class PickerModel: ObservableObject {
         return result
     }
 
-    init(options: LaunchOptions, backend: any BackendClient, cacheTTL: TimeInterval = 30) {
+    init(options: LaunchOptions, backend: any BackendClient, cacheTTL: TimeInterval = 30,
+         pullRequestClipboard: @escaping () -> String? = { nil }) {
+        self.pullRequestClipboard = pullRequestClipboard
         self.cacheTTL = cacheTTL
         self.options = options
         self.backend = backend
         self.view = Self.initialView(for: options)
-        self.page = options.mode == "pr" ? .pr : (options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories))
+        self.page = options.mode == "pr" ? .pr : (options.mode == "wt-create" ? .create : .directories)
         self.repo = options.repo
         self.loading = true
     }
@@ -357,6 +382,7 @@ final class PickerModel: ObservableObject {
     func start() {
         guard !started, contextReady, !closed else { return }
         started = true
+        prefillPullRequestFromClipboard()
         scheduleQuery(immediate: true)
         loadTheme(after: queryTask)
     }
@@ -390,7 +416,17 @@ final class PickerModel: ObservableObject {
         themeTask = task
         return task
     }
-    var showsPills: Bool { !isForm }
+    var showsPills: Bool { false }
+
+    /// Backend rows are MRU ordered. Older sources may omit selected_id.
+    static func preferredSelection(in result: APIResult, query: String = "") -> String? {
+        let rows = result.items ?? []
+        guard query.isEmpty else { return rows.first?.id }
+        if let id = result.selectedID, rows.contains(where: { $0.id == id }) { return id }
+        return rows.first(where: { $0.kind == "session" && $0.active != true })?.id
+            ?? rows.first(where: { $0.kind == "dir" })?.id
+            ?? rows.first?.id
+    }
 
 
     /// Synchronous open boundary: reset origin state before the panel is shown.
@@ -424,28 +460,23 @@ final class PickerModel: ObservableObject {
             && self.options.client == options.client && self.options.title == options.title
             && self.options.demo == options.demo
         let launcher = CacheKey(view: .sessions, page: .directories, repo: nil, query: "")
-        let agents = CacheKey(view: .agents, page: .directories, repo: nil, query: "")
-        let warmAgents = options.mode == "agents" && cache[agents] != nil
         let cachedLauncher = cache[launcher]
         let warmLauncher = (options.mode == "dirs" || options.mode == "sessions")
             && !(cachedLauncher?.result.items ?? []).isEmpty
             && !(cachedLauncher?.target ?? "").isEmpty
             && cachedLauncher?.result.targets?.contains(cachedLauncher?.target ?? "") == true
-        if sameContext, contextReady, !closed, !busy, warmLauncher || warmAgents {
-            // The same origin needs no context RPC. Launcher opens also keep
-            // any refresh already serving this key; Agents start a new order.
+        if sameContext, contextReady, !closed, !busy, warmLauncher {
+            // The same origin needs no context RPC. Keep an existing refresh.
             warmReconfigure = token
             changingContext = true
             self.options = options
             view = Self.initialView(for: options); page = .directories; repo = options.repo
-            // Every reopen starts fresh: filters clear everywhere and the
-            // origin session (first row) becomes the selection once rows land.
+            // Every reopen clears filters and selects the preferred previous session.
             viewQueries.removeAll()
             query = ""
             selectedID = nil
             scrollID = nil
-            // The cached launcher rows remember the previous selection; drop
-            // it so the replay selects the origin session instead.
+            // Discard manual selection before replaying the preferred default.
             for viewKind in ViewKind.allCases {
                 let key = CacheKey(view: viewKind, page: .directories, repo: nil, query: "")
                 cache[key]?.selectedID = nil
@@ -460,10 +491,9 @@ final class PickerModel: ObservableObject {
             removalCandidate = nil
             basePickerPresented = false; targetPickerPresented = false
             changingContext = false
-            // Agents take fresh newest-first order once per presentation.
-            // Directory opens retain the existing no-RPC warm fast path.
+            // Launcher opens retain the existing no-RPC warm fast path.
             if presented { renewSubscription() }
-            scheduleQuery(immediate: true, reuseFresh: !warmAgents)
+            scheduleQuery(immediate: true, reuseFresh: true, freshQuery: true)
             return token
         }
         warmReconfigure = nil
@@ -497,9 +527,10 @@ final class PickerModel: ObservableObject {
         self.options = options
         closed = false
         view = Self.initialView(for: options)
-        page = options.mode == "pr" ? .pr : (options.mode == "wt-create" ? .create : (options.mode == "wt" ? .worktrees : .directories))
+        page = options.mode == "pr" ? .pr : (options.mode == "wt-create" ? .create : .directories)
         prGeneration += 1; prTask?.cancel()
         pullRequest = nil; prInput = ""; prStage = nil; prReturn = nil
+        prCommitConfirmationPresented = false; prCheckoutCommit = false
         repo = options.repo
         createParent = .worktrees
         query = ""
@@ -515,11 +546,12 @@ final class PickerModel: ObservableObject {
             activeKey = cacheKey
             displayedKey = cacheKey
             items = cached.result.items ?? []
-            selectedID = cached.selectedID ?? items.first?.id
-            scrollID = cached.scrollID
+            selectedID = Self.preferredSelection(in: cached.result, query: query)
+            scrollID = nil
             // Targets belong to the new origin, not the cached directory rows.
             loading = false
         }
+        prefillPullRequestFromClipboard()
         refreshing = true
         return token
     }
@@ -604,6 +636,15 @@ final class PickerModel: ObservableObject {
         }
     }
 
+    /// Outside clicks cancel transient UI, not any operation already issued.
+    func dismissForOutsideClick() {
+        basePickerPresented = false
+        targetPickerPresented = false
+        cancelPullRequestCommitCheckout()
+        removalCandidate = nil
+        dismiss()
+    }
+
     /// Hide only. An issued mutation must finish in its original context.
     func dismiss() { setPresented(false); onDismiss?() }
 
@@ -652,7 +693,11 @@ final class PickerModel: ObservableObject {
         saveListPosition()
         let key = cacheKey
         // A warm reopen must not cancel and requeue the same pipe request.
-        if reuseFresh, refreshing, queryKey == key, activeKey == key { return }
+        if reuseFresh, refreshing, queryKey == key, activeKey == key {
+            selectedID = Self.preferredSelection(in: cache[key]?.result ?? APIResult(items: items), query: query)
+            reopenedSelection = (generation, selectedID)
+            return
+        }
         activityTask?.cancel(); activityTask = nil; activityDirty = false
         generation += 1
         let token = generation
@@ -666,8 +711,9 @@ final class PickerModel: ObservableObject {
             activeKey = key
             displayedKey = key
             items = orderedAgents(cached.result.items ?? [], key: key, capture: !freshQuery)
-            selectedID = cached.selectedID ?? items.first?.id
-            scrollID = cached.scrollID
+            selectedID = freshQuery ? Self.preferredSelection(in: cached.result, query: query)
+                : (cached.selectedID ?? Self.preferredSelection(in: cached.result, query: query))
+            scrollID = freshQuery ? nil : cached.scrollID
         } else if !retainRows {
             activeKey = nil
             displayedKey = nil
@@ -699,6 +745,7 @@ final class PickerModel: ObservableObject {
         let currentView = view
         let currentQuery = query
         let currentRepo = repo
+        let initialSelection = selectedID
         let debounce = immediate ? 0 : queryDebounceMilliseconds
         queryTask = Task { [weak self] in
             guard let self else { return }
@@ -727,7 +774,11 @@ final class PickerModel: ObservableObject {
                 }
                 let previous = self.selectedID
                 self.items = currentPage == .create ? [] : self.orderedAgents(result.items ?? [], key: key)
-                self.selectedID = self.items.contains { $0.id == previous } ? previous : self.items.first?.id
+                let reopenedDefault = self.reopenedSelection.map { $0.generation == token && $0.id == previous } ?? false
+                let preserve = !reopenedDefault && !(freshQuery && previous == initialSelection)
+                    && self.items.contains { $0.id == previous }
+                self.reopenedSelection = nil
+                self.selectedID = preserve ? previous : Self.preferredSelection(in: result, query: currentQuery)
                 if currentView == .sessions, case .directories = currentPage {
                     self.sessionHosts = result.hosts ?? []
                 }
@@ -860,7 +911,9 @@ final class PickerModel: ObservableObject {
 
     private func createSession(in host: String, directory path: String) {
         perform {
-            _ = try await self.request("sessions.create", params: ["host": .text(host), "dir": .text(path)])
+            let result = try await self.request("sessions.create", params: ["host": .text(host), "dir": .text(path)])
+            self.acceptLauncherMutation(result)
+            if let message = result.error, !message.isEmpty { throw APIError.message(message) }
             if self.options.demo {
                 self.notice = "Demo only: created a session on \(host) in \(PathDisplay.abbreviate(path, home: "/Users/demo")). No Rex call."
             } else { self.finishNavigation() }
@@ -920,6 +973,7 @@ final class PickerModel: ObservableObject {
     }
 
     func escape() {
+        if prCommitConfirmationPresented { cancelPullRequestCommitCheckout(); return }
         if busy || !contextReady || (createdPath != nil && notice == nil) { dismiss(); return }
         if page == .pr {
             if targetPickerPresented { targetPickerPresented = false; return }
@@ -1083,8 +1137,9 @@ final class PickerModel: ObservableObject {
     }
 
     private func openPath(_ path: String, target: String) async throws {
-        _ = try await request("dispatch", params: ["target": .text(target), "path": .text(path)])
-        invalidateLists()
+        let result = try await request("dispatch", params: ["target": .text(target), "path": .text(path)])
+        acceptLauncherMutation(result)
+        if let message = result.error, !message.isEmpty { throw APIError.message(message) }
         if options.demo {
             notice = "Demo only: opened \(PathDisplay.abbreviate(path, home: "/Users/demo")) → \(Self.targetLabel(target)). No Rex call."
         } else {
@@ -1108,12 +1163,23 @@ final class PickerModel: ObservableObject {
     // URL recognition is local and read-only. Metadata is requested only in the form.
     static func pullRequestLink(_ input: String) -> (repo: String, number: Int)? {
         let input = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pattern = #"^https://github\.com/([A-Za-z0-9_][A-Za-z0-9_.-]*)/([A-Za-z0-9_][A-Za-z0-9_.-]*)/pull/([1-9][0-9]*)/?$"#
-        guard let match = input.range(of: pattern, options: .regularExpression),
-              match == input.startIndex..<input.endIndex else { return nil }
-        let parts = input.dropFirst("https://github.com/".count).split(separator: "/")
+        guard let url = URLComponents(string: input), url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "github.com", url.user == nil, url.password == nil,
+              url.port == nil else { return nil }
+        // Match the encoded path so escaped separators/identities cannot change
+        // repository meaning. Query strings and fragments are browser context only.
+        let path = url.percentEncodedPath
+        let pattern = #"^/([A-Za-z0-9_][A-Za-z0-9_.-]*)/([A-Za-z0-9_][A-Za-z0-9_.-]*)/pull/([1-9][0-9]*)(?:/(?:changes|files|commits|checks))?/?$"#
+        guard let match = path.range(of: pattern, options: .regularExpression),
+              match == path.startIndex..<path.endIndex else { return nil }
+        let parts = path.dropFirst().split(separator: "/")
         guard parts[1] != ".", parts[1] != "..", let number = Int(parts[3]) else { return nil }
         return ("\(parts[0])/\(parts[1])", number)
+    }
+
+    static func normalizedPullRequestURL(_ input: String) -> String? {
+        guard let link = pullRequestLink(input) else { return nil }
+        return "https://github.com/\(link.repo)/pull/\(link.number)"
     }
 
     /// Keep recovery on this model and retain its original Rex context. Open
@@ -1132,10 +1198,28 @@ final class PickerModel: ObservableObject {
         !closed && page == .pr && createdPath != nil && backendIsClosed
     }
 
+    var requiresPullRequestCommitChoice: Bool {
+        guard let info = pullRequest else { return false }
+        return ["CLOSED", "MERGED"].contains(info.state?.uppercased() ?? "") && info.headDeleted == true
+    }
+
+    var pullRequestCommitExplanation: String {
+        let state = pullRequest?.state?.lowercased() ?? "closed"
+        let number = pullRequest?.number ?? Self.pullRequestLink(prInput)?.number ?? 0
+        return "This PR is \(state) and its branch was deleted. Create an editable worktree at its last commit on local branch pr/\(number). The deleted branch will not be restored or pushed."
+    }
+
     var canOpenPullRequest: Bool {
-        contextReady && (!backendIsClosed || canReconnectPullRequest) && !busy && !loading && !targetPickerPresented
+        contextReady && (!backendIsClosed || canReconnectPullRequest) && !busy && !loading && !targetPickerPresented && !prCommitConfirmationPresented
             && ["session", "tab"].contains(target)
             && (createdPath != nil || pullRequest != nil)
+    }
+
+    private func prefillPullRequestFromClipboard() {
+        guard page == .pr, prInput.isEmpty, createdPath == nil,
+              let value = pullRequestClipboard()?.trimmingCharacters(in: .whitespacesAndNewlines),
+              Self.pullRequestLink(value) != nil else { return }
+        prInput = value
     }
 
     func beginPullRequest(input: String = "") {
@@ -1152,11 +1236,13 @@ final class PickerModel: ObservableObject {
         splitMode = false; targetPickerPresented = false
         error = nil; notice = nil; pullRequest = nil; prStage = nil
         prInput = input
+        prefillPullRequestFromClipboard()
         resolvePullRequest()
     }
 
     private func returnFromPullRequest() {
         prGeneration += 1; prTask?.cancel(); prStage = nil
+        prCommitConfirmationPresented = false; prCheckoutCommit = false
         guard let saved = prReturn else { dismiss(); return }
         changingContext = true
         page = saved.page; view = saved.view; repo = saved.repo; query = saved.query
@@ -1169,9 +1255,9 @@ final class PickerModel: ObservableObject {
     }
 
     private func pullRequestParams() -> [String: APIValue] {
-        var params: [String: APIValue] = ["input": .text(prInput.trimmingCharacters(in: .whitespacesAndNewlines))]
-        // A full URL defines its own repository, not the ambient selection.
-        if Self.pullRequestLink(prInput) == nil, let repo, !repo.isEmpty { params["repo"] = .text(repo) }
+        // Commit checkout is sent only after explicit confirmation for this input.
+        var params: [String: APIValue] = ["input": .text(Self.normalizedPullRequestURL(prInput) ?? prInput.trimmingCharacters(in: .whitespacesAndNewlines))]
+        if prCheckoutCommit { params["checkout_commit"] = .flag(true) }
         return params
     }
 
@@ -1180,11 +1266,11 @@ final class PickerModel: ObservableObject {
         prGeneration += 1
         let token = prGeneration
         prTask?.cancel(); pullRequest = nil; error = nil; prStage = nil; loading = false
+        prCommitConfirmationPresented = false; prCheckoutCommit = false; prCommitConfirmationInput = nil
         let input = prInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
-        let number = Int(input)
-        guard Self.pullRequestLink(input) != nil || (number != nil && number! > 0 && repo != nil) else {
-            error = "Enter a full github.com PR URL, or a PR number with a selected repository."
+        guard Self.pullRequestLink(input) != nil else {
+            error = "Enter a full GitHub pull request URL: https://github.com/owner/repo/pull/123"
             return
         }
         let params = pullRequestParams()
@@ -1205,8 +1291,26 @@ final class PickerModel: ObservableObject {
         }
     }
 
+    func cancelPullRequestCommitCheckout() {
+        prCommitConfirmationPresented = false
+        prCommitConfirmationInput = nil
+    }
+
+    func confirmPullRequestCommitCheckout() {
+        guard page == .pr, prCommitConfirmationInput == prInput,
+              requiresPullRequestCommitChoice, createdPath == nil else { return }
+        cancelPullRequestCommitCheckout()
+        prCheckoutCommit = true
+        openPullRequest()
+    }
+
     func openPullRequest() {
         guard page == .pr, canOpenPullRequest else { return }
+        if createdPath == nil && requiresPullRequestCommitChoice && !prCheckoutCommit {
+            prCommitConfirmationInput = prInput
+            prCommitConfirmationPresented = true
+            return
+        }
         if backendIsClosed {
             guard reconnectPullRequestBackend() else { return }
         }
@@ -1227,6 +1331,7 @@ final class PickerModel: ObservableObject {
             self.prStage = "Opening session"
             do {
                 let result = try await self.request("pullrequests.open", params: ["path": .text(path), "target": .text(target)])
+                self.acceptLauncherMutation(result)
                 if let returned = result.path, !returned.isEmpty { self.createdPath = returned }
                 if let message = result.error, !message.isEmpty { throw APIError.message(message) }
             } catch {

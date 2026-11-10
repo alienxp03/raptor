@@ -19,17 +19,12 @@ type agentsLoadedMsg struct {
 }
 
 func (m *dirModel) switchView(view int) tea.Cmd {
-	if view != 0 && view != 2 {
-		return nil
-	}
+	view = 0 // Legacy Agents navigation normalizes to sessions.
 	m.viewStates[m.viewMode] = dirViewState{m.filter, m.sel}
 	m.viewMode = view
 	m.filter, m.sel = m.viewStates[view].filter, m.viewStates[view].sel
 	m.splitMode = false
 	m.applyCurrentFilter()
-	if view == 2 {
-		return m.loadAgents(false)
-	}
 	// Revalidate the launcher cache in the background; rows stay visible.
 	return m.loadLauncherSessions(false)
 }
@@ -273,9 +268,6 @@ func (m *dirModel) viewAgents() string {
 	width := m.width - 2
 	blank := pickerLine("", width)
 	lines := []string{pickerSearch(m.filter, width, "agents")}
-	if m.height >= 8 {
-		lines = append(lines, pickerPills(2, width))
-	}
 	lines = append(lines, blank)
 	maxRows := maxInt(m.height-len(lines)-2, 0)
 	display := m.agentDisplayRows(maxRows)

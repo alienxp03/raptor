@@ -73,14 +73,18 @@ func RunCreateWorktree(ctx rex.Ctx, cfg config.Config, repo string) int {
 }
 
 func RunWorktrees(ctx rex.Ctx, cfg config.Config, repo string) int {
-	return runWorktreeFlow(ctx, cfg, repo, false)
+	fmt.Fprintln(os.Stderr, "worktree browser removed; use raptor wt --create to create a worktree")
+	return 2
 }
 
 func runWorktreeFlow(ctx rex.Ctx, cfg config.Config, repo string, fromDirectories bool) int {
-	return runWorktreePicker(ctx, cfg, repo, fromDirectories, false)
+	return RunWorktrees(ctx, cfg, repo)
 }
 
 func runWorktreePicker(ctx rex.Ctx, cfg config.Config, repo string, fromDirectories, create bool) int {
+	if !create {
+		return RunWorktrees(ctx, cfg, repo)
+	}
 	var m *wtModel
 	if create {
 		m = newCreateModel(ctx, cfg, repo, !fromDirectories)
@@ -374,10 +378,7 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if key == "ctrl+a" && !m.form {
-			m.action = "agents"
-			return m, tea.Quit
-		}
+
 		if m.form {
 			switch key {
 			case "ctrl+o":
@@ -386,8 +387,8 @@ func (m *wtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.closeOnCancel {
 					return m, tea.Quit
 				}
-				m.form = false
-				m.err, m.errField = "", -1
+				m.action = "back"
+				return m, tea.Quit
 			case "tab", "down", "ctrl+j":
 				m.field = (m.field + 1) % 4
 			case "shift+tab", "up", "ctrl+k":

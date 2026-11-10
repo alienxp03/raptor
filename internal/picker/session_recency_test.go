@@ -63,12 +63,12 @@ func TestLauncherUsesFrozenSessionRecencyUntilNextPresentation(t *testing.T) {
 	if got := order(); got[0] != pickerRecentID(1) || got[1] != pickerRecentID(6) {
 		t.Fatalf("next presentation lost current/MRU priority: %v", got)
 	}
-	// Better fuzzy scores must not move the matching current session off top.
+	// Query ranking beats current-session pinning.
 	m.sessions[0].Entries[0].Label = "work-with-a-long-current-name"
 	m.sessions[0].Entries[1].Label = "work"
 	m.filter = "work"
 	m.applyLauncher()
-	if got := order(); len(got) != 6 || got[0] != pickerRecentID(1) {
-		t.Fatalf("search did not keep matching current session first: %v", got)
+	if got := order(); len(got) != 6 || got[0] != pickerRecentID(2) {
+		t.Fatalf("search did not prefer exact name: %v", got)
 	}
 }

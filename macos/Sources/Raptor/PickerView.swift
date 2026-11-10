@@ -6,15 +6,14 @@ struct PickerView: View {
     @FocusState private var field: Field?
     @State private var baseReturnFocus: Field = .base
     @State private var selectedInitialDefault = false
+    @State private var errorDetailsPresented = false
     private enum Field { case search, branch, base, target, submit, pullRequest }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            if model.showsPills { viewPills }
             if model.page == .pr { pullRequestForm }
             else if model.page == .create { createForm } else { results }
-            if model.page == .worktrees && model.view == .sessions { selectedWorktreePath }
             status
             footer
         }
@@ -38,16 +37,13 @@ struct PickerView: View {
             selectedInitialDefault = false
             field = page == .pr ? .pullRequest : (page == .create ? .branch : .search)
         }
-        .alert("Remove worktree?", isPresented: Binding(
-            get: { model.removalCandidate != nil && model.page == .worktrees },
-            set: { if !$0 { model.removalCandidate = nil } }
-        ), presenting: model.page == .worktrees ? model.removalCandidate : nil) { candidate in
-            Button("Cancel", role: .cancel) { model.removalCandidate = nil }
+        .alert("Check out PR commit?", isPresented: $model.prCommitConfirmationPresented) {
+            Button("Cancel", role: .cancel) { model.cancelPullRequestCommitCheckout() }
                 .keyboardShortcut(.defaultAction)
-            Button("Remove", role: .destructive) { model.confirmRemove(candidate) }
-                .accessibilityIdentifier("confirm-remove")
-        } message: { candidate in
-            Text("Remove \(displayPath(candidate.path))?\nGit checks for unsaved changes. The branch is kept.")
+            Button("Check out PR commit") { model.confirmPullRequestCommitCheckout() }
+                .accessibilityIdentifier("confirm-pr-commit")
+        } message: {
+            Text(model.pullRequestCommitExplanation)
         }
         .alert("Close session?", isPresented: Binding(
             get: { model.removalCandidate != nil && model.view == .sessions && model.page == .directories },
@@ -65,12 +61,11 @@ struct PickerView: View {
     private var header: some View {
         Group {
             if model.isForm {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(model.page == .pr ? "Open pull request" : "New worktree").font(.system(size: PickerStyle.titleFontSize, weight: .semibold))
-                        if model.options.demo { demoBadge }
-                        Spacer()
-                    }
+                HStack(spacing: 8) {
+                    Text(model.page == .pr ? "Open pull request" : "New worktree")
+                        .font(.system(size: PickerStyle.rowFontSize, weight: .semibold))
+                    if model.options.demo { demoBadge }
+                    Spacer()
                 }
                 .padding(.horizontal, PickerStyle.horizontalInset)
             } else {
@@ -105,41 +100,6 @@ struct PickerView: View {
         if model.view == .agents { return "Search agents…" }
         if model.page == .worktrees { return "Search worktrees…" }
         return "Search sessions and directories…"
-    }
-
-    private var viewPills: some View {
-        HStack(spacing: 6) {
-            pill("Sessions", active: model.view == .sessions, icon: "tray.full", hint: nil)
-                .accessibilityIdentifier("pill-sessions")
-                .accessibilityHint("Show Sessions, Shift Command S")
-                .help("Show Sessions (⇧⌘S)")
-                .onTapGesture { model.selectView(.sessions) }
-            pill("Agents", active: model.view == .agents, icon: "cpu", hint: nil)
-                .accessibilityIdentifier("pill-agents")
-                .accessibilityHint("Show Agents, Shift Command A")
-                .help("Show Agents (⇧⌘A)")
-                .onTapGesture { model.selectView(.agents) }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, PickerStyle.listInset)
-        .padding(.bottom, 8)
-        .frame(height: PickerStyle.pillsHeight)
-        .accessibilityIdentifier("view-pills")
-    }
-
-    private func pill(_ title: String, active: Bool, icon: String, hint: String?) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon).font(.system(size: 10, weight: .semibold))
-            Text(title).font(.system(size: 12, weight: active ? .semibold : .regular))
-            if let hint {
-                Text(hint).font(.system(size: 10)).foregroundStyle(PickerStyle.foreground.opacity(active ? 0.7 : 0.45))
-            }
-        }
-        .foregroundStyle(active ? PickerStyle.foreground : PickerStyle.foreground.opacity(0.55))
-        .padding(.horizontal, 10)
-        .frame(height: 22)
-        .background(active ? PickerStyle.foreground.opacity(0.12) : PickerStyle.foreground.opacity(0.05), in: Capsule())
-        .contentShape(Capsule())
     }
 
     private var results: some View {
@@ -317,22 +277,27 @@ struct PickerView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 formLabel("Pull request")
-                TextField("GitHub PR URL or number", text: $model.prInput)
+                TextField("GitHub pull request URL", text: $model.prInput,
+                          prompt: Text(verbatim: "https://github.com/owner/repo/pull/123")
+                            .foregroundColor(PickerStyle.foreground.opacity(0.45)))
                     .textFieldStyle(.plain).disableAutocorrection(true)
+                    .foregroundStyle(PickerStyle.foreground)
                     .padding(.horizontal, 9).frame(height: PickerStyle.controlHeight)
-                    .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
+                    .modifier(PickerFormField(focused: field == .pullRequest))
                     .focused($field, equals: .pullRequest)
                     .task { await Task.yield(); field = .pullRequest }
                     .onSubmit { model.openPullRequest() }
                     .disabled(model.busy || model.createdPath != nil)
+                    .accessibilityLabel("GitHub pull request URL")
                     .accessibilityIdentifier("pr-input")
             }
-            Text(model.pullRequest?.title ?? "Enter a pull request to preview it.")
-                .font(.system(size: 12, weight: .semibold)).lineLimit(2)
-                .textSelection(.enabled).help(model.pullRequest?.title ?? "")
-                .accessibilityIdentifier("pr-title")
-            pathRow("Branch", value: model.pullRequest?.branch ?? "—", path: nil)
-            pathRow("Repo", value: pullRequestRepoLabel, path: model.pullRequest?.repo ?? model.repo)
+            pathRow("Title", value: model.pullRequest?.title ?? "—", path: nil, identifier: "pr-title")
+            if let state = model.pullRequest?.state, !state.isEmpty {
+                pathRow("Status", value: state.capitalized + (model.pullRequest?.headDeleted == true ? " · branch deleted" : ""),
+                        path: nil, identifier: "pr-state")
+            }
+            pathRow("Repo", value: pullRequestRepoLabel, path: model.pullRequest?.repo)
+            pathRow("Branch", value: model.pullRequest?.branch ?? "—", path: nil, identifier: "pr-branch")
             pathRow("Destination", value: (model.createdPath ?? model.pullRequest?.path).map(displayPath) ?? "Resolved by Worktrunk", path: model.createdPath ?? model.pullRequest?.path)
             openTargetControl
             if let stage = model.prStage {
@@ -348,25 +313,20 @@ struct PickerView: View {
     }
 
     private var pullRequestRepoLabel: String {
-        let path = (model.pullRequest?.repo ?? model.repo).map(displayPath) ?? "From PR URL"
+        let path = model.pullRequest?.repo.map(displayPath) ?? "From PR URL"
         return model.pullRequest?.cloneRequired == true ? "Will clone to \(path)" : path
     }
 
     private var pullRequestActionLabel: String {
         if model.busy { return model.prStage ?? "Opening session" }
         if model.createdPath != nil { return "Retry opening" }
+        if model.requiresPullRequestCommitChoice { return "Check out PR commit…" }
         return model.pullRequest?.existing == true ? "Open existing" : "Open PR"
     }
 
     private var pullRequestSubmitButton: some View {
         Button { model.openPullRequest() } label: {
-            HStack(spacing: 10) {
-                Text(model.busy ? "Opening…" : pullRequestActionLabel).fontWeight(.semibold)
-                Text("⌘↵").foregroundStyle(PickerStyle.secondaryText)
-            }
-            .padding(.horizontal, 12).frame(height: PickerStyle.controlHeight)
-            .background(PickerStyle.selection.opacity(0.25), in: Capsule())
-            .overlay(Capsule().strokeBorder(PickerStyle.selection.opacity(field == .submit ? 0.9 : 0.4)))
+            formActionLabel(model.busy ? "Opening…" : pullRequestActionLabel, enabled: model.canOpenPullRequest)
         }
         .buttonStyle(.plain).focusable().focused($field, equals: .submit)
         .keyboardShortcut(.return, modifiers: .command)
@@ -384,8 +344,7 @@ struct PickerView: View {
                     .disableAutocorrection(true)
                     .textFieldStyle(.plain).padding(.horizontal, 9)
                     .frame(height: PickerStyle.controlHeight)
-                    .background(field == .branch ? PickerStyle.fieldBackground : PickerStyle.foreground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .branch ? PickerStyle.selection : PickerStyle.foreground.opacity(0.1)))
+                    .modifier(PickerFormField(focused: field == .branch))
                     .focused($field, equals: .branch)
                     .task { await Task.yield(); field = .branch; selectInitialBranchDefault() }
                     .onChange(of: model.branch) { _, _ in selectInitialBranchDefault() }
@@ -404,8 +363,7 @@ struct PickerView: View {
                     }
                     .padding(.horizontal, 9)
                     .frame(height: PickerStyle.controlHeight)
-                    .background(field == .base ? PickerStyle.fieldBackground : PickerStyle.foreground.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(field == .base ? PickerStyle.selection : PickerStyle.foreground.opacity(0.1)))
+                    .modifier(PickerFormField(focused: field == .base))
                 }
                 .buttonStyle(.plain).focusable().focused($field, equals: .base)
                 .onKeyPress(.return) { presentBasePicker(); return .handled }
@@ -439,14 +397,15 @@ struct PickerView: View {
             .frame(width: 90, alignment: .leading)
     }
 
-    private func pathRow(_ title: String, value: String, path: String?) -> some View {
+    private func pathRow(_ title: String, value: String, path: String?, identifier: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             formLabel(title)
-            Text(value).font(.system(size: 12)).foregroundStyle(PickerStyle.secondaryText)
+            Text(value).font(.system(size: 12))
+                .foregroundStyle(path == nil ? PickerStyle.secondaryText : PickerStyle.foreground.opacity(0.85))
                 .textSelection(.enabled).lineLimit(1).truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .help(path ?? value)
-                .accessibilityIdentifier(title == "Repo" ? "create-repo" : "create-destination")
+                .accessibilityIdentifier(identifier ?? (title == "Repo" ? "create-repo" : "create-destination"))
         }
     }
 
@@ -465,15 +424,7 @@ struct PickerView: View {
 
     private var createSubmitButton: some View {
         Button { model.create() } label: {
-            HStack(spacing: 10) {
-                Text(createActionLabel).fontWeight(.semibold)
-                Text("⌘↵").foregroundStyle(PickerStyle.secondaryText)
-            }
-            .padding(.horizontal, 12)
-            .frame(height: PickerStyle.controlHeight)
-            .background(PickerStyle.selection.opacity(0.25), in: Capsule())
-            .overlay(Capsule().strokeBorder(PickerStyle.selection.opacity(field == .submit ? 0.9 : 0.4)))
-            .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+            formActionLabel(createActionLabel, enabled: model.canSubmitForm)
         }
         .buttonStyle(.plain)
         .focusable().focused($field, equals: .submit)
@@ -483,9 +434,22 @@ struct PickerView: View {
             return .handled
         }
         .disabled(!model.canSubmitForm)
-        .opacity(model.canSubmitForm ? 1 : 0.45)
         .accessibilityLabel(createActionLabel)
         .accessibilityIdentifier(model.createdPath == nil ? "create-submit" : "open-created")
+    }
+
+    private func formActionLabel(_ title: String, enabled: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(title).fontWeight(.medium)
+            Text("⌘↵").opacity(0.65)
+        }
+        .foregroundStyle(enabled ? PickerStyle.selectionText : PickerStyle.secondaryText)
+        .padding(.horizontal, 10)
+        .frame(height: 22)
+        .background(enabled ? PickerStyle.selectionBackground : PickerStyle.foreground.opacity(0.06),
+                    in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+            .strokeBorder(field == .submit ? PickerStyle.selection : Color.clear))
     }
 
     private func selectInitialBranchDefault() {
@@ -527,10 +491,41 @@ struct PickerView: View {
 
     @ViewBuilder private var status: some View {
         if let error = model.error {
-            Text(error).foregroundStyle(.red).accessibilityIdentifier("picker-error")
-                .font(.system(size: 11)).lineLimit(2).textSelection(.enabled).help(error)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10).padding(.vertical, 4)
+            HStack(alignment: .top, spacing: 8) {
+                Text(verbatim: PickerStyle.errorSummary(error))
+                    .foregroundStyle(.red).accessibilityIdentifier("picker-error")
+                    .lineLimit(2).textSelection(.enabled).help(error)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Details…") { errorDetailsPresented = true }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(PickerStyle.foreground)
+                    .accessibilityIdentifier("picker-error-details")
+                    .popover(isPresented: $errorDetailsPresented, arrowEdge: .top) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Text("Operation failed").fontWeight(.semibold)
+                                Spacer()
+                                Button("Copy error") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(error, forType: .string)
+                                }
+                            }
+                            ScrollView {
+                                Text(verbatim: error)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(PickerStyle.foreground)
+                        .padding(16).frame(width: 560, height: 280)
+                        .pickerGlass()
+                    }
+            }
+            .font(.system(size: 11))
+            .padding(.horizontal, 10).padding(.vertical, 4)
         } else if let notice = model.notice {
             Text(notice).foregroundStyle(PickerStyle.secondaryText).accessibilityIdentifier("picker-notice")
                 .font(.system(size: 11)).lineLimit(2)
@@ -559,12 +554,22 @@ struct PickerView: View {
                     openTargetControl
                 }
                 Spacer(minLength: 0)
+                if !model.isForm && !model.splitMode {
+                    Button("⇧⌘P PR") { model.beginPullRequest() }
+                        .font(.system(size: 10))
+                        .disabled(model.busy || !model.contextReady || model.createdPath != nil)
+                        .help("Open pull request (⇧⌘P)")
+                        .accessibilityLabel("Open pull request")
+                        .accessibilityIdentifier("open-pull-request")
+                }
                 if model.view == .agents {
-                    Button("↵ Switch") { model.choose() }.disabled(!model.canOpen)
+                    Button("↵") { model.choose() }.disabled(!model.canOpen)
+                        .help("Open selected result (Return)")
+                        .accessibilityLabel("Open selected result")
                         .accessibilityIdentifier("open-selected")
                 } else if model.page == .directories && !model.splitMode {
                     sessionActions
-                } else if model.page == .worktrees && !model.splitMode { listActions }
+                }
                 if model.page == .create { createSubmitButton }
                 if model.page == .pr { pullRequestSubmitButton }
             }
@@ -576,43 +581,25 @@ struct PickerView: View {
         .padding(.horizontal, PickerStyle.horizontalInset)
         .frame(height: PickerStyle.footerHeight)
         .overlay(alignment: .top) {
-            if !model.isForm { Divider().overlay(PickerPalette.stroke) }
+            Divider().overlay(PickerPalette.stroke)
         }
     }
 
     private var sessionActions: some View {
         HStack(spacing: 12) {
-            Button("↵ Switch") { model.choose() }.disabled(!model.canOpen)
+            Button("↵") { model.choose() }.disabled(!model.canOpen)
+                .help("Open selected result (Return)")
+                .accessibilityLabel("Open selected result")
                 .accessibilityIdentifier("open-selected")
             if model.selected?.kind == "session" {
                 Button("⌃X Close") { model.askCloseSession() }
                     .disabled(model.busy || model.loading || model.selected?.kind != "session")
                     .accessibilityIdentifier("remove-session")
             }
-            if model.selected?.kind == "dir" {
-                Button("⌃T Worktrees") { model.showWorktrees() }
-                    .disabled(model.busy || model.loading)
-                    .accessibilityIdentifier("show-worktrees")
-            }
         }
         .font(.system(size: 10))
         .fixedSize()
         .accessibilityIdentifier("session-actions")
-    }
-
-    private var listActions: some View {
-        HStack(spacing: 12) {
-            Button("↵ Open") { model.choose() }.disabled(!model.canOpen)
-                .accessibilityIdentifier("open-selected")
-            Button("⌃P Split") { model.toggleSplit() }.disabled(!model.canOpen)
-                .accessibilityIdentifier("toggle-split")
-            Button("⌃X Remove") { model.askRemove() }
-                .disabled(model.busy || model.loading || model.selected?.isMain != false)
-                .accessibilityIdentifier("remove-worktree")
-        }
-        .font(.system(size: 10))
-        .fixedSize()
-        .accessibilityIdentifier("list-actions")
     }
 
     private var openTargetControl: some View {
@@ -689,6 +676,18 @@ struct PickerView: View {
         if model.view == .agents { return "No matching agents" }
         if model.page == .worktrees { return "No matching worktrees" }
         return "No matching sessions or directories"
+    }
+}
+
+// Use the search surface for every editable form control; amber only marks focus.
+private struct PickerFormField: ViewModifier {
+    let focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(focused ? PickerStyle.selection.opacity(0.7) : Color.clear))
     }
 }
 

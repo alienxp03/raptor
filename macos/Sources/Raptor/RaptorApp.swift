@@ -7,6 +7,11 @@ import CoreGraphics
 final class RaptorPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if TextEditingShortcuts.perform(event, responder: firstResponder) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 @MainActor
@@ -14,6 +19,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var panel: RaptorPanel?
     private var model: PickerModel?
     private var keyboardMonitor: Any?
+    private let outsideClickMonitor = OutsideClickMonitor()
     private var sizeSubscription: AnyCancellable?
     private var themeTimer: Timer?
     private var reopenTask: DispatchWorkItem?
@@ -61,7 +67,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             fatalError("LaunchOptions must accept empty arguments")
         }
         let backend: any BackendClient = ProcessBackend(options: options)
-        let next = PickerModel(options: options, backend: backend)
+        let next = PickerModel(options: options, backend: backend,
+                               pullRequestClipboard: { NSPasteboard.general.string(forType: .string) })
         model = next
         bindDismissal(next)
         _ = makePanel(for: next)
@@ -160,7 +167,14 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
         model?.setPresented(true)
+        startOutsideClickDismissal(for: panel)
         startThemeRefresh()
+    }
+
+    private func startOutsideClickDismissal(for picker: NSPanel) {
+        outsideClickMonitor.start(panel: picker) { [weak self] in
+            self?.model?.dismissForOutsideClick()
+        }
     }
 
     private func startThemeRefresh() {
@@ -182,6 +196,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func dismissResidentPanel() {
+        outsideClickMonitor.stop()
         model?.setPresented(false)
         stopThemeRefresh()
         panel?.orderOut(nil)
@@ -237,7 +252,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         model?.onClose = nil
         model?.close()
         let backend: any BackendClient = options.demo ? DemoBackend() : ProcessBackend(options: options)
-        let next = PickerModel(options: options, backend: backend)
+        let next = PickerModel(options: options, backend: backend,
+                               pullRequestClipboard: { NSPasteboard.general.string(forType: .string) })
         model = next
         bindDismissal(next)
         let picker: RaptorPanel
@@ -363,6 +379,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         picker.makeKeyAndOrderFront(nil)
         model?.setPresented(true)
+        startOutsideClickDismissal(for: picker)
         startThemeRefresh()
     }
 
@@ -379,6 +396,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func dismissPicker() {
+        outsideClickMonitor.stop()
         if resident || model?.busy == true {
             // Keep resident state warm. In either mode, hiding pending work
             // must not close its backend or cancel its task.
@@ -421,6 +439,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        outsideClickMonitor.stop()
         focusTracker?.stop()
         reopenTask?.cancel()
         stopThemeRefresh()
@@ -480,10 +499,6 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // Escape hides; other operation shortcuts cannot submit again.
             return event.keyCode == 36 || event.keyCode == 48 || control
         }
-        if command && shift && !option && !control && key == "a" {
-            model.selectView(.agents)
-            return true
-        }
         if command && shift && !option && !control && key == "s" {
             model.selectView(.sessions)
             return true
@@ -495,12 +510,6 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if command && shift && !option && !control && key == "p" {
             model.beginPullRequest()
-            return true
-        }
-        // Tab switches views everywhere except the create form, which keeps
-        // its field-focus behavior.
-        if event.keyCode == 48 && !command && !option && !control && !model.isForm && !model.basePickerPresented && !model.targetPickerPresented {
-            model.switchView(backward: shift)
             return true
         }
         if model.splitMode {
@@ -530,12 +539,6 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if model.canSubmitForm { model.create() }
             return true
         }
-        if model.page == .worktrees && (command || control) && !option && key == "n" {
-            model.beginCreate(); return true
-        }
-        if model.page == .worktrees && ((command && event.keyCode == 51) || (control && key == "x")) {
-            model.askRemove(); return true
-        }
         if control && !command && !option && key == "x" {
             // askCloseSession only acts on a selected session row of the launcher.
             model.askCloseSession(); return true
@@ -544,7 +547,6 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             switch key {
             case "o": model.cycleTarget(backward: flags.contains(.shift)); return true
             case "p": model.toggleSplit(); return true
-            case "t": model.showWorktrees(); return true
             case "j" where !model.isForm: model.move(1); return true
             case "k" where !model.isForm: model.move(-1); return true
             default: break

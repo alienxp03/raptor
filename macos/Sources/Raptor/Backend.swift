@@ -26,7 +26,7 @@ struct LaunchOptions: Sendable {
         }
         let mode = values["--mode"] ?? "dirs"
         guard ["dirs", "wt", "wt-create", "pr", "agents", "sessions"].contains(mode) else { throw APIError.message("Mode must be dirs, wt, wt-create, pr, agents or sessions.") }
-        self.mode = mode
+        self.mode = ["agents", "wt"].contains(mode) ? "sessions" : mode
         session = values["--session"] ?? ""
         block = values["--block"] ?? ""
         client = values["--client"] ?? ""
@@ -223,7 +223,9 @@ struct HostHeader: Codable, Equatable, Sendable {
 
 struct APIResult: Codable, Sendable {
     var items: [PickerItem]? = nil
+    var launcherItems: [PickerItem]? = nil
     var hosts: [HostHeader]? = nil
+    var selectedID: String? = nil
     var targets: [String]? = nil
     var target: String? = nil
     var repo: String? = nil
@@ -239,6 +241,9 @@ struct APIResult: Codable, Sendable {
     var number: Int? = nil
     var title: String? = nil
     var branch: String? = nil
+    var state: String? = nil
+    var headDeleted: Bool? = nil
+    var headOID: String? = nil
     var cloneRequired: Bool? = nil
     var existing: Bool? = nil
     var sessionID: String? = nil
@@ -248,7 +253,10 @@ struct APIResult: Codable, Sendable {
     var theme: ThemePayload? = nil
     enum CodingKeys: String, CodingKey {
         case items, hosts, targets, target, repo, branches, path, theme
-        case input, url, number, title, branch, existing, error
+        case selectedID = "selected_id"
+        case launcherItems = "launcher_items"
+        case input, url, number, title, branch, existing, error, state
+        case headDeleted = "head_deleted", headOID = "head_oid"
         case cloneRequired = "clone_required"
         case sessionID = "session_id", windowID = "window_id", blockID = "block_id"
         case destinationRoot = "destination_root"

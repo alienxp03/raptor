@@ -185,7 +185,6 @@ func Setup(path string, retry bool) (err error) {
 		return fmt.Errorf("worktree instance changed; call Prepare")
 	}
 	if s.Complete {
-		fmt.Fprintln(os.Stdout, "Worktree setup already complete.")
 		return nil
 	}
 	if strings.HasSuffix(s.Failed, " interrupted") && s.Stage < 3 && s.New && s.Stage > 0 {
@@ -213,6 +212,24 @@ func Setup(path string, retry bool) (err error) {
 	}
 	for s.Stage < len(stages) {
 		phase := stages[s.Stage]
+		hooks, inspectErr := command(path, "wt", "hook", "show", phase, "--format=json")
+		if inspectErr != nil {
+			return inspectErr
+		}
+		var configured []json.RawMessage
+		if err := json.Unmarshal([]byte(hooks), &configured); err != nil || configured == nil {
+			return fmt.Errorf("%s hook inspection must return a valid JSON array", phase)
+		}
+		if len(configured) == 0 {
+			// Empty phases still advance durably, but require neither execution nor
+			// approval. Do not mark an absent background launch as interrupted.
+			s.Stage++
+			s.Failed = ""
+			if err = save(path, s); err != nil {
+				return err
+			}
+			continue
+		}
 		args := []string{"hook", phase}
 		if phase == "pre-start" {
 			args = append(args, "--foreground")
@@ -233,10 +250,6 @@ func Setup(path string, retry bool) (err error) {
 			// Manual hook context supplies the current worktree as a default.
 			// Native creation has no base_worktree_path when the base ref has
 			// no checkout. Stop if a hook uses it; never supply a wrong path.
-			hooks, inspectErr := command(path, "wt", "hook", "show", phase, "--format=json")
-			if inspectErr != nil {
-				return inspectErr
-			}
 			if strings.Contains(hooks, "base_worktree_path") {
 				return fmt.Errorf("%s uses base_worktree_path but the base has no worktree; run this setup manually", phase)
 			}
@@ -247,7 +260,6 @@ func Setup(path string, retry bool) (err error) {
 		if s.Base != "" {
 			args = append(args, "--var", "base="+s.Base)
 		}
-		fmt.Fprintf(os.Stdout, "Worktree setup: %s\n", phase)
 		s.Failed = phase + " interrupted"
 		if err = save(path, s); err != nil {
 			return err
@@ -268,14 +280,10 @@ func Setup(path string, retry bool) (err error) {
 		if err = save(path, s); err != nil {
 			return err
 		}
-		if phase != "pre-start" {
-			fmt.Fprintln(os.Stdout, "Background hooks launched. Logs: wt config state logs")
-		}
 	}
 	s.Complete = true
 	if err = save(path, s); err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stdout, "Worktree setup complete (background hooks can still be running).")
 	return nil
 }

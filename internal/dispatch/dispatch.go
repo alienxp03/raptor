@@ -14,12 +14,25 @@ import (
 
 // Dispatch opens dir with the given target, mirroring the old shell script.
 func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
+	_, err := DispatchResult(target, dir, ctx, cfg)
+	return err
+}
+
+// DispatchResult retains exact resource identities even if selection fails.
+func DispatchResult(target, dir string, ctx rex.Ctx, cfg config.Config) (pullrequest.OpenResult, error) {
+	result := pullrequest.OpenResult{Path: dir}
+	err := dispatch(target, dir, ctx, cfg, &result)
+	return result, err
+}
+
+func dispatch(target, dir string, ctx rex.Ctx, cfg config.Config, result *pullrequest.OpenResult) error {
 	pending, err := pullrequest.LocalPending(dir)
 	if err != nil {
 		return err
 	}
 	if pending && (target == "session" || target == "tab") {
-		_, err := pullrequest.Open(dir, target, ctx)
+		opened, err := pullrequest.Open(dir, target, ctx)
+		*result = opened
 		if err != nil {
 			return fmt.Errorf("worktree preserved at %s; setup destination: %w", dir, err)
 		}
@@ -47,7 +60,9 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 				return fmt.Errorf("could not create session for %s", dir)
 			}
 			sid = res.SessionID
+			rex.RecordLauncherCreation("", sid, name, dir)
 		}
+		result.SessionID = sid
 		return rex.SelectSession(ctx, sid)
 
 	case "tab":
@@ -64,6 +79,7 @@ func Dispatch(target, dir string, ctx rex.Ctx, cfg config.Config) error {
 		if json.Unmarshal([]byte(out), &res) != nil || res.WindowID == "" {
 			return fmt.Errorf("could not identify the new tab")
 		}
+		result.SessionID, result.WindowID = ctx.Session, res.WindowID
 		if ctx.Client != "" {
 			if err := rex.Do(ctx.Client, "session.select", "session_id="+ctx.Session, "window_id="+res.WindowID); err != nil {
 				return err

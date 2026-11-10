@@ -146,6 +146,11 @@ func Open(path, target string, ctx rex.Ctx) (result OpenResult, err error) {
 		if len(created.BlockIDs) > 0 {
 			result.BlockID = created.BlockIDs[0]
 		}
+		// Publish a successful new session before journal/selection failures can
+		// hide it. Never infer a session from a label or a failed create.
+		if target == "session" && createErr == nil && parseErr == nil && len(created.Error) == 0 && result.SessionID != "" {
+			rex.RecordLauncherCreation("", result.SessionID, label, path)
+		}
 		// Keep every returned ID, even when Rex reports an error.
 		s.Result = result
 		// Truncated/unrecognized responses are not explicit failures, even if

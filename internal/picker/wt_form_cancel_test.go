@@ -20,11 +20,11 @@ func TestDirectCreateEscapeCloses(t *testing.T) {
 	}
 }
 
-func TestListCreateEscapeReturnsToList(t *testing.T) {
+func TestNestedCreateEscapeReturnsToLauncher(t *testing.T) {
 	m := &wtModel{form: true}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if cmd != nil || m.form {
-		t.Fatal("A form opened from the list must return to the list")
+	if cmd == nil || !m.form || m.action != "back" {
+		t.Fatal("A nested form must return to the launcher, never the removed browser")
 	}
 }
 

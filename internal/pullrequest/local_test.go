@@ -13,16 +13,7 @@ import (
 func localFixture(t *testing.T) (string, string) {
 	t.Helper()
 	repo, path := fixture(t)
-	wt, err := exec.LookPath("wt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(wt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := strings.Replace(string(data), "if [ -n \"$PR_PRE_SWITCH\" ]; then", "if [ -n \"$PR_PRE_SWITCH\" ] || [ \"$3\" = \"$LOCAL_PHASE\" ]; then", 1)
-	put(t, wt, text)
+	t.Setenv("PR_HOOK_PHASES", "")
 	return repo, path
 }
 

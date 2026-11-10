@@ -57,7 +57,7 @@ func TestLauncherExactNamesPreserveTiesAndCurrentSession(t *testing.T) {
 	}
 	items = append(items, LauncherItem{Kind: "session", Label: "p--i", SessionID: "session:origin", Active: true})
 	got = FilterLauncherItems(items, "pi", "session:origin")
-	if len(got) != 3 || got[0].SessionID != "session:origin" {
-		t.Fatal("matching current session must retain first position")
+	if len(got) != 3 || got[0].SessionID != "session:recent" || got[2].SessionID != "session:origin" {
+		t.Fatal("current session must remain available without overriding query rank")
 	}
 }

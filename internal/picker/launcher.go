@@ -38,8 +38,7 @@ func (m *dirModel) openLauncherActions(path string) {
 	}
 	if worktreepkg.IsGitRepo(path) {
 		m.actions = append(m.actions,
-			launcherAction{label: "New worktree", next: "wt-create"},
-			launcherAction{label: "Browse worktrees", next: "wt"})
+			launcherAction{label: "New worktree", next: "wt-create"})
 	}
 	m.actionMenu = true
 }

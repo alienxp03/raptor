@@ -57,8 +57,13 @@ func TestLauncherGitActionsAndContext(t *testing.T) {
 	repo := fixtureRepo(t)
 	m := launcherFixture(t, repo)
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if len(m.actions) != 7 {
+	if len(m.actions) != 6 {
 		t.Fatalf("Git actions missing: %+v", m.actions)
+	}
+	for _, action := range m.actions {
+		if action.next == "wt" || action.next == "agents" {
+			t.Fatal("removed browser action exposed")
+		}
 	}
 	m.actionSel = 5
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})

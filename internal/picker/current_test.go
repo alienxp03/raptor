@@ -60,8 +60,8 @@ func TestTerminalLauncherFlow(t *testing.T) {
 		t.Fatalf("default Enter must launch a session at the directory: %+v", m.launchDir)
 	}
 	m = newModel()
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if m.next != "wt" || m.nextRepo != repo {
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	if m.next != "wt-create" || m.nextRepo != repo {
 		t.Fatal("worktree flow must use the selected repo")
 	}
 	for _, key := range []tea.KeyType{tea.KeyCtrlN, tea.KeyF2} {

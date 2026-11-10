@@ -66,9 +66,9 @@ func TestSearchDoesNotConsumeLetters(t *testing.T) {
 	repo := fixtureRepo(t)
 	m.filter = ""
 	seedLauncher(m, []launcherRow{{dir: &catalog.Directory{Label: "repo", Path: repo}, host: rex.LocalHostLabel}})
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if m.next != "wt" {
-		t.Fatal("Ctrl+T did not open worktrees")
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	if m.next != "wt-create" {
+		t.Fatal("Ctrl+N did not open worktree creation")
 	}
 }
 

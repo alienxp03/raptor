@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/alienxp03/raptor/internal/config"
+	"github.com/alienxp03/raptor/internal/pullrequest"
 	"github.com/alienxp03/raptor/internal/rex"
 	"github.com/alienxp03/raptor/internal/worktree"
 )
@@ -59,6 +60,47 @@ esac
 	}
 }
 
+func TestPullRequestCommitOptionRouting(t *testing.T) {
+	repo := fixtureRepo(t)
+	if _, err := worktree.GitOut(repo, "remote", "add", "origin", "https://github.com/demo/example.git"); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := `#!/bin/sh
+case "$1" in
+api) echo '{"base":{"repo":{"full_name":"demo/example"}}}' ;;
+pr) echo '{"number":23,"title":"Example","headRefName":"feature"}' ;;
+*) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	h := New(rex.Ctx{}, config.Default())
+	for _, explicit := range []bool{false, true} {
+		params, _ := json.Marshal(map[string]any{"repo": repo, "input": "23", "checkout_commit": explicit})
+		result, err := h.call("pullrequests.resolve", params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info := result.(pullrequest.Info)
+		want := "feature"
+		if explicit {
+			want = "pr/23"
+		}
+		if info.Branch != want || info.Path == "" {
+			t.Fatalf("%+v", info)
+		}
+		if explicit {
+			_, err = h.call("pullrequests.prepare", params)
+			if err == nil || !strings.Contains(err.Error(), "head OID") {
+				t.Fatalf("explicit option not routed: %v", err)
+			}
+		}
+	}
+}
+
 func TestPullRequestRequestValidation(t *testing.T) {
 	h := New(rex.Ctx{}, config.Default())
 	for _, tc := range []struct {
@@ -67,6 +109,7 @@ func TestPullRequestRequestValidation(t *testing.T) {
 		want   string
 	}{
 		{"pullrequests.resolve", `{"input":23}`, "cannot unmarshal"},
+		{"pullrequests.prepare", `{"input":"23","checkout_commit":"true"}`, "cannot unmarshal"},
 		{"pullrequests.resolve", `{}`, "enter a GitHub"},
 		{"pullrequests.prepare", `{"input":" "}`, "enter a GitHub"},
 		{"pullrequests.open", `{}`, "worktree path is required"},

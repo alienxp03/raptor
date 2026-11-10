@@ -10,7 +10,8 @@ import (
 )
 
 func TestLiveActivityIdleToWorkingCoalescesAndKeepsIntent(t *testing.T) {
-	m := newDirModel(rex.Ctx{}, config.Default(), false, 2)
+	m := newDirModel(rex.Ctx{}, config.Default(), false, 0)
+	m.viewMode = 2 // Exercise retained agent snapshot helpers directly.
 	a, b := pickerAgent("a"), pickerAgent("b")
 	a.State, b.State = "idle", "idle"
 	m.loadAgents(false)
@@ -66,7 +67,7 @@ func TestLiveActivityHostScopeAndLauncherSelection(t *testing.T) {
 	}
 	m.hostOrder = []string{rex.LocalHostLabel, "remote"}
 	m.applyLauncher()
-	m.sel = 1
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m.refreshLiveActivity()
 	local := pickerAgent("local")
 	local.Cwd = "/repo"

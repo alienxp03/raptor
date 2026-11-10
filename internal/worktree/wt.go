@@ -180,6 +180,15 @@ func SwitchPR(repo, url string) (Worktree, bool, error) {
 	return switchWorktree(repo, url)
 }
 
+// SwitchBranch reuses a local branch through the same no-hooks switch and
+// registration reconciliation as SwitchPR. It never creates or resets a branch.
+func SwitchBranch(repo, branch string) (Worktree, bool, error) {
+	if strings.TrimSpace(branch) == "" || strings.HasPrefix(branch, "-") {
+		return Worktree{}, false, fmt.Errorf("enter a branch name")
+	}
+	return switchWorktree(repo, branch)
+}
+
 func switchWorktree(repo string, args ...string) (Worktree, bool, error) {
 	before, err := listWorktrees(repo)
 	if err != nil {

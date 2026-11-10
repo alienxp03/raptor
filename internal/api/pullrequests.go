@@ -13,10 +13,11 @@ import (
 // Partial mutation failures are result data so native clients retain recovery.
 func (h *Handler) pullRequest(method string, params json.RawMessage) (any, error) {
 	var p struct {
-		Repo   string `json:"repo"`
-		Input  string `json:"input"`
-		Path   string `json:"path"`
-		Target string `json:"target"`
+		Repo           string `json:"repo"`
+		Input          string `json:"input"`
+		Path           string `json:"path"`
+		Target         string `json:"target"`
+		CheckoutCommit bool   `json:"checkout_commit"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, err
@@ -29,13 +30,7 @@ func (h *Handler) pullRequest(method string, params json.RawMessage) (any, error
 			return nil, fmt.Errorf("pull requests open in a session or tab")
 		}
 		result, err := pullrequest.Open(p.Path, p.Target, h.ctx)
-		if err != nil {
-			return struct {
-				pullrequest.OpenResult
-				Error string `json:"error"`
-			}{result, err.Error()}, nil
-		}
-		return result, nil
+		return h.openLauncherResult(result, err), nil
 	}
 	if strings.TrimSpace(p.Input) == "" {
 		return nil, fmt.Errorf("enter a GitHub pull request URL or number")
@@ -51,9 +46,9 @@ func (h *Handler) pullRequest(method string, params json.RawMessage) (any, error
 		}
 	}
 	if method == "pullrequests.resolve" {
-		return pullrequest.Resolve(repo, p.Input)
+		return pullrequest.ResolveWithOptions(repo, p.Input, p.CheckoutCommit)
 	}
-	result, err := pullrequest.Prepare(repo, p.Input)
+	result, err := pullrequest.PrepareWithOptions(repo, p.Input, p.CheckoutCommit)
 	if err != nil {
 		// A prospective path or an existing registration is not enough: Open
 		// also needs Prepare's valid setup journal. Otherwise retry Prepare.

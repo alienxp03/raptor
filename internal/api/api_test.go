@@ -493,8 +493,10 @@ esac
 	if err := call("dispatch", map[string]any{"target": "tab", "path": "/tmp/project"}, &result); err != "" {
 		t.Fatal(err)
 	}
-	if len(result) != 0 {
-		t.Fatal("dispatch result must be empty")
+	// Dispatch reports its outcome (path/session IDs) and, when a launcher
+	// snapshot already exists, authoritative rows covering any new session.
+	if _, ok := result["error"]; ok {
+		t.Fatalf("successful dispatch must not carry an error: %v", result)
 	}
 	data, err := os.ReadFile(log)
 	if err != nil {

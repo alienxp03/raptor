@@ -116,7 +116,7 @@ func TestLauncherFirstLoadIsAsyncAndKeepsInput(t *testing.T) {
 	log := pickerRexLogSessions(t, `{"sessions":[{"session_id":"s1","label":"work"}]}`, "")
 	m := &dirModel{width: 80, height: 14, hostDirs: map[string][]catalog.Directory{}, ctx: rex.Ctx{Session: "origin"}, viewMode: 2, agentsLoaded: true}
 	m.applyCurrentFilter()
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	if cmd == nil || !m.launcherSessionsLoading || m.viewMode != 0 {
 		t.Fatal("switching to the launcher must start the async load")
 	}
@@ -364,15 +364,19 @@ func TestLauncherWorktreeShortcutUsesGitRepo(t *testing.T) {
 	m.applyLauncher()
 	// Select the repo row: first row is the git repo (pins empty, zoxide order).
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if m.next != "wt" || m.nextRepo != worktreepkg.RepoRoot(repo) {
-		t.Fatalf("ctrl+t must open worktrees for the git repo: %s %s", m.next, m.nextRepo)
+	if m.next != "" {
+		t.Fatal("Ctrl+T must not open browser")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	if m.next != "wt-create" || m.nextRepo != worktreepkg.RepoRoot(repo) {
+		t.Fatalf("ctrl+n must open worktree creation for the git repo: %s %s", m.next, m.nextRepo)
 	}
 	m = launcherModel()
 	m.sessions = localGroups()
 	m.hostOrder = []string{rex.LocalHostLabel}
 	m.hostDirs[rex.LocalHostLabel] = []catalog.Directory{{Label: "plain", Path: t.TempDir()}}
 	m.applyLauncher()
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	if m.next != "" || m.err != "not a git repo" {
 		t.Fatalf("non-repo rows must report the error: %q %q", m.next, m.err)
 	}

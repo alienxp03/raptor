@@ -203,16 +203,16 @@ func TestWorktreeDefaultCollisionBlocksAndRetryStaysInForm(t *testing.T) {
 	}
 }
 
-func TestWorktreeListNewFormUsesMetadataThenFreshSafeSuggestion(t *testing.T) {
+func TestReopenedCreateFormUsesFreshSafeSuggestion(t *testing.T) {
 	repo := fixtureRepo(t)
 	cfg := config.Default()
 	cfg.WorktreeRoot = t.TempDir()
-	m := newWtModel(rex.Ctx{}, cfg, repo)
-	suggestion := m.suggestedBranch
+	m := newCreateModel(rex.Ctx{}, cfg, repo, true)
+	m.Update(wtLoadedMsg{repo: repo, info: catalog.ListWorktrees(repo, cfg)})
+	suggestion := m.branch
 	if suggestion == "" {
-		t.Fatal("list metadata missing suggestion")
+		t.Fatal("create metadata missing suggestion")
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
 	if m.branch != suggestion {
 		t.Fatal("list form must use current metadata suggestion")
 	}
@@ -221,7 +221,8 @@ func TestWorktreeListNewFormUsesMetadataThenFreshSafeSuggestion(t *testing.T) {
 	if _, err := worktreepkg.GitOut(repo, "branch", suggestion); err != nil {
 		t.Fatal(err)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = newCreateModel(rex.Ctx{}, cfg, repo, true)
+	m.Update(wtLoadedMsg{repo: repo, info: catalog.ListWorktrees(repo, cfg)})
 	if m.branch == "" || m.branch == suggestion || m.branchEdited || m.field != 0 || worktreepkg.Validate(repo, m.branch, m.base, m.destination()) != nil {
 		t.Fatal("new form must reset edits and get a fresh safe shared suggestion")
 	}

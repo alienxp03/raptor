@@ -29,8 +29,10 @@ struct TransportFixture {
             var response: [String: Any] = ["id": id, "result": [:] as [String: String]]
             switch method {
             case "pullrequests.resolve", "pullrequests.prepare":
-                guard let input = params["input"] as? String else { exit(5) }
-                response["result"] = ["repo": "/ambient", "path": "/pr-" + input, "title": "Fixture PR"]
+                guard let input = params["input"] as? String,
+                      let number = URL(string: input)?.lastPathComponent,
+                      Int(number) != nil, params["repo"] == nil else { exit(5) }
+                response["result"] = ["repo": "/ambient", "path": "/pr-" + number, "title": "Fixture PR"]
             case "pullrequests.open":
                 guard let path = params["path"] as? String,
                       params["target"] as? String == (path == "/pr-13" ? "tab" : "session") else { exit(6) }

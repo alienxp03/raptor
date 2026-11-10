@@ -5,18 +5,43 @@ Public API:
 ```go
 Resolve(repo, input string) (Info, error) // read-only; repo is local context
 Prepare(repo, input string) (Info, error) // clone base + wt switch --no-hooks
+ResolveWithOptions(repo, input string, checkoutCommit bool) (Info, error)
+PrepareWithOptions(repo, input string, checkoutCommit bool) (Info, error)
 Ready(path string) bool // registered instance + bound setup journal permit Open
 Open(path, target string, ctx rex.Ctx) (OpenResult, error)
 Setup(path string, retry bool) error
 ```
 
 `Info` has flat JSON fields: `input`, `url`, `number`, `title`, `branch`, `repo`,
-`path`, `clone_required`, `existing`. `repo` is the primary local clone.
+`path`, `clone_required`, `existing`, `state`, `head_deleted`, `head_oid`.
+`state` is `OPEN`, `CLOSED`, or `MERGED`; `head_deleted` comes from GitHub's
+nullable GraphQL `headRef`, not PR closure or a failed branch lookup. API failures,
+incomplete responses, or metadata changing between reads fail resolution. Legacy
+fixtures without state retain empty state/OID and false deletion.
+`repo` is the primary local clone.
 `path` is empty until a clone exists and Worktrunk can compute its destination.
 Pass the original selected repository/worktree context to Prepare, not the returned
 primary `Info.Repo`, when the source worktree hook context must be preserved.
 `OpenResult` retains path and all known IDs on error. Its optional `error` field
 matches the returned error. Do not discard either result on error.
+
+## Explicit commit checkout
+
+`pullrequests.resolve` and `pullrequests.prepare` accept `checkout_commit` (default
+false). Native clients must send true only after explicit confirmation of **Check
+out PR commit**. Normal Prepare refuses CLOSED/MERGED PRs with deleted heads before
+any mutation. There is no automatic fallback or restoration of the original branch.
+True previews/uses `pr/<number>` instead of the original branch. Prepare fetches
+`refs/pull/<number>/head` from the verified base repository into a unique private
+ref, requires the exact metadata `head_oid` and a commit object, and removes the
+private ref. It does not write FETCH_HEAD, force, reset, or push. A compare-and-create
+local ref update prevents overwriting a collision; an existing direct branch at
+exactly the same OID may be reused. Different commits and symbolic refs are refused.
+The usual pre-switch safety check, preparation journal, no-hooks Worktrunk switch,
+registration reconciliation, and deferred visible setup remain in force. Failed
+preparations preserve any created branch/journal for recovery; they never delete
+user resources. Missing/changed retained refs require resolving or inspecting again.
+The original Resolve/Prepare functions are default-false wrappers.
 
 ## Parent CLI contract
 
@@ -58,7 +83,13 @@ when Prepare resumes after a crash.
 
 New worktree: foreground `pre-start`, background `post-start`, background
 `post-switch`. Existing worktree: `post-switch` only. Completed setup is not run
-again. A retry resumes the failed stage, not resource creation. An interrupted
+again. Setup is silent when no hooks need running, including completed setup.
+Each phase is inspected with `wt hook show PHASE --format=json`; only a valid,
+nonempty array permits execution. Empty phases advance the durable journal without
+hook execution or approval checks. Invalid inspection data fails closed and can
+be retried. Setup adds no generic phase, success, or log announcements; actual
+hook stdout/stderr, approval prompts, and failure/retry help remain visible.
+A retry resumes the failed stage, not resource creation. An interrupted
 foreground stage requires explicit retry. An uncertain background launch is not
 replayed automatically: inspect `wt config state logs` and recover manually.
 Background launch success is not a server-health check.

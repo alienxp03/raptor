@@ -29,7 +29,7 @@ struct PickerRequestChecks {
         require(options.backendArguments == ["--session", "SID", "--block", "BID", "--client", "CID", "--title", "", "api"])
 
         let noBlock = try parse("raptor://picker/?mode=wt&session=S&client=C")
-        require(noBlock.mode == "wt" && noBlock.block.isEmpty && noBlock.repo == nil)
+        require(noBlock.mode == "sessions" && noBlock.block.isEmpty && noBlock.repo == nil)
         let direct = try parse("raptor://picker?mode=wt-create&session=S&client=C&repo=%2Fdemo")
         require(direct.mode == "wt-create" && direct.repo == "/demo" && direct.block.isEmpty)
         let pr = try parse("raptor://picker?mode=pr&session=S&client=C&repo=%2Frepo")
@@ -39,7 +39,7 @@ struct PickerRequestChecks {
         let directNoRepo = try parse("raptor://picker?mode=wt-create&session=S&client=C")
         require(directNoRepo.mode == "wt-create" && directNoRepo.repo == nil)
         let agents = try parse("raptor://picker?mode=agents&session=S&block=B&client=C")
-        require(agents.mode == "agents" && agents.session == "S" && agents.block == "B")
+        require(agents.mode == "sessions" && agents.session == "S" && agents.block == "B")
         let panel = try LaunchOptions(panelRequest: PanelRequest(mode: "agents", session: "S", block: "B", client: "C"))
         require(panel.matches(agents))
         let sessions = try parse("raptor://picker?mode=sessions&session=S&block=B&client=C")
@@ -68,7 +68,7 @@ struct PickerRequestChecks {
             URLQueryItem(name: "repo", value: payload),
         ]
         let inert = try LaunchOptions(pickerURL: components.url!)
-        require(inert.repo == payload && inert.mode == "wt" && !inert.demo)
+        require(inert.repo == payload && inert.mode == "sessions" && !inert.demo)
         require(inert.session == "--demo" && inert.client == "--mode" && inert.title.isEmpty)
 
         let invalid = [

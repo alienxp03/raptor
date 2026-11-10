@@ -86,6 +86,7 @@ type dirModel struct {
 	activityLivePending     bool
 	activityLiveDirty       bool
 	activityLiveID          uint64
+	launcherSelectionManual bool
 	viewStates              [3]dirViewState
 	err                     string
 	width                   int
@@ -116,9 +117,9 @@ func RunDirs(ctx rex.Ctx, cfg config.Config) int {
 	return runDirs(ctx, cfg, false, 0)
 }
 
-// RunAgents opens the picker directly in its Agents view.
+// RunAgents is a compatibility alias for the sessions launcher.
 func RunAgents(ctx rex.Ctx, cfg config.Config) int {
-	return runDirs(ctx, cfg, false, 2)
+	return RunSessions(ctx, cfg)
 }
 
 // RunSessions opens the picker directly in its Sessions launcher.
@@ -132,9 +133,7 @@ func RunLauncher(ctx rex.Ctx, cfg config.Config) int {
 }
 
 func newDirModel(ctx rex.Ctx, cfg config.Config, experimental bool, view int) *dirModel {
-	if view != 2 {
-		view = 0
-	}
+	view = 0 // Legacy Agents routes normalize to sessions.
 	// The launcher's default verb is session creation; cfg.Enter stays for
 	// the worktree flows and the experimental launcher.
 	defaultTarget := cfg.Enter
@@ -155,6 +154,7 @@ func runDirs(ctx rex.Ctx, cfg config.Config, launcher bool, view int) int {
 		_ = rex.RecordSessionUse("", ctx.Session)
 		m.sessionRecency = rex.LoadSessionRecency()
 		m.applyLauncher()
+		m.selectPreferredLauncher()
 		m.activityWatcher = rex.WatchEvents(context.Background())
 		m.activityWatcher.Discover()
 		final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
@@ -206,7 +206,7 @@ func (m *dirModel) resumeWorktreeFlow(code int) bool {
 	m.actionMenu = false
 	if code == returnToAgents {
 		// Init restarts the pending fetch after the nested picker exits.
-		_ = m.switchView(2)
+		_ = m.switchView(0)
 	}
 	return true
 }
@@ -323,10 +323,7 @@ func (m *dirModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateLauncherActions(msg)
 		}
 		if msg.String() == "ctrl+a" {
-			if m.viewMode == 2 {
-				return m, nil
-			}
-			return m, m.switchView(2)
+			return m, nil
 		}
 		if msg.String() == "ctrl+s" {
 			if m.viewMode == 0 {
@@ -335,12 +332,7 @@ func (m *dirModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.switchView(0)
 		}
 		if !m.splitMode && (msg.String() == "tab" || msg.String() == "shift+tab") {
-			// Two views: the Sessions launcher and Agents.
-			next := 2
-			if m.viewMode == 2 {
-				next = 0
-			}
-			return m, m.switchView(next)
+			return m, nil
 		}
 		if m.viewMode == 2 {
 			return m.updateAgents(msg)

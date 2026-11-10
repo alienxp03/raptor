@@ -29,6 +29,9 @@ type Info struct {
 	Path          string `json:"path"`
 	CloneRequired bool   `json:"clone_required"`
 	Existing      bool   `json:"existing"`
+	State         string `json:"state"`
+	HeadDeleted   bool   `json:"head_deleted"`
+	HeadOID       string `json:"head_oid"`
 }
 
 var component = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
@@ -107,6 +110,11 @@ func parse(input, repo string) (string, string, error) {
 
 // Resolve performs read-only metadata, origin and worktree checks. Repo is a local path.
 func Resolve(repo, input string) (Info, error) {
+	return ResolveWithOptions(repo, input, false)
+}
+
+// ResolveWithOptions previews an isolated pr/N branch when checkoutCommit is explicit.
+func ResolveWithOptions(repo, input string, checkoutCommit bool) (Info, error) {
 	info := Info{Input: input}
 	id, n, err := parse(input, repo)
 	if err != nil {
@@ -132,7 +140,7 @@ func Resolve(repo, input string) (Info, error) {
 		return info, fmt.Errorf("GitHub returned a different base repository")
 	}
 	info.URL = "https://github.com/" + baseID + "/pull/" + n
-	raw, err = command("", "gh", "pr", "view", info.URL, "--json", "number,title,headRefName,url")
+	raw, err = command("", "gh", "pr", "view", info.URL, "--json", "number,title,headRefName,url,state,headRefOid")
 	if err != nil {
 		return info, err
 	}
@@ -141,6 +149,8 @@ func Resolve(repo, input string) (Info, error) {
 		Title       string
 		HeadRefName string
 		URL         string
+		State       string
+		HeadRefOid  string
 	}
 	if err = json.Unmarshal([]byte(raw), &metadata); err != nil {
 		return info, err
@@ -150,6 +160,15 @@ func Resolve(repo, input string) (Info, error) {
 		return info, fmt.Errorf("invalid PR metadata")
 	}
 	info.Number, info.Title, info.Branch = metadata.Number, metadata.Title, metadata.HeadRefName
+	info.State, info.HeadOID = metadata.State, metadata.HeadRefOid
+	if info.State != "" {
+		if err := resolveHead(&info, baseID); err != nil {
+			return info, err
+		}
+	}
+	if checkoutCommit {
+		info.Branch = fmt.Sprintf("pr/%d", info.Number)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return info, err
@@ -219,9 +238,20 @@ func Resolve(repo, input string) (Info, error) {
 // Prepare clones into an absent or verified owned empty destination, then
 // creates/reuses via Worktrunk. Valid existing clones resume without recloning.
 func Prepare(repo, input string) (Info, error) {
-	info, err := Resolve(repo, input)
+	return PrepareWithOptions(repo, input, false)
+}
+
+// PrepareWithOptions requires explicit consent before checking out a retained PR commit.
+func PrepareWithOptions(repo, input string, checkoutCommit bool) (Info, error) {
+	info, err := ResolveWithOptions(repo, input, checkoutCommit)
 	if err != nil {
 		return info, err
+	}
+	if !checkoutCommit && info.HeadDeleted && (info.State == "CLOSED" || info.State == "MERGED") {
+		return info, fmt.Errorf("PR #%d is %s and its head branch was deleted; choose 'Check out PR commit' (checkout_commit:true) to use isolated branch pr/%d", info.Number, info.State, info.Number)
+	}
+	if checkoutCommit && !commitOID.MatchString(info.HeadOID) {
+		return info, fmt.Errorf("explicit PR commit checkout requires a verified head OID")
 	}
 	unlock, err := lock("prepare:"+prospectivePath(info.Repo), false)
 	if err != nil {
@@ -284,12 +314,28 @@ func Prepare(repo, input string) (Info, error) {
 			return info, err
 		}
 	}
-	tree, created, switchErr := worktree.SwitchPR(source, info.URL)
+	var tree worktree.Worktree
+	var created bool
+	var switchErr error
+	if checkoutCommit {
+		if err := prepareCommit(info); err != nil {
+			return info, err
+		}
+		tree, created, switchErr = worktree.SwitchBranch(source, info.Branch)
+	} else {
+		tree, created, switchErr = worktree.SwitchPR(source, info.URL)
+	}
 	if tree.Path == "" {
 		if switchErr == nil {
 			switchErr = fmt.Errorf("Worktrunk returned no destination")
 		}
 		return info, switchErr
+	}
+	if checkoutCommit {
+		oid, verifyErr := command(tree.Path, "git", "rev-parse", "--verify", "HEAD")
+		if verifyErr != nil || oid != info.HeadOID || tree.Branch != info.Branch {
+			switchErr = errors.Join(switchErr, fmt.Errorf("PR commit destination changed during checkout; inspect preserved resources before setup"))
+		}
 	}
 	info.Path, info.Existing = tree.Path, !created
 	path, err := canonical(tree.Path)

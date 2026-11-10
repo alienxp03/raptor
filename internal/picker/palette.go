@@ -78,38 +78,6 @@ func pickerDirectory(path string, width int, selected bool) string {
 	return pickerRow(style.Render(pickerTail(paths.HomeRelative(path), maxInt(width-3, 0))), width, selected)
 }
 
-// pickerPills renders the view switcher under the search field:
-// 0 the sessions launcher, 2 agents.
-func pickerPills(active int, width int) string {
-	pills := []struct {
-		name string
-		view int
-	}{{"Sessions", 0}, {"Agents", 2}}
-	parts := make([]string, 0, len(pills))
-	for _, pill := range pills {
-		name := pill.name
-		if pill.view == active {
-			// The active pill stays quiet; amber belongs to the selected row only.
-			parts = append(parts, pickerInput.Render(" "+name+" "))
-		} else {
-			parts = append(parts, pickerMuted.Render(" "+name+" "))
-		}
-	}
-	content := strings.Join(parts, pickerRail.Render("·"))
-	if lipgloss.Width(content) > width {
-		// Narrow palettes drop pill padding before truncating mid-word.
-		for i, pill := range pills {
-			style := pickerMuted
-			if pill.view == active {
-				style = pickerInput
-			}
-			parts[i] = style.Render(pill.name)
-		}
-		content = strings.Join(parts, pickerRail.Render("·"))
-	}
-	return pickerLine(content, width)
-}
-
 // pickerDirectoryRow adds the alt-number and pin columns to a directory row.
 func pickerDirectoryRow(path string, pinned bool, position, width int, selected bool) string {
 	return pickerDirectoryRowActivity(path, pinned, position, width, selected, "")

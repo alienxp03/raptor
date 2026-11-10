@@ -50,6 +50,7 @@ func fixture(t *testing.T) (string, string) {
 	t.Setenv("PR_DEST", path)
 	t.Setenv("PR_LOG", filepath.Join(root, "calls"))
 	t.Setenv("PR_FAIL", filepath.Join(root, "fail"))
+	t.Setenv("PR_HOOK_PHASES", "pre-start post-start post-switch")
 	bin := filepath.Join(root, "bin")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	put(t, filepath.Join(bin, "gh"), `#!/bin/sh
@@ -70,10 +71,20 @@ case "$1 $2" in
   case "$project" in /*) :;; *) project="$PWD/$project";; esac
   printf '{"user":{"path":"%s/user.toml","exists":false},"system":{"path":"%s/system.toml","exists":false},"project":{"path":"%s","exists":false}}\n' "$HOME" "$HOME" "$project";;
  'step eval') printf '{"result":"%s"}\n' "$PR_DEST";;
- 'hook show') if [ -n "$PR_PRE_SWITCH" ]; then echo '[{"name":"check"}]'; else echo '[]'; fi;;
+ 'hook show')
+  if [ "$3" = pre-switch ]; then
+   if [ -n "$PR_PRE_SWITCH" ]; then echo '[{"name":"check"}]'; else echo '[]'; fi
+  elif [ -n "$PR_HOOK_JSON" ]; then printf '%s\n' "$PR_HOOK_JSON"
+  else
+   case " $PR_HOOK_PHASES $LOCAL_PHASE " in
+    *" $3 "*) echo '[{"name":"check"}]';;
+    *) echo '[]';;
+   esac
+  fi;;
  'config approvals') if [ -n "$PR_DENY" ]; then echo '{"commands":[{"phase":"pre-start","approved":false}]}'; else echo '{"commands":[]}'; fi;;
- 'hook pre-start') if [ -f "$PR_FAIL" ]; then echo 'install failed' >&2; exit 7; fi;;
- 'hook post-start'|'hook post-switch') :;;
+ 'hook pre-start'|'hook post-start'|'hook post-switch')
+  if [ -n "$PR_VISIBLE" ]; then printf '%s stdout\n' "$2"; printf '%s stderr\n' "$2" >&2; fi
+  if [ "$2" = pre-start ] && [ -f "$PR_FAIL" ]; then echo 'install failed' >&2; exit 7; fi;;
  'switch --no-hooks')
   if [ ! -d "$PR_DEST" ]; then git worktree add -q -b feat/fix "$PR_DEST" || exit; fi
   printf '{"path":"%s","branch":"feat/fix"}\n' "$PR_DEST"

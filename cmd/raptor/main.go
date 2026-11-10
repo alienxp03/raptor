@@ -39,7 +39,7 @@ func main() {
 	fs.StringVar(&client, "client", "", "origin client id")
 	fs.StringVar(&title, "title", "", "origin terminal title")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|sessions|agents|launcher|wt|task|setup|api|direct|last-session|panel|service> [command flags]\n")
+		fmt.Fprintf(os.Stderr, "usage: raptor [context flags] <dirs|sessions|launcher|wt|task|setup|api|direct|last-session|panel|service> [command flags]\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(os.Args[1:])
@@ -71,7 +71,7 @@ func main() {
 		os.Exit(picker.RunDirs(ctx, cfg))
 	case "agents":
 		picker.ApplyTheme()
-		os.Exit(picker.RunAgents(ctx, cfg))
+		os.Exit(picker.RunSessions(ctx, cfg))
 	case "sessions":
 		picker.ApplyTheme()
 		os.Exit(picker.RunSessions(ctx, cfg))
@@ -87,8 +87,8 @@ func main() {
 			picker.ApplyTheme()
 			os.Exit(picker.RunCreateWorktree(ctx, cfg, *repo))
 		}
-		picker.ApplyTheme()
-		os.Exit(picker.RunWorktrees(ctx, cfg, *repo))
+		fmt.Fprintln(os.Stderr, "worktree browser removed; use raptor wt --create to create a worktree")
+		os.Exit(2)
 	case "task":
 		rest := flag.NewFlagSet("task", flag.ExitOnError)
 		repo := rest.String("repo", "", "origin repository (default: current pane)")
@@ -126,7 +126,7 @@ func main() {
 	case "panel":
 		// Open (or toggle) the resident native panel over IPC.
 		rest := flag.NewFlagSet("panel", flag.ExitOnError)
-		mode := rest.String("mode", "dirs", "picker mode: dirs, sessions, agents, wt, wt-create or pr")
+		mode := rest.String("mode", "dirs", "picker mode: dirs, sessions, wt-create or pr")
 		repo := rest.String("repo", "", "repository for worktree modes")
 		_ = rest.Parse(fs.Args()[1:])
 		req := panel.Request{

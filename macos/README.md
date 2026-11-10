@@ -1,6 +1,6 @@
 # Raptor native picker
 
-Native macOS 14+ accessory app. No Dock window. One floating `NSPanel` hosts SwiftUI. The approved Rex-inspired layout is 640 points wide with system fonts, 13-point list text, green selection, and content-sized height. It follows system appearance, uses real Liquid Glass on macOS 26+, and falls back to native menu material on older systems. The panel anchors 72 points below the active screen's usable top edge. Dismissal hides the window. The resident host keeps its backend warm; a non-resident picker stops it after pending work ends. Cmd+Q hides a resident picker and exits a non-resident app unless work is pending. Focus loss does not dismiss the panel. Alerts keep their native keyboard handling.
+Native macOS 14+ accessory app. No Dock window. One floating `NSPanel` hosts SwiftUI. The approved Rex-inspired layout is 640 points wide with system fonts, 13-point list text, theme-derived selection, and content-sized height. It follows system appearance, uses real Liquid Glass on macOS 26+, and falls back to native menu material on older systems. The panel anchors 72 points below the active screen's usable top edge. Dismissal hides the window. The resident host keeps its backend warm; a non-resident picker stops it after pending work ends. Cmd+Q hides a resident picker and exits a non-resident app unless work is pending. Clicking outside Raptor dismisses the panel without consuming the click. Picker popovers and confirmation dialogs count as inside; focus changes alone do not dismiss. Pending operations continue, and recovery is preserved. Alerts keep their native keyboard handling.
 
 ## Build
 
@@ -20,10 +20,12 @@ Packaging places this executable at `Raptor.app/Contents/MacOS/Raptor` and the G
 ## Launch contract
 
 ```text
-Raptor --mode sessions|dirs|agents|wt|wt-create|pr --session SID --block BID --client CID --title TITLE [--repo PATH]
+Raptor --mode sessions|dirs|wt-create|pr --session SID --block BID --client CID --title TITLE [--repo PATH]
 ```
 
-Normal Rex invocations use the resident panel socket. Launch Services fallback delivers `raptor://picker?mode=dirs&session=SID&block=BID&client=CID` with `open -g -a Raptor.app`. Launch Services reuses the existing app. The URL parser accepts picker context only and rejects duplicate/unknown keys and oversized requests; it cannot dispatch an action automatically.
+The launcher is one flat session/directory list. New worktree creation has searchable base branches; Instant Pi worktrees, PR checkout, and session activity indicators integrate with the same shared backend.
+
+Normal Rex invocations use the resident panel socket. Launch Services fallback delivers `raptor://picker?mode=dirs&session=SID&block=BID&client=CID` with a package-paired app path or `open -g -b com.alienxp03.raptor` for a registered standalone app installed elsewhere. Launch Services reuses the existing app. The URL parser accepts picker context only and rejects duplicate/unknown keys and oversized requests; it cannot dispatch an action automatically.
 
 Context is fixed during each picker operation. The resident host reuses its model and backend, sets new context through the `context` request, and can show cached same-origin rows immediately. Non-resident invocations create a fresh model and backend. A mutation or removal confirmation in progress keeps its current context and must finish before a different request can replace it. The child receives `--session SID --block BID --client CID --title TITLE api`, in that order. The app keeps one NDJSON process connection. Process launch and request writes use one private serial queue. A separate reader drains stdout even when no request is pending. Each request has an integer ID, a 30-second timeout (180 seconds for PR Resolve/Open; 600 seconds for PR Prepare), and an 8 MB response limit. Backend errors remain visible. EOF, invalid envelopes, mismatched IDs, malformed JSON and transport failures close the connection. Close and reopen the app to reconnect. A timeout can leave an operation outcome unknown; check before retrying.
 
@@ -31,16 +33,18 @@ Go owns search, repository resolution, target availability, branch validation, d
 
 ## Native pull requests
 
-Cmd+Shift+P opens the PR form. A GitHub PR URL in main search adds one selectable `Open PR #N — owner/repo` row. Enter opens the form; paste alone makes no API call. No PR browser or main-view PR button is added. `--mode pr`, panel mode `pr`, and picker URL mode `pr` open the form directly. The CLI and Rex action route to this mode outside the native app.
+Cmd+Shift+P opens the PR form. A GitHub PR URL in main search adds one selectable `Open PR #N — owner/repo` row. Enter opens the form; paste alone makes no API call. A clickable `⇧⌘P PR` footer hint opens the same form from the launcher. The Return action shows only `↵`, with an accessible Open label and tooltip. No PR browser is added. `--mode pr`, panel mode `pr`, and picker URL mode `pr` open the form directly. The CLI and Rex action route to this mode outside the native app.
 
-The form accepts only `https://github.com/OWNER/REPO/pull/N` (optional trailing slash), or a positive number with explicit repository context. URL requests omit the ambient repository; the URL defines its own repository. HTTP, bare hosts, queries, fragments, credentials and ports are rejected. It resolves metadata asynchronously and rejects stale replies after input/context changes. Repo and Destination are read-only backend paths; `clone_required` adds `Will clone to …`. Session is recommended and selected by default; Tab is the only other target. Here and split targets are not offered.
+The native form accepts GitHub PR URLs and normalizes them to `https://github.com/OWNER/REPO/pull/N`. Trailing slashes, query strings, fragments, and PR tabs (`changes`, `files`, `commits`, `checks`) are stripped. Bare PR numbers are rejected, even with ambient repository context. On opening an empty form, a valid GitHub PR URL from the clipboard is prefilled; unrelated clipboard contents are ignored and explicit input takes priority. The empty field shows a dimmed URL example. Title, Status, Repo, Branch, and Destination use matching read-only rows, with Branch directly below Repo. URL requests omit the ambient repository; the URL defines its own repository. HTTP, bare hosts, unrelated paths, credentials and ports are rejected. It resolves metadata asynchronously and rejects stale replies after input/context changes. Repo and Destination are read-only backend paths; `clone_required` adds `Will clone to …`. Session is recommended and selected by default; Tab is the only other target. Here and split targets are not offered.
+
+For a closed or merged PR whose source branch was deleted, the action is **Check out PR commit…**. A confirmation explains that this creates an editable worktree on isolated local branch `pr/N`, without restoring or pushing the deleted branch. Cancel and Escape do nothing to Git. Only confirmation sends `checkout_commit:true`; retries reuse a preserved worktree. Other PRs retain the normal Open action. Errors show their final diagnostic line, with **Details…** for selectable, scrollable full output and **Copy error**.
 
 Native API contract:
 
 ```text
-pullrequests.resolve {repo?: path, input: string}
-pullrequests.prepare {repo?: path, input: string}
-  -> {input?, url?, number?, title?, branch?, repo?, path?, clone_required?, existing?, error?}
+pullrequests.resolve {repo?: path, input: string, checkout_commit?: boolean}
+pullrequests.prepare {repo?: path, input: string, checkout_commit?: boolean}
+  -> {input?, url?, number?, title?, branch?, state?, head_deleted?, head_oid?, repo?, path?, clone_required?, existing?, error?}
 pullrequests.open {path: string, target: "session" | "tab"}
   -> {path?, session_id?, window_id?, block_id?, error?}
 ```
@@ -59,7 +63,7 @@ The resident host keeps its model and backend while hidden. AppKit presentation/
 
 The idle reader accepts `{"event":"rex.changed"}` without an ID, between normal responses. Requests remain serial, with strict response IDs/envelopes and the existing 30-second timeout. Invalid events, EOF and malformed responses close the connection. Closing wakes blocked requests and stops the reader/child.
 
-Visible notifications coalesce for 40 ms. Changes during a refresh cause one follow-up. There is no recurring activity poll. Swift re-requests the current filtered Sessions, Agents or Worktrees rows; Go owns projection and cache invalidation. Live updates preserve target, query, selection/scroll identities, busy state, forms, popovers and split mode. Agent presentation order/groups stay fixed; raw snapshots are cached for the next presentation. Create forms ignore activity notifications.
+Visible notifications coalesce for 40 ms. Changes during a refresh cause one follow-up. There is no recurring activity poll. Swift re-requests the current filtered Sessions rows; Go owns projection and cache invalidation. Live updates preserve target, query, selection/scroll identities, busy state, forms, popovers and split mode. Row ordering stays stable during an open presentation. Fresh opens and cached reopens use Go's preferred `selected_id` to select a non-current MRU session, falling back to a directory before the current session. Create forms ignore activity notifications.
 
 Hide unsubscribes without cancelling mutations. Presentation, context and query generations reject old callbacks and responses. Close stops the connection. Reopening a failed resident connection uses the existing host recovery path; Go owns Rex notification reconnection. The existing theme refresh timer is separate and unchanged.
 
@@ -104,35 +108,32 @@ matching local app peer; validate it with isolated history storage.
 | Key | Action |
 | --- | --- |
 | Up / Down, Ctrl+K / Ctrl+J | Select row |
-| Enter | Switch session, create from a directory, or open the selected worktree |
-| Tab / Shift+Tab | Switch Sessions/Agents; move focus through enabled creation controls |
+| Enter | Switch session or create from a directory |
+| Tab / Shift+Tab | Move keyboard focus; move through enabled form controls |
 | Ctrl+O / Ctrl+Shift+O | Cycle open target forward / backward |
 | Cmd+Enter in the creation form | Create and open; retry opening if creation already succeeded |
-| Ctrl+T | Show worktrees for the selected directory |
 | Ctrl+P | Enter or cancel split mode |
 | Split ⌃P in the footer | Enter split mode |
 | J/Down or L/Right in split mode | Open below or right |
 | Esc in split mode | Cancel split mode |
-| Cmd+N / Ctrl+N in worktrees | Show creation form |
 | Cmd+Shift+P | Show pull request form |
 | Cmd+Enter in the PR form | Prepare and open PR; retry Open with the preserved path |
-| Cmd+Backspace / Ctrl+X in worktrees | Ask to remove a non-main worktree |
 | Esc | Dismiss a popover/split mode first; hide the launcher or return from a nested page |
 | Cmd+Q | Hide the resident picker; quit a non-resident app when no mutation is pending |
 
 Creation groups the branch name, searchable local **From branch** picker, read-only Go destination preview, and **Open in** target. Validation waits for branch input. **Create** sends creation, then dispatch. A failed dispatch leaves **Retry opening**, which reuses the created path. Completed branch/base fields stay read-only until Back. Enter in the branch field opens the base picker; Enter in that popover selects only, and Escape dismisses only the popover and restores focus. Tab / Shift+Tab traverses enabled controls. Cmd+Enter submits from the form, never from the popover. Focus callbacks bind to each new model when the warm app reopens.
 
-Removal is a secondary action. Main worktrees cannot be selected for removal. The confirmation defaults to Cancel, not Remove. Go performs the final safety checks.
+Use Worktrunk directly for worktree administration. Creation and PR flows use the shared safety checks.
 
 ## Synthetic demo
 
-For manual UI QA, launch a packaged app with `--demo` and optional `--mode dirs|wt`, `--repo`, and context flags. This is a separate in-memory backend. It does not start a Process, call Rex or change files. Fixed demo directories, worktrees, local branches and destination previews support screenshots and keyboard checks. Create/remove change only in-memory demo data; Open shows a demo notice rather than dispatching or closing.
+For manual UI QA, launch a packaged app with `--demo` and optional `--mode sessions|dirs|wt-create|pr`, `--repo`, and context flags. This is a separate in-memory backend. It does not start a Process, call Rex or change files. Fixed demo directories, local branches and destination previews support screenshots and keyboard checks. Create changes only in-memory demo data; Open shows a demo notice rather than dispatching or closing.
 
 Important accessibility identifiers:
 
 - `raptor-panel`, `picker-search`, `picker-results`, `path-row:<full path>`
-- `open-target`, `open-selected`, `show-worktrees`, `toggle-split`, `keyboard-hint`
-- `new-worktree`, `remove-worktree`, `confirm-remove`
+- `open-target`, `open-selected`, `open-pull-request`, `toggle-split`, `keyboard-hint`
+- `new-worktree`
 - `create-branch`, `create-base`, `create-destination`, `create-validation`
 - `base-search`, `base-results`, `base-option:<branch>`, `base-error`
 - `create-submit`, `open-created`, `create-back`, `close-picker`
@@ -154,6 +155,8 @@ swiftc -swift-version 6 -warnings-as-errors -parse-as-library \
   macos/Tests/RexFocusChecks.swift \
   macos/Sources/Raptor/PathDisplay.swift \
   macos/Sources/Raptor/PickerStyle.swift \
+  macos/Sources/Raptor/TextEditingShortcuts.swift \
+  macos/Sources/Raptor/OutsideClickMonitor.swift \
   macos/Tests/NativeChecks.swift \
   -o aux/native-check/NativeChecks -framework SwiftUI -framework AppKit
 aux/native-check/NativeChecks
@@ -178,4 +181,4 @@ These checks verify persistent requests, partial reads, idle/interleaved notific
 
 `make test-macos` runs strict Swift 6 headless checks and UI type-checking. `make app` separately builds the packaged executable with production settings. Synthetic tests do not switch user Rex sessions or write user preferences. Intel execution and Apple notarization are not verified.
 
-The resident panel and backend stay warm on dismissal. The panel does not auto-dismiss on focus loss. Hide and reopen after a backend transport failure. Cmd+Q hides a resident picker; stop the host with `raptor service stop`. `make install` stops and restarts the host automatically.
+The resident panel and backend stay warm on dismissal. Outside mouse clicks dismiss it; keyboard focus changes alone do not. Outside dismissal closes popovers and cancels unconfirmed dialogs, never an issued operation. Hide and reopen after a backend transport failure. Cmd+Q hides a resident picker; stop the host with `raptor service stop`. `make install` stops and restarts the host automatically.
