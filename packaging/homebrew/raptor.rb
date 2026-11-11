@@ -17,8 +17,9 @@ class Raptor < Formula
 
   def install
     if build.stable?
-      # Homebrew downloads but does not unpack url archives.
-      system "unzip", "-q", "Raptor-#{version}-universal.zip"
+      # Homebrew downloads but does not unpack url archives; the cached
+      # file is named raptor--<version>.zip.
+      Dir["*.zip"].each { |zip| system "unzip", "-q", zip }
       libexec.install "Raptor.app"
       bin.install_symlink libexec/"Raptor.app/Contents/MacOS/raptor-cli" => "raptor"
       pkgshare.install libexec/"Raptor.app/Contents/Resources/rex/init.lua"
