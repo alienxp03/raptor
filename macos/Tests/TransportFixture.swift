@@ -47,6 +47,11 @@ struct TransportFixture {
                 response["result"] = prepared
                     ? ["path": path, "session_id": "kept-S", "window_id": "kept-W", "block_id": "kept-B", "error": "Selection failed"]
                     : ["path": path, "session_id": "kept-S", "window_id": "kept-W", "block_id": "kept-B"]
+            case "missing-path":
+                response["result"] = ["launcher_items": [["kind": "session", "session_id": "created"]]]
+            case "creation-overlay":
+                response["result"] = ["session_id": "created",
+                                      "launcher_items": [["kind": "session", "path": "created", "session_id": "created"]]]
             case "audit": response["result"] = ["branches": requests]
             case "sessions", "agents": response["result"] = ["items": [["path": query]]]
             case "error": response = ["id": id, "error": "fixture error"]

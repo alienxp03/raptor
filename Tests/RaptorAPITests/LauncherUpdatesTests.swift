@@ -40,6 +40,9 @@ final class LauncherUpdatesTests: APITestCase {
             XCTFail("first warm read lost the created session: \(items)")
         }
 
+        XCTAssertEqual(created?["path"] as? String, "new-session",
+                       "Creation overlays must include the session identity as path for native decoding")
+
         // The mutation response carries the same authoritative rows for native
         // clients to publish before hiding.
         output.reset()
@@ -58,6 +61,9 @@ final class LauncherUpdatesTests: APITestCase {
         if !found {
             XCTFail("mutation response must include the created row: \(launcherItems)")
         }
+        let createdRow = launcherItems.first { $0["session_id"] as? String == "new-session" }
+        XCTAssertEqual(createdRow?["path"] as? String, "new-session",
+                       "Mutation responses must include path before the native client hides the picker")
     }
 
     func testOverlayDoesNotResurrectAfterAuthoritativeScan() throws {

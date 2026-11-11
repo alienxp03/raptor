@@ -555,10 +555,33 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
             }
         } catch {
             lock.lock()
-            if !closed { connectionFailure = error.localizedDescription }
+            if !closed { connectionFailure = Self.describeReadError(error) }
             lock.unlock()
             close()
         }
+    }
+
+    private static func describeReadError(_ error: Error) -> String {
+        let context: DecodingError.Context
+        let detail: String
+        switch error {
+        case DecodingError.keyNotFound(let key, let value):
+            context = value
+            detail = "Missing field '\(key.stringValue)'."
+        case DecodingError.valueNotFound(_, let value):
+            context = value
+            detail = "Required value is null."
+        case DecodingError.typeMismatch(_, let value):
+            context = value
+            detail = "Unexpected value type."
+        case DecodingError.dataCorrupted(let value):
+            context = value
+            detail = "Invalid data."
+        default:
+            return error.localizedDescription
+        }
+        let path = context.codingPath.map { $0.stringValue }.joined(separator: ".")
+        return "Invalid backend response at \(path.isEmpty ? "root" : path): \(detail)"
     }
 
     private func readChunk(from output: FileHandle) throws -> Data {

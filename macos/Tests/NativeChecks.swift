@@ -2524,7 +2524,21 @@ struct NativeChecks {
         _ = try await backend.request("interleaved", params: [:])
         try await Task.sleep(for: .milliseconds(30))
         require(await events.count() == 2, "Unsubscribed notifications must not reach the consumer")
+        let creation = try await backend.request("creation-overlay", params: [:])
+        require(creation.sessionID == "created" && creation.launcherItems?.first?.path == "created",
+                "Creation replies must decode their overlaid session rows")
+        _ = try await backend.request("ok", params: [:])
         backend.close()
+        let missingPath = ProcessBackend(options: options)
+        do {
+            _ = try await missingPath.request("missing-path", params: [:])
+            testFailure("Missing required path was accepted")
+        } catch {
+            require(error.localizedDescription.contains("result.launcher_items.Index 0") &&
+                    error.localizedDescription.contains("Missing field 'path'"),
+                    "Decode errors must identify the missing field and row: \(error.localizedDescription)")
+        }
+        missingPath.close()
         for _ in 0..<8 {
             let finalReply = ProcessBackend(options: options)
             _ = try await finalReply.request("reply-and-eof", params: [:])

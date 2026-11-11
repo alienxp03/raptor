@@ -32,7 +32,7 @@ func overlayLauncher(_ entry: LauncherCacheEntry) -> LauncherCacheEntry {
         }
         if !found {
             let item = LauncherItem(
-                kind: "session", id: s.id, sessionID: s.id, label: s.label,
+                kind: "session", id: s.id, path: s.id, sessionID: s.id, label: s.label,
                 sessionLabel: s.label, host: s.host, local: s.local)
             entry.items?.insert(item, at: 0)
         }
