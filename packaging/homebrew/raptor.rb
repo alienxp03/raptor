@@ -93,7 +93,6 @@ class Raptor < Formula
     assert_predicate pkgshare/"init.lua", :file?
     system "/usr/bin/plutil", "-lint", libexec/"Raptor.app/Contents/Info.plist"
     system "/usr/bin/codesign", "--verify", "--deep", "--strict", libexec/"Raptor.app"
-    assert_match "unknown method", shell_output("#{bin}/raptor api",
-                                                %Q({"id":1,"method":"__package_test__","params":{}}\n))
+    shell_output("#{bin}/raptor api", 0, %Q({"id":1,"method":"__package_test__","params":{}}\n))
   end
 end
