@@ -47,9 +47,11 @@ export CLANG_MODULE_CACHE_PATH="$work/clang-cache"
 export SWIFT_MODULECACHE_PATH="$work/swift-cache"
 # Homebrew already isolates the build. Swift macro plugins cannot nest another
 # macOS sandbox inside it; retain the outer sandbox and skip only the inner one.
-swift_flags=()
+swiftc_flags=()
+spm_flags=()
 if [[ ${RAPTOR_EXTERNAL_SANDBOX:-0} == 1 ]]; then
-  swift_flags=(-disable-sandbox)
+  swiftc_flags=(-disable-sandbox)
+  spm_flags=(--disable-sandbox)
 fi
 # Version is baked into the CLI through a generated source file (the Swift
 # stand-in for Go's -ldflags -X). Restore the placeholder after building.
@@ -60,11 +62,11 @@ trap 'restore_version; rm -rf "$work"' EXIT
 
 for arch in "${archs[@]}"; do
   printf 'Building %s backend (Swift %s)\n' "$arch" "$(swift --version | head -1)"
-  xcrun --sdk macosx swiftc ${swift_flags[@]+"${swift_flags[@]}"} -parse-as-library -O -sdk "$sdk" \
+  xcrun --sdk macosx swiftc ${swiftc_flags[@]+"${swiftc_flags[@]}"} -parse-as-library -O -sdk "$sdk" \
     -target "$arch-apple-macosx14.0" -framework SwiftUI -framework AppKit \
     "${sources[@]}" -o "$work/RaptorUI-$arch"
   (cd "$SCRIPT_ROOT" && swift build -c release --product raptor --arch "$arch" \
-    --scratch-path "$work/spm-$arch" ${swift_flags[@]+"${swift_flags[@]}"} >/dev/null) || exit 1
+    --scratch-path "$work/spm-$arch" ${spm_flags[@]+"${spm_flags[@]}"} >/dev/null) || exit 1
   bin_dir=$(cd "$SCRIPT_ROOT" && swift build -c release --product raptor --arch "$arch" \
     --scratch-path "$work/spm-$arch" --show-bin-path)
   cp "$bin_dir/raptor" "$work/raptor-cli-$arch"
