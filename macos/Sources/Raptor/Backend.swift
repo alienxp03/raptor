@@ -409,7 +409,14 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         do {
             var data = try JSONEncoder().encode(Request(id: id, method: method, params: params))
             data.append(0x0A)
-            try input?.write(contentsOf: data)
+            lock.lock()
+            let writer = input
+            let closedNow = closed
+            lock.unlock()
+            guard !closedNow, writer != nil else {
+                throw APIError.message("Backend connection closed. Close and reopen Raptor.")
+            }
+            try writer?.write(contentsOf: data)
             lock.lock()
             while reply == nil && !closed { lock.wait() }
             let received = reply
@@ -534,6 +541,10 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     }
 
     private func stop(_ child: Process?, input: FileHandle?) {
+        // Detach the writer first: a queued request must throw a clean
+        // connection error instead of writing to a closed descriptor (an
+        // uncatchable ObjC exception).
+        lock.lock(); self.input = nil; lock.unlock()
         // EOF lets Go run deferred watcher cleanup before escalation. Its
         // SIGTERM handler also cancels subscriptions during a blocked request.
         try? input?.close()
