@@ -8,6 +8,12 @@ import XCTest
 final class LauncherUpdatesTests: APITestCase {
     func testCreatedSessionVisibleOnFirstWarmRead() throws {
         let cache = makeTempDir()
+        // Fake rex: sessions.create must never reach a real Rex install.
+        let stub = makeTempDir()
+        try "#!/bin/sh\ncase \"$*\" in\n  *'new --json'*) echo '{\"session_id\":\"new-session\"}' ;;\n  *) echo '{}' ;;\nesac\n"
+            .write(toFile: stub + "/rex", atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub + "/rex")
+        env.set("PATH", stub + ":" + (env.get("PATH") ?? ""))
         env.set("XDG_CACHE_HOME", cache)
         // A snapshot whose scan started before the creation cannot know about it.
         let h = Handler(ctx: Ctx(session: "origin"), cfg: .default())
