@@ -790,11 +790,15 @@ struct NativeChecks {
         model.repo = "/changed"
         try await pending("pullrequests.resolve", backend)
         model.repo = "/repo"
-        // Wait for the restored-context request; replying on a fixed sleep
-        // targets the stale /changed request on loaded CI runners.
-        try await pending("pullrequests.resolve", backend)
+        // The restored context re-resolves; wait for that second call so the
+        // first reply deterministically lands on the stale /changed request.
+        var reissued = false
+        for _ in 0..<100 {
+            if await backend.count("pullrequests.resolve") >= 2 { reissued = true; break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        require(reissued, "Restored context must re-resolve")
         await backend.reply("pullrequests.resolve", APIResult(title: "Wrong context"))
-        try await Task.sleep(for: .milliseconds(20))
         require(model.pullRequest == nil && !model.canOpenPullRequest, "Old context became actionable")
         await backend.reply("pullrequests.resolve", APIResult(repo: "/repo", path: "/wt13", title: "Latest", branch: "feat/latest", existing: true))
         try await wait { model.canOpenPullRequest }
