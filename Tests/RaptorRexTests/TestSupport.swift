@@ -82,6 +82,11 @@ extension XCTestCase {
         #!/bin/sh
         printf '%s\\n' "$*" >> "$REX_TEST_LOG"
         case "$*" in
+          *'local response, listError'*)
+            case "$REX_TEST_FAIL" in
+              list|malformed|select) echo 'history request failed' >&2; exit 1;;
+            esac
+            printf '%s\\n' "${REX_TEST_SELECTED:-session:previous}";;
           *session.select*)
             if [ "$REX_TEST_FAIL" = select ]; then echo 'selection failed' >&2; exit 1; fi;;
           *client.list*)

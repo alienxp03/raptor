@@ -26,6 +26,7 @@ endif
 test:
 	swift test --parallel --num-workers $(TEST_WORKERS)
 	lua Tests/history_test.lua
+	lua Tests/history_select_test.lua
 	lua Tests/homebrew_routing_test.lua
 	lua Tests/task_action_test.lua
 	lua Tests/pr_action_test.lua

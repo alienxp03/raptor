@@ -24,10 +24,22 @@ final class RexTests: XCTestCase {
         try seedHistory("", "session:previous", "session:deleted", "session:current")
         var ctx = Ctx(session: "session:current", client: "client:app")
         for want in ["session:previous", "session:current", "session:previous"] {
+            setenvTemp("REX_TEST_SELECTED", want)
             let got = try Rex.selectLast(ctx)
             XCTAssertEqual(got, want)
             ctx.session = got
         }
+    }
+
+    func testSelectLastLocalUsesOneRexProcess() throws {
+        let log = fakeRex()
+        try seedHistory("", "session:previous", "session:deleted", "session:current")
+        let selected = try Rex.selectLast(Ctx(session: "session:current", client: "client:app"))
+        XCTAssertEqual(selected, "session:previous")
+        let calls = readTextFile(log)
+        XCTAssertEqual(calls.components(separatedBy: "do -e local response").count - 1, 1)
+        XCTAssertFalse(calls.contains("ls --json"), "Local toggle must not spawn a separate listing")
+        XCTAssertTrue(calls.contains("client.perform"), "Selection still waits for the requesting app")
     }
 
     func testSelectLastFailurePreservesHistory() throws {

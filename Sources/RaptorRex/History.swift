@@ -35,6 +35,25 @@ public extension Rex {
            let id = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
             visits.append(RecencyVisit(host: "", sessionID: id, at: zeroTime))
         }
+        // The common local toggle needs one Rex process/connection, not a
+        // separate listing followed by a second process for client selection.
+        // Mixed-host history keeps the existing ordered, bounded host checks.
+        if ctx.client.hasPrefix("client:"), visits.allSatisfy({ $0.host.isEmpty }) {
+            let candidates = visits.map(\.sessionID).filter { $0 != ctx.session }
+            guard !candidates.isEmpty else {
+                throw RexError("no previous live session recorded; switch sessions first")
+            }
+            let payload = try JSONSerialization.data(withJSONObject: ["client": ctx.client, "sessions": candidates], options: .sortedKeys)
+            let args = String(decoding: payload, as: UTF8.self)
+            let selected = try run("do", "-e", localHistoryScript, "--args", args)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard candidates.contains(selected) else {
+                throw RexError("no previous live session recorded; switch sessions first")
+            }
+            if ctx.session != selected { _ = try? recordSessionUse("", ctx.session) }
+            _ = try? recordSessionUse("", selected)
+            return selected
+        }
         var listings: [String: Set<String>] = [:]
         for visit in visits {
             if visit.sessionID == ctx.session {
@@ -60,6 +79,26 @@ public extension Rex {
         }
         throw RexError("no previous live session recorded; switch sessions first")
     }
+
+    static let localHistoryScript = #"""
+    local response, listError = rex.call("session.list")
+    if not response then error("could not check previous sessions: " .. tostring(listError)) end
+    if type(response.sessions) ~= "table" then error("could not parse previous sessions") end
+    local live = {}
+    for _, session in ipairs(response.sessions) do live[session.session_id] = true end
+    for _, id in ipairs(rex.args.sessions) do
+        if live[id] then
+            local selected, selectError = rex.call("client.perform", {
+                client_id = rex.args.client,
+                action = "session.select",
+                args = { session_id = id },
+            })
+            if not selected then error(tostring(selectError)) end
+            print(id)
+            return
+        end
+    end
+    """#
 
     static func historySessions(_ host: String) throws -> Set<String> {
         let out: String
