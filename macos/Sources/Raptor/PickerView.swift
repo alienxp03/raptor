@@ -140,23 +140,70 @@ struct PickerView: View {
         .accessibilityIdentifier("picker-results")
     }
 
-    private func row(_ item: PickerItem, position: Int = 0) -> some View {
-        let selected = model.selectedID == item.id
-        let isAgent = model.view == .agents && item.kind != "pr"
-        let isSessionRow = model.view == .sessions && item.isSessionEntry
-        let isLauncherDir = model.view == .sessions && item.kind == "dir"
-        return HoverRow(selected: selected, enabled: true) {
+    /// Small helpers keep each branch's type-checking surface tiny; the CI
+    /// toolchain times out on the monolithic ViewBuilder.
+    private func cmdBadge(_ position: Int, selected: Bool) -> some View {
+        let font = Font.system(size: 10, weight: .medium).monospacedDigit()
+        let color = selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.45)
+        return Text("⌘\(position)")
+            .font(font)
+            .foregroundStyle(color)
+            .accessibilityHidden(true)
+    }
+
+    private func pinnedIcon(selected: Bool) -> some View {
+        let color = selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.selection
+        return Image(systemName: "pin.fill")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(color)
+            .accessibilityLabel("Pinned")
+    }
+
+    private func agentContextLabel(_ text: String, selected: Bool) -> some View {
+        let color = selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText
+        return Text(text)
+            .font(.system(size: 10))
+            .foregroundStyle(color)
+            .lineLimit(1).truncationMode(.tail)
+            .frame(maxWidth: 220, alignment: .trailing)
+            .layoutPriority(2)
+    }
+
+    private func agentAgeLabel(_ age: String, updated: String?, selected: Bool) -> some View {
+        let color = selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText
+        return Text(age)
+            .font(.system(size: 10).monospacedDigit())
+            .foregroundStyle(color)
+            .fixedSize()
+            .help(updated ?? "")
+    }
+
+    private func sessionMarker(selected: Bool) -> some View {
+        Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
+            .frame(width: 5, height: 5)
+            .opacity(0.9)
+            .accessibilityLabel("Active")
+    }
+
+    private func hostLabel(_ host: String, selected: Bool) -> some View {
+        let color = selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText
+        // Never truncates: the label yields its space instead.
+        return Text("· " + host)
+            .font(.system(size: 10))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .fixedSize()
+            .layoutPriority(2)
+            .accessibilityLabel("On \(host)")
+    }
+
+    @ViewBuilder
+    private func rowContent(_ item: PickerItem, position: Int, selected: Bool, isAgent: Bool, isSessionRow: Bool, isLauncherDir: Bool) -> some View {
             if position >= 1, position <= 9 {
-                Text("⌘\(position)")
-                    .font(.system(size: 10, weight: .medium).monospacedDigit())
-                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.45))
-                    .accessibilityHidden(true)
+                cmdBadge(position, selected: selected)
             }
             if !isAgent && item.isPinned == true {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.selection)
-                    .accessibilityLabel("Pinned")
+                pinnedIcon(selected: selected)
             }
             if item.kind == "pr" {
                 Text(item.label ?? item.path).lineLimit(1).truncationMode(.middle)
@@ -168,19 +215,10 @@ struct PickerView: View {
                 ActivityIndicator(activity: item.activity, workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground)
                 Spacer(minLength: 8)
                 if !item.agentContext.isEmpty {
-                    Text(item.agentContext)
-                        .font(.system(size: 10))
-                        .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText)
-                        .lineLimit(1).truncationMode(.tail)
-                        .frame(maxWidth: 220, alignment: .trailing)
-                        .layoutPriority(2)
+                    agentContextLabel(item.agentContext, selected: selected)
                 }
                 if let age = item.updatedAge() {
-                    Text(age)
-                        .font(.system(size: 10).monospacedDigit())
-                        .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText)
-                        .fixedSize()
-                        .help(item.updatedAt ?? "")
+                    agentAgeLabel(age, updated: item.updatedAt, selected: selected)
                 }
             } else if isSessionRow {
                 Image(systemName: "terminal.fill")
@@ -188,10 +226,7 @@ struct PickerView: View {
                     .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.sessionText)
                     .accessibilityHidden(true)
                 if item.active == true {
-                    Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
-                        .frame(width: 5, height: 5)
-                        .opacity(0.9)
-                        .accessibilityLabel("Active")
+                    sessionMarker(selected: selected)
                 }
                 Text(item.label ?? item.path)
                     .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.sessionText)
@@ -217,15 +252,17 @@ struct PickerView: View {
                 ActivityIndicator(activity: item.activity, workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground)
             }
             if !isAgent, item.isLocal == false, let host = item.host, !host.isEmpty {
-                // Never truncates: the label yields its space instead.
-                Text("· " + host)
-                    .font(.system(size: 10))
-                    .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .layoutPriority(2)
-                    .accessibilityLabel("On \(host)")
+                hostLabel(host, selected: selected)
             }
+        }
+
+    private func row(_ item: PickerItem, position: Int = 0) -> some View {
+        let selected = model.selectedID == item.id
+        let isAgent = model.view == .agents && item.kind != "pr"
+        let isSessionRow = model.view == .sessions && item.isSessionEntry
+        let isLauncherDir = model.view == .sessions && item.kind == "dir"
+        return HoverRow(selected: selected, enabled: true) {
+            rowContent(item, position: position, selected: selected, isAgent: isAgent, isSessionRow: isSessionRow, isLauncherDir: isLauncherDir)
         }
         .font(.system(size: PickerStyle.rowFontSize, weight: selected ? .medium : .regular))
         .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
