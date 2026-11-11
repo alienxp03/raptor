@@ -1,4 +1,5 @@
 import Foundation
+import RaptorPaths
 
 /// Port of Go's filepath.Clean: lexical slash-path normalization.
 func pathClean(_ path: String) -> String {
@@ -85,7 +86,7 @@ func evalSymlinks(_ path: String) -> String? {
 /// Go's exec.LookPath: resolves a bare command name against PATH.
 func lookPath(_ name: String) -> String? {
     if name.contains("/") { return FileManager.default.fileExists(atPath: name) ? name : nil }
-    let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+    let path = RaptorPaths.env("PATH") ?? "/usr/bin:/bin:/usr/sbin:/sbin"
     for dir in path.split(separator: ":") {
         let candidate = dir + "/" + name
         if FileManager.default.isExecutableFile(atPath: String(candidate)) {

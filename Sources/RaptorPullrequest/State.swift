@@ -101,7 +101,7 @@ struct SetupState: Codable, Equatable {
 }
 
 func stateFile(_ key: String, _ suffix: String) throws -> String {
-    var root = ProcessInfo.processInfo.environment["XDG_STATE_HOME"] ?? ""
+    var root = RaptorPaths.env("XDG_STATE_HOME") ?? ""
     if root.isEmpty {
         root = userHome() + "/.local/state"
     }

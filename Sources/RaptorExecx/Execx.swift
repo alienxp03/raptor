@@ -1,4 +1,5 @@
 import Foundation
+import RaptorPaths
 
 /// Ported from internal/execx: process runs with stdout/stderr capture,
 /// optional timeout, and Go-style exit-code semantics.
@@ -29,7 +30,7 @@ public enum Execx {
     /// Resolves a bare command name against PATH like Go's exec.Command.
     public static func lookup(name: String) -> String? {
         if name.contains("/") { return FileManager.default.fileExists(atPath: name) ? name : nil }
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let path = RaptorPaths.env("PATH") ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         for dir in path.split(separator: ":") {
             let candidate = dir + "/" + name
             if FileManager.default.isExecutableFile(atPath: String(candidate)) {

@@ -93,7 +93,7 @@ func fixPath() {
         "/bin",
         RaptorPaths.home() + "/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
     ]
-    var cur = ProcessInfo.processInfo.environment["PATH"] ?? ""
+    var cur = RaptorPaths.env("PATH") ?? ""
     for p in extra where !cur.contains(p) {
         cur = p + ":" + cur
     }

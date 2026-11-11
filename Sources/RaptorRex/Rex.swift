@@ -282,7 +282,7 @@ public extension Rex {
     // ---------- last-session state ----------
 
     static func statePath() -> String {
-        var cache = ProcessInfo.processInfo.environment["XDG_CACHE_HOME"] ?? ""
+        var cache = RaptorPaths.env("XDG_CACHE_HOME") ?? ""
         if cache.isEmpty {
             cache = RaptorPaths.home() + "/.cache"
         }

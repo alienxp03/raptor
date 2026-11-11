@@ -1,4 +1,5 @@
 import Foundation
+import RaptorPaths
 import RaptorRex
 
 /// Local hostname resolution and host normalization, ported from internal/rex
@@ -312,7 +313,7 @@ enum ExecxLookup {
         if name.contains("/") {
             return FileManager.default.fileExists(atPath: name) ? name : nil
         }
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let path = RaptorPaths.env("PATH") ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         for dir in path.split(separator: ":") {
             let candidate = dir + "/" + name
             if FileManager.default.isExecutableFile(atPath: String(candidate)) {

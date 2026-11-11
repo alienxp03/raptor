@@ -1,4 +1,5 @@
 import Foundation
+import RaptorPaths
 
 /// Ported from internal/theme: resolves the active Rex theme from the Rex
 /// app bundle and its macOS preferences. Both interfaces (terminal picker
@@ -295,7 +296,7 @@ private func lookup(_ name: String) -> String? {
     if name.contains("/") {
         return FileManager.default.fileExists(atPath: name) ? name : nil
     }
-    let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+    let path = RaptorPaths.env("PATH") ?? "/usr/bin:/bin:/usr/sbin:/sbin"
     for dir in path.split(separator: ":") {
         let candidate = dir + "/" + name
         if FileManager.default.isExecutableFile(atPath: String(candidate)) {

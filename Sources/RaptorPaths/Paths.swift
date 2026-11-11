@@ -2,6 +2,14 @@ import Foundation
 
 /// Filesystem locations the backend shares. Ported from internal/paths.
 public enum RaptorPaths {
+    /// Live environment read (Go's os.Getenv). ProcessInfo.environment is a
+    /// process-start snapshot and misses setenv from tests and callers.
+    public static func env(_ name: String) -> String? {
+        guard let raw = getenv(name) else { return nil }
+        let value = String(cString: raw)
+        return value.isEmpty ? nil : value
+    }
+
     /// $HOME like Go's os.UserHomeDir.
     public static func home() -> String {
         if let c = getenv("HOME"), !String(cString: c).isEmpty {
@@ -12,7 +20,7 @@ public enum RaptorPaths {
 
     /// Cache directory, creating it when missing.
     public static func cacheDir() -> String {
-        var base = ProcessInfo.processInfo.environment["XDG_CACHE_HOME"] ?? ""
+        var base = env("XDG_CACHE_HOME") ?? ""
         if base.isEmpty {
             base = home() + "/Library/Caches"
         }

@@ -1,5 +1,6 @@
 import Foundation
 import RaptorExecx
+import RaptorPaths
 
 /// Preserves Worktrunk diagnostics, including a failed command's JSON output.
 /// Callers must retain any returned worktree when this error is thrown.
@@ -112,7 +113,7 @@ extension WorktreeKit {
                 }
             }
         }
-        if let override = ProcessInfo.processInfo.environment["WORKTRUNK_WORKTREE_PATH"] {
+        if let override = RaptorPaths.env("WORKTRUNK_WORKTREE_PATH") {
             template = override
         }
         // Let Worktrunk evaluate its own variables and filters, not a Raptor clone
@@ -125,7 +126,7 @@ extension WorktreeKit {
         let branches = localBranches(repo: repo)
         if !branches.isEmpty {
             var n = 0
-            let rawCount = ProcessInfo.processInfo.environment["GIT_CONFIG_COUNT"]
+            let rawCount = RaptorPaths.env("GIT_CONFIG_COUNT")
             if let rawCount, !rawCount.isEmpty {
                 guard let parsed = Int(rawCount) else {
                     throw MessageError("invalid GIT_CONFIG_COUNT: strconv.Atoi: parsing \"\(rawCount)\": invalid syntax")

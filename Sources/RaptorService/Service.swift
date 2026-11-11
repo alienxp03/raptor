@@ -55,7 +55,7 @@ public enum Service {
             home + "/Applications/Raptor.app",
             "/Applications/Raptor.app",
         ]
-        for prefix in [ProcessInfo.processInfo.environment["HOMEBREW_PREFIX"] ?? "", "/opt/homebrew", "/usr/local"] {
+        for prefix in [RaptorPaths.env("HOMEBREW_PREFIX") ?? "", "/opt/homebrew", "/usr/local"] {
             if prefix.isEmpty { continue }
             candidates.append(prefix + "/opt/raptor/libexec/Raptor.app")
         }
@@ -178,7 +178,7 @@ public enum Service {
         if name.contains("/") {
             return FileManager.default.fileExists(atPath: name) ? name : nil
         }
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let path = RaptorPaths.env("PATH") ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         for dir in path.split(separator: ":") {
             let candidate = dir + "/" + name
             if FileManager.default.isExecutableFile(atPath: String(candidate)) {

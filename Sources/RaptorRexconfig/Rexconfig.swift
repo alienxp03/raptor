@@ -1,4 +1,5 @@
 import Foundation
+import RaptorPaths
 
 /// Wires Raptor into a Rex configuration file, resh-style: one managed,
 /// idempotent block the user never edits by hand. Ported from internal/rexconfig.
@@ -80,7 +81,7 @@ public enum Rexconfig {
         ] where isFile(join(app, "Contents", "MacOS", "Raptor")) {
             return app
         }
-        for prefix in [ProcessInfo.processInfo.environment["HOMEBREW_PREFIX"] ?? "", "/opt/homebrew", "/usr/local"] {
+        for prefix in [RaptorPaths.env("HOMEBREW_PREFIX") ?? "", "/opt/homebrew", "/usr/local"] {
             if prefix.isEmpty { continue }
             let app = join(prefix, "opt", "raptor", "libexec", "Raptor.app")
             if isFile(join(app, "Contents", "MacOS", "Raptor")) {
@@ -108,7 +109,7 @@ public enum Rexconfig {
         if let c = getenv("REX_CONFIG"), String(cString: c) != "" {
             return String(cString: c)
         }
-        var base = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"] ?? ""
+        var base = RaptorPaths.env("XDG_CONFIG_HOME") ?? ""
         if base.isEmpty {
             base = join(homeDir(), ".config")
         }
