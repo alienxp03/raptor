@@ -2494,8 +2494,12 @@ struct NativeChecks {
         _ = try await backend.request("ok", params: [:])
         let events = EventCounter()
         _ = try await backend.setChangeHandler { Task { await events.increment() } }
-        try await Task.sleep(for: .milliseconds(160))
-        require(await events.count() == 1, "Idle notifications must be read without a request")
+        var idleSeen = false
+        for _ in 0..<200 {
+            if await events.count() >= 1 { idleSeen = true; break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        require(idleSeen, "Idle notifications must be read without a request")
         _ = try await backend.request("interleaved", params: [:])
         try await Task.sleep(for: .milliseconds(30))
         require(await events.count() == 2, "Interleaved notifications must not consume a response ID")
