@@ -63,8 +63,36 @@ public extension Catalog {
 
     /// DirectoriesOn scopes frecency directories to one host. The empty host and
     /// "This Mac" read the local zoxide database; remote hosts answer over SSH.
+    /// The fd scan is appended after zoxide: frecency order stays untouched, and
+    /// never-visited directories surface below the established ones.
     static func directoriesOn(host: String, reposOnly: Bool) -> [Directory] {
-        directoryItems(Rex.zoxideListOn(host), reposOnly)
+        let dirs = mergeDirScan(zoxide: Rex.zoxideListOn(host), scan: Rex.dirScanOn(host))
+        return directoryItems(dirs, reposOnly)
+    }
+
+    /// MergeDirScan keeps zoxide order, then appends scan entries that are not
+    /// already present, compared by canonical path so symlinked zoxide entries
+    /// still suppress their scan twins. The scan contribution is capped: it is a
+    /// fallback, not a second index.
+    static func mergeDirScan(zoxide: [String], scan: [String], cap: Int = 100) -> [String] {
+        var seen = Set<String>()
+        for dir in zoxide {
+            seen.insert(canonicalPath(dir))
+        }
+        var merged = zoxide
+        merged.reserveCapacity(zoxide.count + min(scan.count, cap))
+        for dir in scan {
+            if merged.count - zoxide.count >= cap {
+                break
+            }
+            let canonical = canonicalPath(dir)
+            if seen.contains(canonical) {
+                continue
+            }
+            seen.insert(canonical)
+            merged.append(dir)
+        }
+        return merged
     }
 
     /// DirectoryItems keeps zoxide order. Repository discovery also accepts subdirectories.
@@ -89,6 +117,30 @@ public extension Catalog {
     static func filterDirectories(_ items: [Directory], _ query: String) -> [Int] {
         let entries = items.map { $0.label + " " + RaptorPaths.homeRelative($0.path) }
         return match(entries, query)
+    }
+
+    /// TypedPathDirectory recognizes a query that is a path, not a name: `~/`,
+    /// `/`, `./`, `../`, or `.` prefixes. It closes the sesh gap — sesh opens any
+    /// path you hand it, while a list-only picker makes unlisted directories
+    /// unreachable. Local paths only; an existing directory becomes one extra
+    /// row after the listed matches. nil when the query is not an openable path.
+    static func typedPathDirectory(_ query: String, _ items: [Directory]) -> Directory? {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        let pathLike = trimmed.hasPrefix("~") || trimmed.hasPrefix("/")
+            || trimmed.hasPrefix("./") || trimmed.hasPrefix("../") || trimmed == "."
+        guard pathLike else { return nil }
+        var path = trimmed
+        if path.hasPrefix("~") {
+            path = RaptorPaths.home() + path.dropFirst()
+        }
+        let canonical = canonicalPath(path)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: canonical, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+        if items.contains(where: { canonicalPath($0.path) == canonical }) {
+            return nil
+        }
+        return Directory(path: canonical, label: RaptorPaths.basename(canonical))
     }
 
     /// ApplyPins marks and floats pinned directories. Stable sort keeps each

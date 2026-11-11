@@ -85,4 +85,70 @@ final class DispatchTests: XCTestCase {
             }
         }
     }
+
+    func testTeachZoxideRecordsOnlySuccessfulOpens() throws {
+        for target in ["session", "tab"] {
+            for fail in [false, true] {
+                subtest(target + "-zoxide-fail-\(fail)") {
+                    let env = TestEnv()
+                    defer { env.restore() }
+                    let dir = try makeTempDir()
+                    env.set("XDG_CACHE_HOME", try makeTempDir())
+                    env.set("XDG_STATE_HOME", try makeTempDir())
+                    env.set("PATH", dir + ":" + (env.get("PATH") ?? ""))
+                    env.set("REX_TEST_FAIL", fail ? "1" : "")
+                    let script = #"""
+                    #!/bin/sh
+                    case "$*" in
+                      'ls --json') echo '{"sessions":[]}' ;;
+                      'new '*) echo '{"session_id":"fresh-session"}' ;;
+                      'window new '*) echo '{"window_id":"new-window"}' ;;
+                      'api call '*session.describe_block*) echo '{"block":{"window_id":"new-window"}}' ;;
+                      'focus '*) if [ "$REX_TEST_FAIL" = 1 ]; then exit 1; fi ;;
+                      *session.select*) if [ "$REX_TEST_FAIL" = 1 ]; then exit 1; fi ;;
+                    esac
+                    """#
+                    try writeExecutable(dir + "/rex", script)
+
+                    let recorded = LockedRecord()
+                    let original = RaptorDispatch.teachZoxide
+                    RaptorDispatch.teachZoxide = { recorded.add($0) }
+                    defer { RaptorDispatch.teachZoxide = original }
+
+                    let ctx = Ctx(session: "origin-session", block: "origin-pane", client: "client")
+                    var caught: Error?
+                    do {
+                        _ = try RaptorDispatch.dispatch(target: target, dir: "/tmp/zoxide-project", ctx: ctx,
+                                                        cfg: RaptorConfig.default())
+                    } catch {
+                        caught = error
+                    }
+                    XCTAssertEqual(caught != nil, fail)
+                    if fail {
+                        XCTAssertEqual(recorded.paths, [], "failed opens must not teach zoxide")
+                    } else {
+                        XCTAssertEqual(recorded.paths, ["/tmp/zoxide-project"],
+                                       "successful opens teach zoxide the directory")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Thread-safe recorder for the injectable zoxide hook. Dispatch runs on the
+/// test thread, but the hook may fire from any dispatch path.
+final class LockedRecord {
+    private let lock = NSLock()
+    private var all: [String] = []
+    var paths: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return all
+    }
+    func add(_ path: String) {
+        lock.lock()
+        all.append(path)
+        lock.unlock()
+    }
 }

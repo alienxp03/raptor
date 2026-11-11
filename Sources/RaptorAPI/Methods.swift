@@ -291,6 +291,9 @@ extension Handler {
                 resultItems.append(items[i])
             }
             Catalog.applyPins(&resultItems)
+            if let typed = Catalog.typedPathDirectory(query, resultItems) {
+                resultItems.append(typed)
+            }
             return (.directories(items: resultItems, targets: targets(), target: cfg.enter), nil)
         case "pullrequests.resolve", "pullrequests.prepare", "pullrequests.open":
             return pullRequest(method, params)

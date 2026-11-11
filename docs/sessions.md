@@ -17,7 +17,8 @@ end)
 Two row types, one verb:
 
 - **Live sessions** on every connected host. The session you came from is pinned to the top. Other sessions use most-recently-used order; sessions without history keep Rex's source order. Remote rows carry an `@host` badge; activity (working/blocked) shows right-aligned. Enter switches to the session — through the host's own copy of the app, so it works across hosts and Tailscale.
-- **Frecency directories** (zoxide) from every host that do not already have a same-name live session. Enter creates the session — named after the directory — and switches to it. An existing session with the same label is reused, never duplicated. Remote directories read the host's zoxide over SSH.
+- **Frecency directories** (zoxide) from every host that do not already have a same-name live session, with a shallow fd scan (depth 2 from `$HOME`, Trash and Library pruned) appended below them. The scan surfaces projects zoxide has never seen — newly created folders, never-`cd`'d paths — capped at 100 entries so it stays a fallback, not a second index. Remote directories read the host's zoxide and run the same scan over SSH, preferring `fd` and falling back to POSIX `find`. Enter creates the session — named after the directory — and switches to it. An existing session with the same label is reused, never duplicated. Opening a directory that came from the scan runs `zoxide add` on it, so after first use it becomes a permanent zoxide entry (sesh's AddToZoxide behavior).
+- **Typed paths**: a query starting with `~/`, `/`, `./`, or `../` that resolves to an existing local directory adds one extra row below the matches — the sesh behavior of opening any path you hand it, not just listed ones. Remote typed paths are a follow-up.
 
 Pinned local directories float to the top of the directory block (Ctrl+G toggles). The origin pane context is kept when refreshing.
 

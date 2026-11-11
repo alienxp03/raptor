@@ -279,6 +279,105 @@ public extension Rex {
         throw RexError("zoxide is unavailable on \(host)")
     }
 
+    // ---------- directory scan (fd) ----------
+
+    /// DirScanOn lists shallow directories from the filesystem, not the frecency
+    /// database: the fd fallback for projects zoxide has never seen. Depth 2 from
+    /// $HOME catches newly created projects; anything deeper is usually visited
+    /// already, so zoxide covers it. Remote hosts answer over SSH, preferring fd
+    /// and falling back to POSIX find, which every host has.
+    static func dirScanOn(_ host: String) -> [String] {
+        let raw: String?
+        if host.isEmpty || host == localHostLabel {
+            raw = try? dirScanLocalOut()
+        } else {
+            raw = try? remoteDirScanOut(host)
+        }
+        // The merge cap consumes the scan head-first, so visible directories
+        // must precede hidden tooling subtrees (.cache, .local, ...) or real
+        // projects would sit beyond the cap forever.
+        return prioritizeVisible(parseDirScan(raw))
+    }
+
+    /// Stable partition: plain directories keep their scan order in front,
+    /// hidden-subtree entries trail. A path is hidden when any component
+    /// starts with a dot.
+    static func prioritizeVisible(_ dirs: [String]) -> [String] {
+        func isHidden(_ path: String) -> Bool {
+            path.split(separator: "/").contains(where: { $0.hasPrefix(".") })
+        }
+        return dirs.filter { !isHidden($0) } + dirs.filter { isHidden($0) }
+    }
+
+    /// LocalDirScanCmd mirrors the sesh README's fd recipe, minus the noise:
+    /// hidden directories included, Trash and Library pruned. Execx runs without
+    /// a shell, so the root must be the expanded home — a literal "~" would
+    /// silently produce an empty scan.
+    static func localDirScanArgs() -> [String] {
+        ["-H", "-d", "2", "-t", "d", "-E", ".Trash", "-E", "Library", ".", RaptorPaths.home()]
+    }
+
+    static func dirScanLocalOut() throws -> String {
+        let r = try runCmd(dir: "", timeout: 5, name: "fd", args: localDirScanArgs())
+        if r.code == 0 {
+            return r.stdout
+        }
+        // fd is not installed or failed: POSIX find is always present.
+        return try runCmd(dir: "", timeout: 10, name: "find", args: [
+            RaptorPaths.home(), "-maxdepth", "2", "(", "-path", "*/.Trash", "-o", "-path", "*/Library", ")",
+            "-prune", "-o", "-type", "d", "-print",
+        ]).stdout
+    }
+
+    /// RemoteDirScanCandidates keeps tilde paths: the remote shell expands them.
+    /// Each entry is a full remote command line; find closes the list because it
+    /// exists everywhere, so a host without fd still answers.
+    static let remoteDirScanCandidates = [
+        "fd -H -d 2 -t d -E .Trash -E Library . ~",
+        "~/.local/bin/fd -H -d 2 -t d -E .Trash -E Library . ~",
+        "~/.cargo/bin/fd -H -d 2 -t d -E .Trash -E Library . ~",
+        "/usr/local/bin/fd -H -d 2 -t d -E .Trash -E Library . ~",
+        "fdfind -H -d 2 -t d -E .Trash -E Library . ~",
+        "find $HOME -maxdepth 2 \\( -path '*/.Trash' -o -path '*/Library' \\) -prune -o -type d -print",
+    ]
+
+    static func remoteDirScanOut(_ host: String) throws -> String {
+        var lastError: Error?
+        for command in remoteDirScanCandidates {
+            let r = try? runCmd(dir: "", timeout: 8, name: "ssh",
+                args: ["-o", "BatchMode=yes", "-o", "ConnectTimeout=4", host, command])
+            if let r, r.code == 0 {
+                return r.stdout
+            }
+            lastError = r.map { RexError("\(command): \($0.stderr.trimmingCharacters(in: .whitespacesAndNewlines))") }
+        }
+        throw lastError ?? RexError("directory scan is unavailable on \(host)")
+    }
+
+    static func parseDirScan(_ result: String?) -> [String] {
+        guard let out = result else { return [] }
+        var dirs: [String] = []
+        for line in out.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n", omittingEmptySubsequences: false) {
+            var trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            // fd prints directories with a trailing slash; zoxide rows do not.
+            while trimmed.count > 1 && trimmed.hasSuffix("/") {
+                trimmed = String(trimmed.dropLast())
+            }
+            dirs.append(trimmed)
+        }
+        return dirs
+    }
+
+    // ---------- teach zoxide ----------
+
+    /// ZoxideAdd records a path in the frecency database without raising it to
+    /// the front (sesh's AddToZoxide parity): a project opened from the fd scan
+    /// becomes a permanent zoxide entry after its first use. Best effort.
+    static func zoxideAdd(_ path: String) {
+        _ = try? runCmd(dir: "", timeout: 3, name: "zoxide", args: ["add", path])
+    }
+
     // ---------- last-session state ----------
 
     static func statePath() -> String {

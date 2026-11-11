@@ -200,7 +200,9 @@ extension Rex {
     /// LocalHostname resolves a display name, not server identity: Rex's Tailscale
     /// DNS label when available, else the OS hostname, else the generic
     /// label. Cached for the process lifetime — badges render it on every row.
-    static func localHostname() -> String {
+    /// Public so catalog-level row synthesis can badge local rows like the API
+    /// composition does.
+    public static func localHostname() -> String {
         hostnameLock.lock()
         if let cached = hostnameCache {
             hostnameLock.unlock()

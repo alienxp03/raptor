@@ -184,13 +184,33 @@ public extension Catalog {
 
     /// FilterLauncherItems applies the query to a cached (unfiltered) launcher
     /// composition: everything when the query is empty, exact names then fuzzy
-    /// quality otherwise.
+    /// quality otherwise. A path-like query that resolves to an unlisted local
+    /// directory appends one typed-path row after the ranked matches.
     static func filterLauncherItems(_ items: [LauncherItem], _ query: String, _ originSession: String) -> [LauncherItem] {
         if query.isEmpty {
             return items
         }
-        let scored = rankLauncherItems(items, query)
-        return scored.map { items[$0.index] }
+        var scored = rankLauncherItems(items, query).map { items[$0.index] }
+        if let typed = typedPathLauncherItem(query, items) {
+            scored.append(typed)
+        }
+        return scored
+    }
+
+    /// TypedPathLauncherItem mirrors typedPathDirectory for the launcher row
+    /// shape. The host badge shows the local machine because only local paths
+    /// resolve here; remote typed paths stay a follow-up.
+    static func typedPathLauncherItem(_ query: String, _ items: [LauncherItem]) -> LauncherItem? {
+        guard let directory = typedPathDirectory(query, []) else { return nil }
+        let canonical = canonicalPath(directory.path)
+        for item in items where item.kind == "dir" && canonicalPath(item.path) == canonical {
+            return nil
+        }
+        return LauncherItem(
+            kind: "dir", id: directory.path, path: directory.path,
+            label: directory.label, host: Rex.localHostname(), local: true,
+            state: "", working: false
+        )
     }
 
     /// PreferredLauncherID chooses a default without hiding the current session.

@@ -66,6 +66,11 @@ func rexRun(_ args: [String]) throws -> String {
 }
 
 public extension RaptorDispatch {
+    /// TeachZoxide records the opened directory in the frecency database
+    /// (sesh's AddToZoxide parity). Injectable so tests observe instead of
+    /// writing the real database.
+    public static var teachZoxide: (String) -> Void = { Rex.zoxideAdd($0) }
+
     /// Dispatch opens dir with the given target, mirroring the old shell script.
     static func dispatch(target: String, dir: String, ctx: Ctx, cfg: RaptorConfig) throws {
         _ = try dispatchResult(target: target, dir: dir, ctx: ctx, cfg: cfg)
@@ -119,6 +124,7 @@ extension RaptorDispatch {
             }
             result.sessionID = sid
             try Rex.selectSession(ctx, sid)
+            teachZoxide(dir)
             return
 
         case "tab":
@@ -138,6 +144,7 @@ extension RaptorDispatch {
             } else {
                 _ = try Rex.run("focus", "-s", ctx.session, windowID)
             }
+            teachZoxide(dir)
             return
 
         case "pane_right", "pane_below":
