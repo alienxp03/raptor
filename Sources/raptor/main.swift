@@ -162,7 +162,7 @@ case "task":
         fail(String(describing: error))
     }
 case "setup":
-    let (values, bools, positional) = Flags.parse(sub, valueFlags: ["path"], boolFlags: ["retry"])
+    let (values, bools, _) = Flags.parse(sub, valueFlags: ["path"], boolFlags: ["retry"])
     var path = values["path"] ?? ""
     if path.isEmpty {
         path = FileManager.default.currentDirectoryPath

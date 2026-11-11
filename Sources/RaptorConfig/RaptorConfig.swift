@@ -99,7 +99,6 @@ public struct RaptorConfig {
     }
 
     /// Rewrites only the pins line, leaving every other byte untouched.
-    @discardableResult
     public static func savePins(_ pins: [String]) throws -> Void {
         let path = configPath()
         let quoted = pins.map { "\"" + $0.replacingOccurrences(of: "\"", with: "\\\"") + "\"" }

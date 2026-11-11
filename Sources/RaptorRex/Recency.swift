@@ -265,7 +265,7 @@ public extension Rex {
                 remove(name)
             }
         }
-        var bytes = [UInt8](data)
+        let bytes = [UInt8](data)
         var written = 0
         while written < bytes.count {
             let n = bytes.withUnsafeBufferPointer { buffer -> Int in
@@ -320,7 +320,7 @@ public extension Rex {
     static func validateFocusClientPIDContext(parentTimeout: TimeInterval, pid: Int) -> Bool {
         if pid <= 0 { return false }
         let timeout = parentTimeout > 0 ? min(parentTimeout, 2) : 2
-        guard let out = try? runCapture(timeout: timeout, name: "rex",
+        guard let out = runCapture(timeout: timeout, name: "rex",
             args: ["--autostart=false", "api", "call", "client.list", "{\"kinds\":[\"app\"]}"]) else {
             return false
         }

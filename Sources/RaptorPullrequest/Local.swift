@@ -77,7 +77,7 @@ extension Pullrequest {
         let p = prospectivePath(path)
         let unlock = try lock(p, false)
         defer { unlock() }
-        var s = try load(p)
+        let s = try load(p)
         if s.path.isEmpty || s.complete {
             // Finished setup must not block ordinary navigation after a manual
             // branch change or replacement. Prepare/Register validate new instances.
@@ -136,7 +136,7 @@ extension Pullrequest {
             if !s.opening {
                 return (OpenResult(), false)
             }
-            var result = s.result
+            let result = s.result
             if s.target ?? "" != target {
                 throw handledFailure(result, MessageError("worktree preserved at \(p); retry original \(s.target ?? "") destination"))
             }

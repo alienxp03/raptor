@@ -397,10 +397,10 @@ extension Pullrequest {
             } catch {
                 throw fail(error)
             }
-            defer { destinationUnlock?() }
         } else {
             destinationUnlock = nil
         }
+        defer { destinationUnlock?() }
         let prior: SetupState
         do {
             prior = try load(path)
