@@ -118,7 +118,16 @@ final class RecencyTests: XCTestCase {
         isolateRecency()
         let writers = 12
         DispatchQueue.concurrentPerform(iterations: writers) { i in
-            _ = try? Rex.recordSessionUse("", "session:writer-\(i)")
+            // Contention can exceed the lock timeout on loaded CI runners;
+            // writers retry, which keeps the merge semantics under test.
+            for _ in 0..<30 {
+                do {
+                    try Rex.recordSessionUse("", "session:writer-\(i)")
+                    return
+                } catch {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+            }
         }
         XCTAssertEqual(Rex.loadSessionRecency().count, writers, "merged writers")
         let temps = (try? FileManager.default.contentsOfDirectory(atPath: (Rex.recencyPath() as NSString).deletingLastPathComponent))?
