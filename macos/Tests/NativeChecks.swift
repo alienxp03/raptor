@@ -583,8 +583,19 @@ struct NativeChecks {
                 try await Task.sleep(for: .milliseconds(20))
             }
             require(settled, "Only canonical PR URLs may be prefilled")
+            // Valid prefills resolve; wait for that to settle before judging
+            // errors, so CI load cannot race the response.
+            if valid {
+                var resolved = false
+                for _ in 0..<100 {
+                    if await backend.count("pullrequests.resolve") >= 1 { resolved = true; break }
+                    try await Task.sleep(for: .milliseconds(20))
+                }
+                require(resolved, "A valid prefill must resolve")
+            } else {
+                try await Task.sleep(for: .milliseconds(120))
+            }
             require(model.error == nil, "Ignored clipboard contents must not cause validation errors")
-            try await Task.sleep(for: .milliseconds(220))
             require(await backend.count("pullrequests.resolve") == (valid ? 1 : 0))
             require(await backend.count("pullrequests.prepare") == 0, "Prefill must never create a worktree")
             model.close()
