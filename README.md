@@ -113,7 +113,8 @@ Track `master` without a checkout (builds from source; Xcode 26+):
 brew install --HEAD alienxp03/tap/raptor
 ```
 
-Private-repo credentials: [packaging](packaging/macos.md).
+A previous `~/.local/bin/raptor` shadows the Homebrew CLI on PATH; remove it
+to use the managed one.
 
 ```sh
 make test         # Swift and Lua checks

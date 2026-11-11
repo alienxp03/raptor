@@ -45,8 +45,8 @@ class Raptor < Formula
 
       This app is ad-hoc signed, not Apple-notarized. The formula does not
       remove quarantine flags or change macOS security settings.
-      Stable archive downloads must be publicly accessible.
-      Private HEAD builds need repository read access; see the README.
+      A manual CLI earlier on PATH (such as ~/.local/bin/raptor) shadows
+      this package's CLI; remove it to use the managed one.
 
       App: #{opt_libexec}/Raptor.app
       CLI: #{opt_bin}/raptor

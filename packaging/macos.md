@@ -100,11 +100,9 @@ attributes, disable Gatekeeper, or change user configuration. Keeping the `.app`
 bundle is intentional. This is not Apple notarization or a guarantee that every
 macOS security check will accept the app.
 
-The source repository is currently private. The generated stable formula uses
-ordinary release URLs: it requires public assets. A private repository token
-alone is not a supported private-asset download strategy. Do not publish a
-stable tap entry until downloads work without authentication. The draft-release
-workflow does not change repository visibility or push the tap.
+Stable releases use ordinary public archive URLs. Publish the draft release
+(the draft keeps assets private until you publish it) before pushing the
+stable tap entry, so downloads always work without authentication.
 
 Generate a formula locally from a real package:
 
@@ -141,12 +139,9 @@ An updated plugin automatically selects the Homebrew app and CLI through stable
 
 This formula layout is the distribution contract: one app bundle owns the backend, `bin/raptor` links to that same backend, and the Lua module resolves the package as a pair. Do not independently discover arbitrary CLI and app copies by filename, or store versioned Cellar paths in user config. Homebrew's `opt` symlink follows upgrades. A cask can be considered later for a standalone drag-and-drop app, but is not required for the CLI-first tap.
 
-Quit the app before upgrading, then reopen it to start the new backend. A manual
-CLI earlier on PATH can shadow the package. The source repository currently has
-no declared SPDX license; the formula does not assume MIT. Private source clones
-require a repo-scoped `gh auth git-credential` helper and
-`HOMEBREW_GITHUB_API_TOKEN` in the calling shell; see the README. No credentials
-are embedded. A read-only token for the source repository is sufficient.
+Quit the app before upgrading, then reopen it to start the new backend. A
+manual CLI earlier on PATH (such as `~/.local/bin/raptor`) shadows the
+package; remove it to use the managed one.
 
 `homebrew/raptor.rb.in` is an unused cask template. Prebuilt releases use a
 formula, not a cask. Until the first stable release, the working formula is
