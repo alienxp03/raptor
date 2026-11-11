@@ -639,14 +639,14 @@ struct NativeChecks {
                 model.prInput = "https://github.com/o/r/pull/12"
                 try await pending("pullrequests.resolve", backend)
                 await backend.reply("pullrequests.resolve", APIResult(repo: "/repo", path: "/new", number: 12, branch: "feat/new"))
-                try await wait { model.canOpenPullRequest }
+                try await wait({ model.canOpenPullRequest }, label: "pr:canOpenPullRequest")
                 model.openPullRequest()
                 try await pending("pullrequests.prepare", backend)
                 await backend.reply("pullrequests.prepare", APIResult(repo: "/repo", path: "/new"))
             } else if method == "dispatch" {
                 try await pending("worktrees.list", backend)
                 await backend.reply("worktrees.list", APIResult(targets: ["session", "tab", "here"], target: "session", repo: "/repo", branches: ["main"], baseBranch: "main"))
-                try await wait { !model.loading }
+                try await wait({ !model.loading }, label: "dispatch:!loading")
                 model.branch = "feat/new"; model.destination = "/new"; model.previewReady = true
                 model.create()
                 try await pending("worktrees.create", backend)
@@ -654,13 +654,13 @@ struct NativeChecks {
             } else {
                 try await pending("sessions", backend)
                 await backend.reply("sessions", APIResult(items: [old, PickerItem(path: "/new", kind: "dir")], targets: ["session", "tab", "here"], target: "session"))
-                try await wait { model.canOpen }
+                try await wait({ model.canOpen }, label: "sessions:canOpen")
                 model.selectedID = "/new"
                 model.choose()
             }
             try await pending(method, backend)
             await backend.reply(method, APIResult(launcherItems: [old, fresh], path: "/new", sessionID: "new-session"))
-            try await wait { !model.busy }
+            try await wait({ !model.busy }, label: method + ":!busy")
             let before = await backend.count("sessions")
             let reopen = try LaunchOptions(arguments: ["--mode", "sessions", "--session", "new-session", "--block", "new-pane"])
             _ = model.prepareReconfigure(reopen)
@@ -2372,12 +2372,12 @@ struct NativeChecks {
         print("PASS: immediate direct form, origin metadata, early typing, disabled submit, close during load, stale metadata, launcher fallback continuation, direct Escape/popover, five target labels and bidirectional cycling")
     }
 
-    @MainActor private static func wait(_ condition: () -> Bool) async throws {
+    @MainActor private static func wait(_ condition: () -> Bool, label: String = "model") async throws {
         for _ in 0..<750 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        testFailure("Timed out waiting for model")
+        testFailure("Timed out waiting for \(label)")
     }
 
     @MainActor private static func themeIntegrationChecks() async throws {
