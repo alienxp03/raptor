@@ -17,12 +17,12 @@ class Raptor < Formula
 
   def install
     if build.stable?
-      # Homebrew extracts the zip and nests into a single root when
-      # __MACOSX metadata is stripped, so the app is the buildpath itself;
-      # otherwise it sits one level below. Cover both layouts.
-      app = buildpath/"Raptor.app"
-      app = buildpath unless (app/"Contents/Info.plist").exist?
-      libexec.install app
+      # Homebrew stages url downloads as bare files in HOMEBREW_CACHE;
+      # unzip the release archive into the buildpath ourselves.
+      zips = Dir.glob(HOMEBREW_CACHE.join("*Raptor-#{version}-universal.zip"))
+      raise "release archive for #{version} not found in HOMEBREW_CACHE" if zips.empty?
+      system "unzip", "-q", zips.first, "-d", buildpath
+      libexec.install buildpath/"Raptor.app"
       bin.install_symlink libexec/"Raptor.app/Contents/MacOS/raptor-cli" => "raptor"
       pkgshare.install libexec/"Raptor.app/Contents/Resources/rex/init.lua"
       return
