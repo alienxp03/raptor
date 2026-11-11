@@ -17,10 +17,12 @@ class Raptor < Formula
 
   def install
     if build.stable?
-      # Homebrew downloads but does not unpack url archives; the cached
-      # file is named raptor--<version>.zip.
-      Dir["*.zip"].each { |zip| system "unzip", "-q", zip }
-      libexec.install "Raptor.app"
+      # Homebrew extracts the zip and nests into a single root when
+      # __MACOSX metadata is stripped, so the app is the buildpath itself;
+      # otherwise it sits one level below. Cover both layouts.
+      app = buildpath/"Raptor.app"
+      app = buildpath unless (app/"Contents/Info.plist").exist?
+      libexec.install app
       bin.install_symlink libexec/"Raptor.app/Contents/MacOS/raptor-cli" => "raptor"
       pkgshare.install libexec/"Raptor.app/Contents/Resources/rex/init.lua"
       return
