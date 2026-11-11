@@ -10,9 +10,9 @@ final class PreferredLauncherTests: XCTestCase {
         let dir = LauncherItem(kind: "dir", id: "/repo")
         // Subtests mirroring the Go table.
         let cases: [(name: String, items: [LauncherItem], query: String, want: String)] = [
-            ("MRU alternative", [current, recent, older, dir], "", "recent"),
+            ("current first", [current, recent, older, dir], "", "current"),
             ("no history keeps incoming order", [older, recent], "", "older"),
-            ("current and directory", [current, dir], "", "/repo"),
+            ("current and directory", [current, dir], "", "current"),
             ("directories only", [dir], "", "/repo"),
             ("only current", [current], "", "current"),
             ("empty", [], "", ""),

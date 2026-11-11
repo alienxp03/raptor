@@ -306,13 +306,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func dismissPicker() {
-        outsideClickMonitor.stop()
-        if model?.busy == true {
-            // Keep resident state warm. Hiding pending work must not close
-            // its backend or cancel its task.
-            dismissResidentPanel()
-            return
-        }
+        // Keep resident state warm, whether idle or busy. Hiding pending work
+        // must not close its backend or cancel its task.
+        dismissResidentPanel()
     }
 
     private func resizePanel() {

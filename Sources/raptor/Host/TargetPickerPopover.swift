@@ -8,6 +8,7 @@ struct TargetPickerPopover: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var selected: String
+    @FocusState private var keyboardFocused: Bool
 
     init(targets: [String], current: String, choose: @escaping @MainActor (String) -> Void) {
         self.targets = targets
@@ -25,6 +26,14 @@ struct TargetPickerPopover: View {
         .padding(.vertical, 4)
         .frame(width: 170)
         .pickerGlass()
+        .focusable()
+        .focused($keyboardFocused)
+        .focusEffectDisabled()
+        .task {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            keyboardFocused = true
+        }
         .onKeyPress(keys: [.upArrow, .downArrow, .return, .escape], phases: [.down, .repeat], action: handleKey)
         .accessibilityIdentifier("target-picker")
     }

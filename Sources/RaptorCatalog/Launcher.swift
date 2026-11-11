@@ -213,21 +213,10 @@ public extension Catalog {
         )
     }
 
-    /// PreferredLauncherID chooses a default without hiding the current session.
+    /// Default to the first displayed row, including the current session.
     /// Items must already be MRU ordered (empty query) or search ranked.
     static func preferredLauncherID(_ items: [LauncherItem], _ query: String) -> String {
-        if items.isEmpty {
-            return ""
-        }
-        if query.isEmpty {
-            for item in items where item.kind == "session" && !item.active {
-                return item.id
-            }
-            for item in items where item.kind == "dir" {
-                return item.id
-            }
-        }
-        return items[0].id
+        items.first?.id ?? ""
     }
 
     /// PinLauncherOrigin moves the origin session to the front of already-composed

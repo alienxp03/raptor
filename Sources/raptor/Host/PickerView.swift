@@ -103,41 +103,48 @@ struct PickerView: View {
     }
 
     private var results: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if model.view == .agents && model.items.first?.kind != "pr" {
-                    ForEach(model.agentSections) { section in
-                        Text(section.group.rawValue)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(PickerStyle.secondaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, PickerStyle.rowInset)
-                            .frame(height: PickerStyle.agentGroupHeight)
-                            .padding(.top, section.id == model.agentSections.first?.id ? 0 : PickerStyle.agentGroupSpacing)
-                            .accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("agent-group:\(section.id)")
-                        ForEach(section.items) { item in
-                            row(item, position: model.numberedPosition(of: item)).id(item.id)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if model.view == .agents && model.items.first?.kind != "pr" {
+                        ForEach(model.agentSections) { section in
+                            Text(section.group.rawValue)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(PickerStyle.secondaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, PickerStyle.rowInset)
+                                .frame(height: PickerStyle.agentGroupHeight)
+                                .padding(.top, section.id == model.agentSections.first?.id ? 0 : PickerStyle.agentGroupSpacing)
+                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityIdentifier("agent-group:\(section.id)")
+                            ForEach(section.items) { item in
+                                row(item, position: model.numberedPosition(of: item)).id(item.id)
+                            }
+                        }
+                    } else {
+                        ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                            row(item, position: index + 1).id(item.id)
                         }
                     }
-                } else {
-                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                        row(item, position: index + 1).id(item.id)
-                    }
+                }
+                .scrollTargetLayout()
+                .padding(.horizontal, PickerStyle.listInset).padding(.vertical, 4)
+            }
+            .scrollPosition(id: $model.scrollID)
+            .overlay {
+                if model.items.isEmpty {
+                    Text(model.loading ? "Loading…" : (model.error == nil ? emptyMessage : "No results"))
+                        .foregroundStyle(PickerStyle.secondaryText)
                 }
             }
-            .scrollTargetLayout()
-            .padding(.horizontal, PickerStyle.listInset).padding(.vertical, 4)
-        }
-        .scrollPosition(id: $model.scrollID)
-        .overlay {
-            if model.items.isEmpty {
-                Text(model.loading ? "Loading…" : (model.error == nil ? emptyMessage : "No results"))
-                    .foregroundStyle(PickerStyle.secondaryText)
+            .frame(maxHeight: .infinity)
+            .accessibilityIdentifier("picker-results")
+            .onChange(of: model.selectedID, initial: true) { _, id in
+                // No anchor: keep visible rows still; reveal only clipped rows.
+                if let id { proxy.scrollTo(id) }
             }
         }
-        .frame(maxHeight: .infinity)
-        .accessibilityIdentifier("picker-results")
+        .id(model.listPresentation)
     }
 
     /// Small helpers keep each branch's type-checking surface tiny; the CI

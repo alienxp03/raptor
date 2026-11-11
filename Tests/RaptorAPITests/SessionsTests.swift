@@ -62,9 +62,6 @@ final class SessionsTests: APITestCase {
                 var wantSelected = ""
                 if !tt.ids.isEmpty {
                     wantSelected = tt.ids[0]
-                    if tt.query.isEmpty {
-                        wantSelected = "b"
-                    }
                 }
                 let resultDict = try jsonDict(res.result ?? "{}")
                 let selectedID = resultDict["selected_id"] as? String ?? ""

@@ -508,9 +508,9 @@ struct NativeChecks {
         let previous = PickerItem(path: "previous", kind: "session")
         let directory = PickerItem(path: "/repo", kind: "dir")
         let older = PickerItem(path: "older", kind: "session")
-        require(PickerModel.preferredSelection(in: APIResult(items: [current, directory, previous, older])) == previous.id)
-        require(PickerModel.preferredSelection(in: APIResult(items: [current, directory])) == directory.id,
-                "Sources with no session history prefer directories over current")
+        require(PickerModel.preferredSelection(in: APIResult(items: [current, directory, previous, older])) == current.id)
+        require(PickerModel.preferredSelection(in: APIResult(items: [current, directory])) == current.id,
+                "The first row stays selected even when it is the current session")
         require(PickerModel.preferredSelection(in: APIResult(items: [current])) == current.id)
         require(PickerModel.preferredSelection(in: APIResult()) == nil)
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data(#"{"selected_id":"previous"}"#.utf8))
@@ -519,13 +519,13 @@ struct NativeChecks {
         let options = try LaunchOptions(arguments: ["--mode", "sessions"])
         let model = PickerModel(options: options, backend: backend)
         var result = APIResult(items: [current, previous, older, directory], selectedID: older.id, targets: ["session"], target: "session")
-        require(PickerModel.preferredSelection(in: result) == older.id, "Backend preference wins")
+        require(PickerModel.preferredSelection(in: result) == current.id, "Displayed order wins over backend preference")
         require(PickerModel.preferredSelection(in: result, query: "ranked") == current.id)
         model.setPresented(true); model.start()
         try await pending("sessions", backend)
         await backend.reply("sessions", result)
         try await wait { !model.refreshing }
-        require(model.selectedID == older.id && model.items.contains { $0.active == true })
+        require(model.selectedID == current.id && model.items.contains { $0.active == true })
         model.selectedID = directory.id
         await backend.emit()
         try await pending("sessions", backend)
@@ -535,7 +535,7 @@ struct NativeChecks {
         require(model.selectedID == directory.id, "Live refresh preserves manual selection despite selected_id")
         model.dismiss()
         let token = model.prepareReconfigure(options)
-        require(model.selectedID == older.id && !model.loading, "Warm reopen immediately resets manual selection to preferred row")
+        require(model.selectedID == current.id && !model.loading, "Warm reopen immediately resets manual selection to preferred row")
         await model.completeReconfigure(token)
         model.query = "ranked"
         try await pending("sessions", backend)
@@ -543,16 +543,16 @@ struct NativeChecks {
         try await wait { !model.refreshing }
         require(model.selectedID == current.id, "Search uses ranked first row, not empty-query preference")
         model.query = ""
-        require(model.selectedID == older.id, "Clearing query immediately restores cached preference")
+        require(model.selectedID == current.id, "Clearing query immediately restores cached preference")
         try await pending("sessions", backend)
         result.selectedID = nil
         await backend.reply("sessions", result)
         try await wait { !model.refreshing }
-        require(model.selectedID == previous.id, "Missing selected_id uses non-active session fallback")
+        require(model.selectedID == current.id, "Missing selected_id still selects the first row")
         model.selectedID = current.id
         model.dismiss()
         _ = model.prepareReconfigure(options)
-        require(model.selectedID == previous.id, "Legacy cached reopen must not remember current/manual selection")
+        require(model.selectedID == current.id, "Legacy cached reopen selects the first row")
         model.close()
         let source = CachedListBackend()
         let noHistory = PickerModel(options: options, backend: source)
@@ -560,11 +560,11 @@ struct NativeChecks {
         try await pending("sessions", source)
         await source.reply("sessions", APIResult(items: [current, directory], targets: ["session"], target: "session"))
         try await wait { !noHistory.refreshing }
-        require(noHistory.selectedID == directory.id && noHistory.items.first?.active == true)
+        require(noHistory.selectedID == current.id && noHistory.items.first?.active == true)
         noHistory.selectedID = current.id
         _ = noHistory.prepareReconfigure(options)
-        require(noHistory.selectedID == directory.id && !noHistory.loading,
-                "No-history source cached reopen prefers the directory, retaining current as an available row")
+        require(noHistory.selectedID == current.id && !noHistory.loading,
+                "No-history source cached reopen selects the first row")
         noHistory.close()
         print("PASS: native modes normalized, no pills/browser shortcuts, preferred selection decoding/fallback, cached reopen, ranked search and live refresh preservation")
     }
@@ -2095,7 +2095,12 @@ struct NativeChecks {
             try await pending("sessions", backend)
             await backend.reply("sessions", launcherRows)
             try await wait { !model.refreshing && model.themeLoaded }
-            model.selectedID = "/b"; model.scrollID = "/c"; model.target = "tab"
+            model.selectedID = "/a"; model.scrollID = "/a"
+            model.move(1)
+            require(model.selectedID == "/b" && model.scrollID == "/a",
+                    "Arrow navigation must not replace the viewport anchor with the selected row")
+            model.scrollID = "/c"; model.target = "tab"
+            let previousPresentation = model.listPresentation
             model.query = "filtered"
             try await pending("sessions", backend)
             await backend.reply("sessions", APIResult(items: [PickerItem(path: "/filtered")], targets: ["tab"], target: "tab"))
@@ -2106,6 +2111,8 @@ struct NativeChecks {
             try await wait { !model.refreshing }
 
             let token = model.prepareReconfigure(options)
+            require(model.listPresentation == previousPresentation + 1,
+                    "Reopen must reset the resident list viewport, not only its saved scroll ID")
             require(model.contextReady && model.canOpen && !model.loading && model.view == .sessions && model.page == .directories && model.query.isEmpty,
                          "Warm same-context reopen must enable Open synchronously, before any backend reply")
             require(model.items == launcherRows.items && model.selectedID == "/a" && model.scrollID == nil && model.targets == ["tab", "session"] && model.target == "tab",

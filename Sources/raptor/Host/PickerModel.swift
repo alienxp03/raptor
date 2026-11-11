@@ -42,6 +42,7 @@ final class PickerModel: ObservableObject {
     @Published private(set) var sessionHosts: [HostHeader] = []
     @Published var selectedID: String?
     @Published var scrollID: String?
+    @Published private(set) var listPresentation = 0
     @Published private(set) var refreshing = false
     @Published var targets: [String] = []
     @Published var target = ""
@@ -418,14 +419,9 @@ final class PickerModel: ObservableObject {
     }
     var showsPills: Bool { false }
 
-    /// Backend rows are MRU ordered. Older sources may omit selected_id.
+    /// Always start at the first displayed row, including the current session.
     static func preferredSelection(in result: APIResult, query: String = "") -> String? {
-        let rows = result.items ?? []
-        guard query.isEmpty else { return rows.first?.id }
-        if let id = result.selectedID, rows.contains(where: { $0.id == id }) { return id }
-        return rows.first(where: { $0.kind == "session" && $0.active != true })?.id
-            ?? rows.first(where: { $0.kind == "dir" })?.id
-            ?? rows.first?.id
+        result.items?.first?.id
     }
 
 
@@ -449,6 +445,9 @@ final class PickerModel: ObservableObject {
             }
             return token
         }
+        // A resident view keeps its physical scroll offset even when scrollID
+        // becomes nil. Recreate the list viewport for each normal open.
+        listPresentation += 1
         // Invalidate callbacks before any presentation/context state changes.
         eventEpoch += 1
         activityTask?.cancel(); activityTask = nil; activityDirty = false
@@ -471,7 +470,7 @@ final class PickerModel: ObservableObject {
             changingContext = true
             self.options = options
             view = Self.initialView(for: options); page = .directories; repo = options.repo
-            // Every reopen clears filters and selects the preferred previous session.
+            // Every reopen clears filters and selects the first displayed row.
             viewQueries.removeAll()
             query = ""
             selectedID = nil
@@ -841,7 +840,8 @@ final class PickerModel: ObservableObject {
         guard !loading, !busy, !items.isEmpty else { return }
         let index = items.firstIndex { $0.id == selectedID } ?? 0
         selectedID = items[min(max(index + delta, 0), items.count - 1)].id
-        scrollID = selectedID
+        // The view reveals selection with minimal scrolling. scrollID tracks
+        // the viewport, not the keyboard selection.
     }
 
     func cycleTarget(backward: Bool) {
