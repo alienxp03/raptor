@@ -29,7 +29,9 @@ class Raptor < Formula
       system "unzip", "-q", zips.first, "-d", buildpath
       libexec.install buildpath/"Raptor.app"
       bin.install_symlink libexec/"Raptor.app/Contents/MacOS/raptor-cli" => "raptor"
-      pkgshare.install libexec/"Raptor.app/Contents/Resources/rex/init.lua"
+      # Copy the plugin from the stage, not from the installed bundle: Homebrew
+      # dedupes nested installs and would strip the sealed resource otherwise.
+      pkgshare.install buildpath/"Raptor.app/Contents/Resources/rex/init.lua"
       return
     end
 
