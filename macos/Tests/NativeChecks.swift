@@ -576,7 +576,13 @@ struct NativeChecks {
             model.start()
             let expected = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let valid = PickerModel.pullRequestLink(expected) != nil
-            require(model.prInput == (PickerModel.normalizedPullRequestURL(expected) ?? ""), "Only canonical PR URLs may be prefilled")
+            let wanted = PickerModel.normalizedPullRequestURL(expected) ?? ""
+            var settled = false
+            for _ in 0..<100 {
+                if model.prInput == wanted { settled = true; break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            require(settled, "Only canonical PR URLs may be prefilled")
             require(model.error == nil, "Ignored clipboard contents must not cause validation errors")
             try await Task.sleep(for: .milliseconds(220))
             require(await backend.count("pullrequests.resolve") == (valid ? 1 : 0))
