@@ -50,6 +50,7 @@ Sessions come first (the current one marked), then directories by frequency. `En
 | Type | Filter |
 | `↑`/`↓`, `Ctrl+J`/`Ctrl+K` | Move through results |
 | `Ctrl+O` | Change where the item opens |
+| `Ctrl+R` | Rename the selected session; `Enter` saves, `Esc` cancels |
 | `Enter` | Switch or open |
 | `Ctrl+P`, then `H J K L` | Open in a pane split |
 | `⇧⌘P` | Open a pull request (or paste a PR URL) |

@@ -378,6 +378,15 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // is key with no sheet or modal, its shortcuts own the keyboard.
         guard panel.isKeyWindow, panel.attachedSheet == nil, NSApp.modalWindow == nil,
               event.window == nil || event.window === panel else { return false }
+        if model.renameCandidate != nil {
+            // Inline editing owns keys; never jump, move rows, or change targets.
+            switch event.keyCode {
+            case 53: model.cancelRenameSession(); return true
+            case 36, 76: model.confirmRenameSession(); return true
+            case 48: return true
+            default: return false
+            }
+        }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let control = flags.contains(.control)
         let command = flags.contains(.command)
@@ -435,6 +444,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if control && !command && !option {
             switch key {
+            case "r" where !shift: model.beginRenameSession(); return true
             case "o": model.cycleTarget(backward: flags.contains(.shift)); return true
             case "p": model.toggleSplit(); return true
             case "j" where !model.isForm: model.move(1); return true

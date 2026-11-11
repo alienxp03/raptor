@@ -228,7 +228,30 @@ struct NativeChecks {
             require(!TextEditingShortcuts.perform(event, responder: editor))
             editor.isEditable = true
         }
-        print("PASS: accessory-panel paste/copy/cut/select-all route to editable text only")
+        for dark in [false, true] {
+            PickerPalette.useFallback(dark: dark)
+            editor.selectedTextAttributes = [.foregroundColor: NSColor.black, .backgroundColor: NSColor.darkGray]
+            let renameField = InlineSessionNameField(text: .constant("name"), onSubmit: {}, onCancel: {})
+            let coordinator = InlineSessionNameField.Coordinator(renameField)
+            let originalCaret = editor.insertionPointColor
+            coordinator.configureEditor(editor)
+            coordinator.configureEditor(editor) // Theme/view updates must not overwrite saved defaults.
+            require(editor.textColor == NSColor(PickerStyle.selectionText)
+                        && editor.insertionPointColor == NSColor(PickerStyle.selectionText),
+                    "Inline rename text and caret must use the row's text color")
+            require(editor.selectedTextAttributes[.foregroundColor] as? NSColor == NSColor(PickerStyle.foreground)
+                        && editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(PickerStyle.background),
+                    "Auto-selected rename text must use a matching foreground/background pair")
+            require(abs(hexLuma(PickerStyle.foreground) - hexLuma(PickerStyle.background)) > 0.5,
+                    "Selected rename text must remain readable in light and dark themes")
+            coordinator.restoreEditor()
+            require(editor.selectedTextAttributes[.foregroundColor] as? NSColor == NSColor.black
+                        && editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor.darkGray
+                        && editor.insertionPointColor == originalCaret,
+                    "Leaving rename must restore the shared field editor's selection colors")
+        }
+        PickerPalette.useFallback(dark: true)
+        print("PASS: accessory-panel editing shortcuts; inline rename text, caret, and text-selection colors in light/dark themes")
     }
 
     @MainActor private static func run() async throws {
@@ -1222,6 +1245,78 @@ struct NativeChecks {
             testFailure("Directory rows must dispatch the path with the chosen target")
         }
         require(model.notice?.contains("No Rex call") == true)
+
+        // Rename is session-only, cancels without a request, and pins the row's identity.
+        model.selectedID = "/tmp/plain"
+        model.beginRenameSession()
+        require(model.renameCandidate == nil, "Directories cannot be renamed as sessions")
+        model.selectedID = "session:x"
+        model.beginRenameSession()
+        require(model.renameLabel == "dotfiles" && model.canRenameSession)
+        require(!model.canOpen, "Inline editing must block opening the session")
+        let editingTarget = model.target
+        model.move(1)
+        model.openNumbered(3)
+        model.cycleTarget(backward: false)
+        model.askCloseSession()
+        model.selectView(.agents)
+        require(model.selectedID == "session:x" && model.target == editingTarget
+                    && model.removalCandidate == nil && model.view == .sessions,
+                "Inline editing must not move, open, close, or change context beneath the field")
+        model.renameLabel = "   "
+        require(!model.canRenameSession, "Blank names must not submit")
+        model.confirmRenameSession()
+        let blankRenameCount = await backend.count("sessions.rename")
+        require(blankRenameCount == 0)
+        model.escape()
+        require(model.renameCandidate == nil && model.renameLabel.isEmpty && model.page == .directories)
+
+        await backend.hold("sessions.rename")
+        for (id, host, label) in [("session:x", "This Mac", "local-name"), ("session:y", "Demo Host", "remote-name")] {
+            model.selectedID = id
+            model.beginRenameSession()
+            model.renameLabel = " \(label) "
+            model.selectedID = "/tmp/plain" // A refresh must not redirect the pending rename.
+            let rowIDs = model.items.map(\.id)
+            let hosts = model.sessionHosts
+            let scansBeforeRename = await backend.count("sessions")
+            model.confirmRenameSession()
+            require(model.selectedID == id && model.selected?.label == label
+                        && model.selected?.sessionLabel == label && model.renameCandidate == nil,
+                    "Enter must publish the new name synchronously, before any backend response")
+            require(model.items.map(\.id) == rowIDs && model.sessionHosts == hosts && !model.loading,
+                    "Optimistic rename must keep the list, host headers, and row order visible")
+            model.confirmRenameSession() // Duplicate submission must do nothing.
+            try await pending("sessions.rename", backend)
+            let params = await backend.parameters("sessions.rename")
+            if case .text("session") = params["kind"],
+               case .text(id) = params["session_id"],
+               case .text(host) = params["host"],
+               case .text(label) = params["label"] {} else {
+                testFailure("Rename must send the original session ID, host, and trimmed name")
+            }
+            await backend.reply("sessions.rename", APIResult())
+            try await wait { !model.busy && !model.refreshing }
+            let scansAfterRename = await backend.count("sessions")
+            require(scansAfterRename == scansBeforeRename && !model.loading && !model.items.isEmpty,
+                    "Confirmed rename must not reload or clear the list")
+            require(model.selectedID == id && model.selected?.label == label,
+                    "Confirmed rename must retain the selected session and its new name")
+        }
+        model.beginRenameSession()
+        let originalLabel = model.selected?.label
+        let originalSessionLabel = model.selected?.sessionLabel
+        model.renameLabel = "failed-name"
+        model.confirmRenameSession()
+        require(model.selected?.label == "failed-name", "Even a slow failed save must update immediately")
+        try await pending("sessions.rename", backend)
+        await backend.fail("sessions.rename")
+        try await wait { !model.busy }
+        require(model.error != nil && model.renameCandidate == nil && !model.refreshing,
+                "Rename failures must show an error without refreshing")
+        require(model.selected?.label == originalLabel && model.selected?.sessionLabel == originalSessionLabel
+                    && !model.items.isEmpty && !model.loading,
+                "Failed saves must restore both original labels without clearing the list")
 
         // Close flow mirrors removal: confirm first, then sessions.close + refresh.
         model.selectedID = "session:x"

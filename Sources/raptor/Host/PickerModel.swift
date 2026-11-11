@@ -79,6 +79,9 @@ final class PickerModel: ObservableObject {
     @Published var notice: String?
     @Published var splitMode = false
     @Published var removalCandidate: PickerItem?
+    @Published var renameCandidate: PickerItem?
+    @Published var renameLabel = ""
+    private var pendingRename: (context: Int, item: PickerItem, label: String)?
     @Published var basePickerPresented = false
     @Published var targetPickerPresented = false
     @Published var themeLoaded = false
@@ -120,6 +123,9 @@ final class PickerModel: ObservableObject {
     private var agentGroups: [CacheKey: [String: AgentGroup]] = [:]
 
     private func orderedAgents(_ rows: [PickerItem], key: CacheKey, capture: Bool = true) -> [PickerItem] {
+        let rows: [PickerItem] = if let pendingRename, pendingRename.context == contextGeneration {
+            renamedRows(rows, candidate: pendingRename.item, label: pendingRename.label, sessionLabel: pendingRename.label)
+        } else { rows }
         guard key.view == .agents else { return rows }
         if agentOrder[key] == nil, capture {
             agentOrder[key] = rows.map(\.id)
@@ -205,7 +211,8 @@ final class PickerModel: ObservableObject {
     }
 
     private func activityChanged() {
-        guard presented, contextReady, !closed, !isForm, Self.pullRequestLink(query) == nil else { return }
+        guard presented, contextReady, !closed, !isForm, renameCandidate == nil,
+              pendingRename?.context != contextGeneration, Self.pullRequestLink(query) == nil else { return }
         activityDirty = true
         guard activityTask == nil else { return }
         let epoch = eventEpoch
@@ -351,6 +358,7 @@ final class PickerModel: ObservableObject {
     /// Resident recovery: did the shared backend connection die?
     var backendIsClosed: Bool { closed || ((backend as? ProcessBackend)?.isClosed ?? false) }
     var canOpen: Bool {
+        guard renameCandidate == nil else { return false }
         if selected?.kind == "pr", !isForm {
             return contextReady && !busy && !loading && Self.pullRequestLink(query) != nil
                 && selected?.path == query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -488,6 +496,7 @@ final class PickerModel: ObservableObject {
             destination = nil; destinationRoot = nil; previewReady = false; validationError = nil
             createdPath = nil; splitMode = false; error = nil; notice = nil
             removalCandidate = nil
+            cancelRenameSession()
             basePickerPresented = false; targetPickerPresented = false
             changingContext = false
             // Launcher opens retain the existing no-RPC warm fast path.
@@ -538,6 +547,7 @@ final class PickerModel: ObservableObject {
         notice = nil
         createdPath = nil
         removalCandidate = nil
+        cancelRenameSession()
         basePickerPresented = false
         targetPickerPresented = false
         changingContext = false
@@ -600,7 +610,7 @@ final class PickerModel: ObservableObject {
     func selectView(_ desired: ViewKind) {
         guard contextReady, desired != view else { return }
         guard !busy, !isForm,
-              removalCandidate == nil,
+              removalCandidate == nil, renameCandidate == nil,
               !basePickerPresented, !targetPickerPresented else { return }
         saveListPosition()
         viewQueries[view] = query
@@ -619,7 +629,7 @@ final class PickerModel: ObservableObject {
     /// Open the row at a 1-based position (⌘1–9 / alt-1–9).
     func openNumbered(_ number: Int) {
         guard contextReady else { return }
-        guard number >= 1, number <= items.count, !busy, !loading else { return }
+        guard number >= 1, number <= items.count, !busy, !loading, renameCandidate == nil else { return }
         selectedID = items[number - 1].id
         choose()
     }
@@ -641,6 +651,7 @@ final class PickerModel: ObservableObject {
         targetPickerPresented = false
         cancelPullRequestCommitCheckout()
         removalCandidate = nil
+        cancelRenameSession()
         dismiss()
     }
 
@@ -837,7 +848,7 @@ final class PickerModel: ObservableObject {
 
     func move(_ delta: Int) {
         guard contextReady else { return }
-        guard !loading, !busy, !items.isEmpty else { return }
+        guard !loading, !busy, !items.isEmpty, renameCandidate == nil else { return }
         let index = items.firstIndex { $0.id == selectedID } ?? 0
         selectedID = items[min(max(index + delta, 0), items.count - 1)].id
         // The view reveals selection with minimal scrolling. scrollID tracks
@@ -846,7 +857,7 @@ final class PickerModel: ObservableObject {
 
     func cycleTarget(backward: Bool) {
         guard contextReady else { return }
-        guard !busy, !targets.isEmpty else { return }
+        guard !busy, !targets.isEmpty, renameCandidate == nil else { return }
         let index = targets.firstIndex(of: target) ?? 0
         target = targets[(index + (backward ? targets.count - 1 : 1)) % targets.count]
     }
@@ -973,6 +984,7 @@ final class PickerModel: ObservableObject {
     }
 
     func escape() {
+        if renameCandidate != nil { cancelRenameSession(); return }
         if prCommitConfirmationPresented { cancelPullRequestCommitCheckout(); return }
         if busy || !contextReady || (createdPath != nil && notice == nil) { dismiss(); return }
         if page == .pr {
@@ -1100,6 +1112,79 @@ final class PickerModel: ObservableObject {
             _ = try await self.request("worktrees.remove", params: ["repo": .text(repo), "path": .text(candidate.path)])
             self.invalidateLists()
             self.scheduleQuery(immediate: true)
+        }
+    }
+
+    func beginRenameSession() {
+        guard contextReady, canOpen, view == .sessions, page == .directories,
+              removalCandidate == nil, renameCandidate == nil,
+              let selected, selected.kind == "session" else { return }
+        // Keep the editing row mounted, even when a live refresh removes it.
+        generation += 1
+        queryTask?.cancel()
+        activityTask?.cancel(); activityTask = nil; activityDirty = false
+        refreshing = false
+        renameLabel = selected.label ?? ""
+        renameCandidate = selected
+        splitMode = false
+    }
+
+    var canRenameSession: Bool {
+        contextReady && !busy && renameCandidate != nil
+            && !renameLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func cancelRenameSession() {
+        renameCandidate = nil
+        renameLabel = ""
+    }
+
+    private func renamedRows(_ rows: [PickerItem], candidate: PickerItem, label: String?, sessionLabel: String?) -> [PickerItem] {
+        rows.map { row in
+            guard row.host == candidate.host else { return row }
+            var row = row
+            if row.id == candidate.id && row.kind == "session" { row.label = label }
+            if let sessionID = candidate.sessionID, row.sessionID == sessionID { row.sessionLabel = sessionLabel }
+            return row
+        }
+    }
+
+    private func publishSessionName(_ candidate: PickerItem, label: String?, sessionLabel: String?) {
+        items = renamedRows(items, candidate: candidate, label: label, sessionLabel: sessionLabel)
+        // Keep the visible snapshot during revalidation. Clearing it here would
+        // replace the instant rename with an empty list and a loading state.
+        let snapshot = APIResult(items: items, hosts: sessionHosts, targets: targets, target: target)
+        cache[cacheKey] = CachedList(result: snapshot, selectedID: selectedID, scrollID: scrollID, target: target)
+        activeKey = cacheKey
+    }
+
+    func confirmRenameSession() {
+        guard canRenameSession, let candidate = renameCandidate else { return }
+        let label = renameLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let context = contextGeneration
+        cancelRenameSession()
+        invalidateLists()
+        selectedID = candidate.id
+        pendingRename = (context, candidate, label)
+        publishSessionName(candidate, label: label, sessionLabel: label)
+        perform {
+            do {
+                _ = try await self.request("sessions.rename", params: [
+                    "kind": .text("session"),
+                    "session_id": .text(candidate.sessionID ?? candidate.path),
+                    "host": .text(candidate.host ?? ""),
+                    "label": .text(label),
+                ])
+            } catch {
+                guard context == self.contextGeneration, !self.closed else { throw error }
+                self.pendingRename = nil
+                self.invalidateLists()
+                self.publishSessionName(candidate, label: candidate.label, sessionLabel: candidate.sessionLabel)
+                throw error
+            }
+            // The confirmed name is already visible and cached. Live updates
+            // reconcile later; another list request can still contain old rows.
+            self.pendingRename = nil
         }
     }
 

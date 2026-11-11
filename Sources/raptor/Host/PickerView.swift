@@ -37,6 +37,9 @@ struct PickerView: View {
             selectedInitialDefault = false
             field = page == .pr ? .pullRequest : (page == .create ? .branch : .search)
         }
+        .onChange(of: model.renameCandidate?.id) { _, id in
+            if id == nil { field = .search }
+        }
         .alert("Check out PR commit?", isPresented: $model.prCommitConfirmationPresented) {
             Button("Cancel", role: .cancel) { model.cancelPullRequestCommitCheckout() }
                 .keyboardShortcut(.defaultAction)
@@ -79,7 +82,7 @@ struct PickerView: View {
                         .font(.system(size: PickerStyle.rowFontSize))
                         .focused($field, equals: .search)
                         .task { await Task.yield(); field = .search }
-                        .disabled(model.busy)
+                        .disabled(model.busy || model.renameCandidate != nil)
                         .accessibilityLabel("Search \(model.heading.lowercased())")
                         .accessibilityIdentifier("picker-search")
                     if model.loading {
@@ -235,9 +238,20 @@ struct PickerView: View {
                 if item.active == true {
                     sessionMarker(selected: selected)
                 }
-                Text(item.label ?? item.path)
-                    .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.sessionText)
-                    .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                if model.renameCandidate?.id == item.id {
+                    InlineSessionNameField(text: $model.renameLabel,
+                        onSubmit: { model.confirmRenameSession() },
+                        onCancel: { model.cancelRenameSession() })
+                        .layoutPriority(1)
+                    Text("↵ Save · Esc Cancel")
+                        .font(.system(size: 10))
+                        .foregroundStyle(PickerStyle.selectionText.opacity(0.7))
+                        .fixedSize()
+                } else {
+                    Text(item.label ?? item.path)
+                        .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.sessionText)
+                        .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                }
             } else if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
                     .lineLimit(selected ? 2 : 1).truncationMode(.tail)
@@ -310,21 +324,24 @@ struct PickerView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            guard !model.busy, !model.loading else { return }
+            guard !model.busy, !model.loading, model.renameCandidate == nil else { return }
             model.selectedID = item.id
             model.choose()
         }
         .onTapGesture {
-            guard !model.busy, !model.loading else { return }
+            guard !model.busy, !model.loading, model.renameCandidate == nil else { return }
             model.selectedID = item.id
         }
         .help(rowHelp(item, isAgent: isAgent))
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: model.renameCandidate?.id == item.id ? .contain : .ignore)
         .accessibilityLabel(rowAccessibility(item, isAgent: isAgent, isSessionRow: isSessionRow))
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("path-row:\(item.path)")
-        .accessibilityAction { model.selectedID = item.id; model.choose() }
+        .accessibilityAction {
+            guard model.renameCandidate == nil else { return }
+            model.selectedID = item.id; model.choose()
+        }
     }
 
     private var selectedWorktreePath: some View {
@@ -645,6 +662,7 @@ struct PickerView: View {
             }
             .frame(height: PickerStyle.footerHeight)
         }
+        .disabled(model.renameCandidate != nil)
         .font(.system(size: 11)).foregroundStyle(PickerStyle.foreground.opacity(0.65))
         .lineLimit(1)
         .buttonStyle(.plain)
@@ -662,6 +680,9 @@ struct PickerView: View {
                 .accessibilityLabel("Open selected result")
                 .accessibilityIdentifier("open-selected")
             if model.selected?.kind == "session" {
+                Button("⌃R Rename") { model.beginRenameSession() }
+                    .disabled(!model.canOpen)
+                    .accessibilityIdentifier("rename-session")
                 Button("⌃X Close") { model.askCloseSession() }
                     .disabled(model.busy || model.loading || model.selected?.kind != "session")
                     .accessibilityIdentifier("remove-session")
