@@ -10,7 +10,9 @@ final class LauncherUpdatesTests: APITestCase {
         let cache = makeTempDir()
         // Fake rex: sessions.create must never reach a real Rex install.
         let stub = makeTempDir()
-        try "#!/bin/sh\ncase \"$*\" in\n  *'new --json'*) echo '{\"session_id\":\"new-session\"}' ;;\n  *) echo '{}' ;;\nesac\n"
+        // The scan must lag the mutation: an instant completed scan would
+        // legitimately supersede the creation overlay.
+        try "#!/bin/sh\ncase \"$*\" in\n  *'new --json'*) echo '{\"session_id\":\"new-session\"}' ;;\n  *'ls --json'*) sleep 2; echo '{\"sessions\":[]}' ;;\n  *) echo '{}' ;;\nesac\n"
             .write(toFile: stub + "/rex", atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub + "/rex")
         env.set("PATH", stub + ":" + (env.get("PATH") ?? ""))
