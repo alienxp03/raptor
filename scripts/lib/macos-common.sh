@@ -38,20 +38,14 @@ sign_app() {
   /usr/bin/codesign --force --sign "$identity" ${opts[@]+"${opts[@]}"} "$app"
   verify_app "$app"
 }
-app_architecture() {
-  local app=$1 archs backend
-  archs=$(xcrun lipo -archs "$app/Contents/MacOS/Raptor")
-  backend=$(xcrun lipo -archs "$app/Contents/MacOS/raptor-cli")
+binary_architecture() {
+  local binary=$1 archs
+  archs=$(xcrun lipo -archs "$binary")
   # RELEASE_ARCH is the result consumed by callers.
   export RELEASE_ARCH
   case "$archs" in
     arm64|x86_64) RELEASE_ARCH=$archs ;;
     'arm64 x86_64'|'x86_64 arm64') RELEASE_ARCH=universal ;;
-    *) fail "Unsupported app architectures: $archs" ;;
+    *) fail "Unsupported binary architectures: $archs" ;;
   esac
-  local arch
-  for arch in $archs; do
-    [[ " $backend " == *" $arch "* ]] || fail "Backend lacks architecture: $arch"
-  done
-  [[ $(wc -w <<< "$archs") == $(wc -w <<< "$backend") ]] || fail 'App and backend architectures differ.'
 }

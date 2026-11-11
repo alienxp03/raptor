@@ -34,11 +34,11 @@ binary="$DIST_DIR/raptor"
 [[ -f $binary && ! -L $binary ]] || fail "Missing binary or binary is a symlink: $binary"
 [[ -x $binary ]] || fail "Binary is not executable: $binary"
 [[ -f $DIST_DIR/init.lua ]] || fail "Missing plugin beside the binary: $DIST_DIR/init.lua"
-app_architecture "$binary"
+binary_architecture "$binary"
 mkdir -p "$SCRIPT_ROOT/aux"
 work=$(mktemp -d "$SCRIPT_ROOT/aux/macos-package.XXXXXX")
 trap 'rm -rf "$work"' EXIT
-archive="raptor-$VERSION-$RELEASE_ARCH.zip"
+archive="Raptor-$VERSION-$RELEASE_ARCH.zip"
 # The payload is the bare host/CLI binary and the Rex plugin, laid out like
 # the Homebrew formula expects: bin/raptor and the plugin beside it.
 staging="$work/raptor-$VERSION-$RELEASE_ARCH"

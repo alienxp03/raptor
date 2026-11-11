@@ -6,7 +6,7 @@ work=$(mktemp -d "$root/aux/release-tests.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 # Fixture bytes test hashing only; the release job builds the real archive.
 # The resh-model payload is the bare binary plus the Rex plugin.
-printf 'release fixture\n' > "$work/raptor-1.2.3-universal.zip"
+printf 'release fixture\n' > "$work/Raptor-1.2.3-universal.zip"
 printf 'plugin\n' > "$work/init.lua"
 ruby "$root/scripts/release-formula.rb" 1.2.3 "$work" > "$work/raptor.rb"
 ruby -c "$work/raptor.rb"

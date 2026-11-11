@@ -1,3 +1,10 @@
+# Native app — superseded by the resh model
+
+The spawn chain and app-bundle details below describe the pre-resh model and
+are kept for history. The current architecture is a bare host process spawned
+under Rex: see [resh-model](resh-model.md). The wire protocol, resident panel,
+PR recovery, and theme sections still apply.
+
 # Native Mac app
 
 Raptor has one interface and one Swift implementation of picker behavior:

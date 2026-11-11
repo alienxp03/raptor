@@ -75,6 +75,6 @@ jobs:
             jq -e '.isDraft' release.json > /dev/null
           else
             gh release create "$TAG" --verify-tag --draft --title "$TAG" \
-              --notes 'Universal macOS app (Intel and Apple Silicon). Ad-hoc signed, not Apple-notarized. Install with the Homebrew formula; browser downloads can be blocked by Gatekeeper. The raptor.rb asset is for the tap maintainer.'
+              --notes 'Universal macOS binary (Intel and Apple Silicon) with the Rex plugin; the resh model has no app bundle. Not Apple-notarized. Install with the Homebrew formula; browser downloads can be blocked by Gatekeeper. The raptor.rb asset is for the tap maintainer.'
           fi
           gh release upload "$TAG" Raptor-*.zip Raptor-*.zip.sha256 raptor.rb --clobber
