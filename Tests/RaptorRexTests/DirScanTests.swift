@@ -16,26 +16,26 @@ final class DirScanTests: XCTestCase {
         XCTAssertEqual(Rex.parseDirScan("   "), [])
     }
 
-    func testLocalScanPrunesTrashAndLibraryAndExpandsHome() {
+    func testLocalScanPrunesProtectedFoldersAndExpandsHome() {
         // Execx runs without a shell: the root must be the expanded home, never
-        // a literal "~" which silently produces an empty scan.
+        // a literal "~" which silently produces an empty scan. TCC-protected
+        // folders are pruned so the backend never trips macOS file prompts.
         let args = Rex.localDirScanArgs()
         XCTAssertEqual(args.first, "-H", "hidden directories are part of the scan")
-        for pruned in [".Trash", "Library"] {
+        for pruned in Rex.localDirScanPrunes {
             XCTAssertTrue(args.contains(pruned), "missing prune entry: \(pruned)")
         }
         XCTAssertEqual(args.last, RaptorPaths.home(), "scan root is the expanded home directory")
         XCTAssertFalse(args.contains("~"), "tilde must be expanded before exec")
     }
 
-    func testRemoteScanFallsBackToFind() {
-        let candidates = Rex.remoteDirScanCandidates
-        XCTAssertGreaterThanOrEqual(candidates.count, 2)
-        XCTAssertEqual(candidates.last?.hasPrefix("find "), true,
-                       "POSIX find must close the candidate list")
-        for candidate in candidates.dropLast() {
-            XCTAssertTrue(candidate.hasPrefix("fd ") || candidate.contains("/fd ") || candidate.hasPrefix("fdfind "),
-                          "non-final candidates must be fd invocations: \(candidate)")
+    func testRemoteScanFallsBackToFindInOneRoundTrip() {
+        let command = Rex.remoteDirScanCommand()
+        XCTAssertTrue(command.hasPrefix("command -v fd"), "fd is preferred when installed")
+        XCTAssertTrue(command.contains("|| find "),
+                      "POSIX find must close the command as the fallback")
+        for pruned in Rex.remoteDirScanPrunes {
+            XCTAssertTrue(command.contains("*/" + pruned), "missing prune entry: \(pruned)")
         }
     }
 

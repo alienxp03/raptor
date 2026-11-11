@@ -65,8 +65,13 @@ public extension Catalog {
     /// "This Mac" read the local zoxide database; remote hosts answer over SSH.
     /// The fd scan is appended after zoxide: frecency order stays untouched, and
     /// never-visited directories surface below the established ones.
+    /// RAPTOR_DISABLE_DIR_SCAN isolates fixture-backed tests from the real
+    /// filesystem: the scan runs real commands that PATH stubs cannot intercept
+    /// (find exists everywhere), which would leak home directories into rows.
     static func directoriesOn(host: String, reposOnly: Bool) -> [Directory] {
-        let dirs = mergeDirScan(zoxide: Rex.zoxideListOn(host), scan: Rex.dirScanOn(host))
+        let scan = (RaptorPaths.env("RAPTOR_DISABLE_DIR_SCAN") ?? "").isEmpty
+            ? Rex.dirScanOn(host) : []
+        let dirs = mergeDirScan(zoxide: Rex.zoxideListOn(host), scan: scan)
         return directoryItems(dirs, reposOnly)
     }
 

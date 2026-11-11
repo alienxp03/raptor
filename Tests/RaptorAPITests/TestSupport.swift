@@ -66,6 +66,15 @@ final class TestEnv {
 class APITestCase: XCTestCase {
     let env = TestEnv()
 
+    override func setUp() {
+        super.setUp()
+        // Fixture tests stub zoxide through PATH, but the fd scan runs real
+        // commands (find exists everywhere), so PATH stubs cannot intercept it.
+        // Disable it wholesale: exact-row assertions must not see the operator's
+        // home directory. Set it through TestEnv so tearDown restores it.
+        env.set("RAPTOR_DISABLE_DIR_SCAN", "1")
+    }
+
     func addTeardown(_ block: @escaping () -> Void) {
         env.addTeardown(block)
     }

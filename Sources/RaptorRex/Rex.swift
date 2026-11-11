@@ -310,11 +310,21 @@ public extension Rex {
     }
 
     /// LocalDirScanCmd mirrors the sesh README's fd recipe, minus the noise:
-    /// hidden directories included, Trash and Library pruned. Execx runs without
-    /// a shell, so the root must be the expanded home — a literal "~" would
-    /// silently produce an empty scan.
+    /// hidden directories included, Trash and Library pruned. Desktop/Documents/
+    /// Downloads stay IN the scan — never-visited folders there are exactly the
+    /// point. macOS TCC prompts once per folder for a stably signed build; the
+    /// developer-facing churn came from ad-hoc rebuilds changing the code
+    /// identity, fixed by the Makefile's Developer ID default. Execx runs
+    /// without a shell, so the root must be the expanded home — a literal "~"
+    /// would silently produce an empty scan.
+    static let localDirScanPrunes = [".Trash", "Library"]
+
     static func localDirScanArgs() -> [String] {
-        ["-H", "-d", "2", "-t", "d", "-E", ".Trash", "-E", "Library", ".", RaptorPaths.home()]
+        var args = ["-H", "-d", "2", "-t", "d"]
+        for prune in localDirScanPrunes {
+            args += ["-E", prune]
+        }
+        return args + [".", RaptorPaths.home()]
     }
 
     static func dirScanLocalOut() throws -> String {
@@ -323,35 +333,41 @@ public extension Rex {
             return r.stdout
         }
         // fd is not installed or failed: POSIX find is always present.
-        return try runCmd(dir: "", timeout: 10, name: "find", args: [
-            RaptorPaths.home(), "-maxdepth", "2", "(", "-path", "*/.Trash", "-o", "-path", "*/Library", ")",
-            "-prune", "-o", "-type", "d", "-print",
-        ]).stdout
+        var args = [RaptorPaths.home(), "-maxdepth", "2", "("]
+        for (i, prune) in localDirScanPrunes.enumerated() {
+            if i > 0 { args += ["-o"] }
+            args += ["-path", "*/" + prune]
+        }
+        args += [")", "-prune", "-o", "-type", "d", "-print"]
+        return try runCmd(dir: "", timeout: 10, name: "find", args: args).stdout
     }
 
-    /// RemoteDirScanCandidates keeps tilde paths: the remote shell expands them.
-    /// Each entry is a full remote command line; find closes the list because it
-    /// exists everywhere, so a host without fd still answers.
-    static let remoteDirScanCandidates = [
-        "fd -H -d 2 -t d -E .Trash -E Library . ~",
-        "~/.local/bin/fd -H -d 2 -t d -E .Trash -E Library . ~",
-        "~/.cargo/bin/fd -H -d 2 -t d -E .Trash -E Library . ~",
-        "/usr/local/bin/fd -H -d 2 -t d -E .Trash -E Library . ~",
-        "fdfind -H -d 2 -t d -E .Trash -E Library . ~",
-        "find $HOME -maxdepth 2 \\( -path '*/.Trash' -o -path '*/Library' \\) -prune -o -type d -print",
-    ]
+    /// RemoteDirScanCommand prefers fd in one remote round trip and falls back
+    /// to POSIX find in the same command, so a host without fd costs one SSH
+    /// attempt instead of one per candidate binary. Tilde paths expand in the
+    /// remote shell; the compound form tolerates fd's no-match exit code.
+    static let remoteDirScanPrunes = [".Trash", "Library"]
+
+    static func remoteDirScanCommand() -> String {
+        var prunes = ""
+        for prune in remoteDirScanPrunes {
+            prunes += " -E " + prune
+        }
+        var findPaths = ""
+        for (i, prune) in remoteDirScanPrunes.enumerated() {
+            findPaths += (i > 0 ? " -o " : " ") + "-path '*/" + prune + "'"
+        }
+        return "command -v fd >/dev/null 2>&1 && fd -H -d 2 -t d" + prunes + " . ~ "
+            + "|| find $HOME -maxdepth 2 \\(" + findPaths + " \\) -prune -o -type d -print"
+    }
 
     static func remoteDirScanOut(_ host: String) throws -> String {
-        var lastError: Error?
-        for command in remoteDirScanCandidates {
-            let r = try? runCmd(dir: "", timeout: 8, name: "ssh",
-                args: ["-o", "BatchMode=yes", "-o", "ConnectTimeout=4", host, command])
-            if let r, r.code == 0 {
-                return r.stdout
-            }
-            lastError = r.map { RexError("\(command): \($0.stderr.trimmingCharacters(in: .whitespacesAndNewlines))") }
+        let r = try runCmd(dir: "", timeout: 10, name: "ssh",
+            args: ["-o", "BatchMode=yes", "-o", "ConnectTimeout=4", host, remoteDirScanCommand()])
+        if r.code == 0 {
+            return r.stdout
         }
-        throw lastError ?? RexError("directory scan is unavailable on \(host)")
+        throw RexError("directory scan is unavailable on \(host): \(r.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
 
     static func parseDirScan(_ result: String?) -> [String] {

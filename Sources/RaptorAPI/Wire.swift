@@ -103,7 +103,27 @@ public final class PipeInput: RequestInput {
     }
 
     public func readChunk() throws -> Data {
-        handle.availableData // empty at EOF
+        // availableData raises an uncatchable Objective-C exception when the
+        // read fails at the OS level (the app closed its pipe end), and the
+        // backend dies mid-loop: the app then reports a closed connection
+        // until relaunched. POSIX read reports the same condition as an errno
+        // instead, and an empty chunk still means EOF.
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = buffer.withUnsafeMutableBytes {
+                Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count)
+            }
+            if count > 0 {
+                return Data(buffer.prefix(count))
+            }
+            if count == 0 {
+                return Data()
+            }
+            if errno == EINTR {
+                continue
+            }
+            throw StreamError.closedPipe
+        }
     }
 }
 

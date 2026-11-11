@@ -17,9 +17,11 @@ for dependency in zoxide worktrunk gh; do
   grep -Fq "depends_on \"$dependency\"" "$work/raptor.rb"
 done
 # Both stable and HEAD formulas keep the app, backend and plugin together.
-grep -Fq 'libexec.install "Raptor.app"' "$work/raptor.rb"
+# The stable branch preserves the sealed bundle: app installed via variable,
+# plugin copied out with cp -p because Homebrew install helpers move files.
+grep -Fq 'libexec.install app' "$work/raptor.rb"
 grep -Fq 'bin.install_symlink libexec/"Raptor.app/Contents/MacOS/raptor-cli" => "raptor"' "$work/raptor.rb"
-grep -Fq 'pkgshare.install libexec/"Raptor.app/Contents/Resources/rex/init.lua"' "$work/raptor.rb"
+grep -Fq 'system "cp", "-p", buildpath/"init.lua", pkgshare/"init.lua"' "$work/raptor.rb"
 grep -Fq 'license "MIT"' "$work/raptor.rb"
 grep -Fq 'raptor init' "$work/raptor.rb"
 grep -Fq 'rex config reload' "$work/raptor.rb"
