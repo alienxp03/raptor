@@ -312,8 +312,13 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     private var stdoutPipe: Pipe?
     private var repliedOnce = false
     private var wroteOnce = false
+    private let requestTimeout: @Sendable (String) -> TimeInterval
 
-    init(options: LaunchOptions) { self.options = options }
+    init(options: LaunchOptions,
+         requestTimeout: @escaping @Sendable (String) -> TimeInterval = { ProcessBackend.timeoutSeconds(for: $0) }) {
+        self.options = options
+        self.requestTimeout = requestTimeout
+    }
 
     /// Retarget the shared backend for a new picker open. A running child is
     /// retold its context in place; an idle one simply takes new launch flags.
@@ -461,7 +466,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         reply = nil
         lock.unlock()
         let timeout = DispatchWorkItem { [weak self] in self?.timeout(id) }
-        DispatchQueue.global().asyncAfter(deadline: .now() + Self.timeoutSeconds(for: method), execute: timeout)
+        DispatchQueue.global().asyncAfter(deadline: .now() + requestTimeout(method), execute: timeout)
         defer {
             timeout.cancel()
             lock.lock(); activeID = nil; lock.unlock()

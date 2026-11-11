@@ -117,10 +117,15 @@ A previous `~/.local/bin/raptor` shadows the Homebrew CLI on PATH; remove it
 to use the managed one.
 
 ```sh
-make test         # Swift and Lua checks
-make test-macos   # Native host checks
+make test         # All Swift tests, 16 isolated workers, then Lua checks
+make test-macos   # Native host checks, with cached builds
 make install      # dist/raptor + plugin (release build)
 ```
+
+Use `make test TEST_WORKERS=4` to limit local CPU use. Native checks cache
+binaries by source contents, compiler and flags under `aux/native-test-cache/`.
+Delete that directory to force a fresh compile. Each run still executes all
+checks with new runtime fixtures; production request timeouts stay unchanged.
 
 ## License
 

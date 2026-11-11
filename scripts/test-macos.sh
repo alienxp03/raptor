@@ -10,9 +10,43 @@ work=$(mktemp -d "$SCRIPT_ROOT/aux/macos-tests.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 arch=$(uname -m)
 sdk=$(xcrun --sdk macosx --show-sdk-path)
-export CLANG_MODULE_CACHE_PATH="$work/clang-cache"
-export SWIFT_MODULECACHE_PATH="$work/swift-cache"
+# Keep compiler caches and check binaries between local runs. Runtime fixtures
+# remain unique so concurrent checks never share fake backends or theme files.
+cache="$SCRIPT_ROOT/aux/native-test-cache/$arch"
+mkdir -p "$cache"
+export CLANG_MODULE_CACHE_PATH="$cache/clang-cache"
+export SWIFT_MODULECACHE_PATH="$cache/swift-cache"
 common=(-swift-version 6 -warnings-as-errors -parse-as-library -sdk "$sdk" -target "$arch-apple-macosx14.0")
+compiler_version=$(xcrun swiftc --version)
+# Cache by source contents, flags, SDK and compiler, not timestamps.
+cached_swiftc() {
+  local name=$1
+  shift
+  local signature
+  signature=$(
+    {
+      printf '%s\n' "$compiler_version" "${common[@]}" "$@"
+      local arg
+      for arg in "$@"; do
+        [[ $arg != *.swift ]] || shasum -a 256 "$arg"
+      done
+    } | shasum -a 256 | awk '{print $1}'
+  )
+  local output="$cache/$name-$signature"
+  if [[ ! -f $output ]]; then
+    local temporary="$work/$name"
+    if [[ $name == host-typecheck ]]; then
+      xcrun swiftc "${common[@]}" "$@"
+      touch "$temporary"
+    else
+      xcrun swiftc "${common[@]}" "$@" -o "$temporary"
+    fi
+    mv "$temporary" "$output"
+  fi
+  if [[ $name != host-typecheck ]]; then
+    cp "$output" "$work/$name"
+  fi
+}
 host_sources=("$SCRIPT_ROOT"/Sources/raptor/Host/*.swift)
 [[ -f ${host_sources[0]} ]] || fail 'Host sources are not ready: Sources/raptor/Host/*.swift'
 # Native checks run against the bare host sources; the resh model has no app
@@ -20,7 +54,7 @@ host_sources=("$SCRIPT_ROOT"/Sources/raptor/Host/*.swift)
 # fake backend child where the old fixture used an .app bundle.
 fixture="$work/Fixture"
 mkdir -p "$fixture"
-xcrun swiftc "${common[@]}" -framework SwiftUI -framework AppKit \
+cached_swiftc NativeChecks -framework SwiftUI -framework AppKit \
   "$SCRIPT_ROOT/Sources/raptor/Host/Backend.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/DemoBackend.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/PickerModel.swift" \
@@ -32,16 +66,15 @@ xcrun swiftc "${common[@]}" -framework SwiftUI -framework AppKit \
   "$SCRIPT_ROOT/Sources/raptor/Host/RexTheme.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/TextEditingShortcuts.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/OutsideClickMonitor.swift" \
-  "$SCRIPT_ROOT/macos/Tests/NativeChecks.swift" \
-  -o "$fixture/NativeChecks"
-xcrun swiftc "${common[@]}" \
-  "$SCRIPT_ROOT/macos/Tests/TransportFixture.swift" \
-  -o "$fixture/raptor"
+  "$SCRIPT_ROOT/macos/Tests/NativeChecks.swift"
+cp "$work/NativeChecks" "$fixture/NativeChecks"
+cached_swiftc TransportFixture "$SCRIPT_ROOT/macos/Tests/TransportFixture.swift"
+cp "$work/TransportFixture" "$fixture/raptor"
 "$fixture/NativeChecks" --transport-fixture
 # Exercise the real Swift response envelope through ProcessBackend, not a mock.
-(cd "$SCRIPT_ROOT" && swift build -c release --product raptor --scratch-path "$work/spm" \
+(cd "$SCRIPT_ROOT" && swift build --product raptor \
   && rm -f "$fixture/raptor" \
-  && cp "$(swift build -c release --product raptor --scratch-path "$work/spm" --show-bin-path)/raptor" \
+  && cp "$(swift build --product raptor --show-bin-path)/raptor" \
     "$fixture/raptor")
 theme_app="$work/Rex.app"
 theme_resources="$theme_app/Contents/Resources/SuperUI_SuperDesignTokens.bundle/Contents/Resources"
@@ -73,12 +106,11 @@ cat > "$theme_resources/themes.json" <<'JSON'
 JSON
 PATH="$work/theme-bin:$PATH" RAPTOR_REX_APP="$theme_app" RAPTOR_THEME= \
   "$fixture/NativeChecks" --theme-integration
-xcrun swiftc "${common[@]}" \
+cached_swiftc PathDisplayChecks \
   "$SCRIPT_ROOT/Sources/raptor/Host/PathDisplay.swift" \
-  "$SCRIPT_ROOT/macos/Tests/PathDisplayChecks.swift" \
-  -o "$work/PathDisplayChecks"
+  "$SCRIPT_ROOT/macos/Tests/PathDisplayChecks.swift"
 "$work/PathDisplayChecks"
 # Also type-check the real panel and keyboard integration in Swift 6 mode.
-xcrun swiftc "${common[@]}" -typecheck -framework SwiftUI -framework AppKit \
+cached_swiftc host-typecheck -typecheck -framework SwiftUI -framework AppKit \
   "$SCRIPT_ROOT"/Sources/raptor/Host/*.swift
 printf 'Native checks passed.\n'

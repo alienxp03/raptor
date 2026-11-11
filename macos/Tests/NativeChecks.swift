@@ -2577,14 +2577,16 @@ struct NativeChecks {
             _ = try await pending.value
             testFailure("In-flight request survived close")
         } catch {}
-        let timed = ProcessBackend(options: options)
+        require(ProcessBackend.timeoutSeconds(for: "hang") == 30,
+                "Production request timeout must remain 30 seconds")
+        let timed = ProcessBackend(options: options, requestTimeout: { _ in 0.2 })
         let began = Date()
         do {
             _ = try await timed.request("hang", params: [:])
             testFailure("Request exceeded its deadline without failing")
         } catch {}
-        require(timed.isClosed && Date().timeIntervalSince(began) >= 29 && Date().timeIntervalSince(began) < 35,
-                "Request timeout must close and wake the connection at 30 seconds")
-        print("PASS: persistent NDJSON, split reads, idle/interleaved notifications, unsubscribe, valid API error recovery, strict IDs/envelopes, malformed JSON, EOF, closed connection, final reply before EOF, graceful EOF shutdown and 30-second timeout")
+        require(timed.isClosed && Date().timeIntervalSince(began) >= 0.2 && Date().timeIntervalSince(began) < 5,
+                "Request timeout must close and wake the connection at the injected deadline")
+        print("PASS: persistent NDJSON, split reads, idle/interleaved notifications, unsubscribe, valid API error recovery, strict IDs/envelopes, malformed JSON, EOF, closed connection, final reply before EOF, graceful EOF shutdown and injected request timeout")
     }
 }

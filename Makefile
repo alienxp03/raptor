@@ -1,5 +1,7 @@
 BIN    := raptor
 PREFIX := $(HOME)/.local
+# SwiftPM uses separate test processes; tests change process-wide environment.
+TEST_WORKERS ?= 16
 
 .PHONY: build install install-cli test test-macos clean
 
@@ -22,7 +24,7 @@ install: install-cli
 endif
 
 test:
-	swift test
+	swift test --parallel --num-workers $(TEST_WORKERS)
 	lua Tests/history_test.lua
 	lua Tests/homebrew_routing_test.lua
 	lua Tests/task_action_test.lua
