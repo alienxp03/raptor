@@ -256,6 +256,35 @@ struct PickerView: View {
             }
         }
 
+    private func rowHeight(_ item: PickerItem, isAgent: Bool, selected: Bool) -> CGFloat {
+        if isAgent { return PickerStyle.agentRowHeight }
+        if model.page == .worktrees {
+            return PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1)
+        }
+        return PickerStyle.rowHeight
+    }
+
+    private func rowHelp(_ item: PickerItem, isAgent: Bool) -> String {
+        if isAgent {
+            return [item.agentHelp, item.updatedAt].compactMap { $0 }.joined(separator: " · ")
+        }
+        return launcherRowHelp(item)
+    }
+
+    private func rowAccessibility(_ item: PickerItem, isAgent: Bool, isSessionRow: Bool) -> String {
+        let primary: String
+        if isAgent {
+            primary = item.agentAccessibility
+        } else if item.kind == "pr" || isSessionRow {
+            primary = item.label ?? item.path
+        } else {
+            primary = displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? "")
+        }
+        let active = item.active == true && !isAgent ? ", Active" : ""
+        let activity = item.activityAccessibility.isEmpty ? "" : ", " + item.activityAccessibility
+        return primary + active + activity
+    }
+
     private func row(_ item: PickerItem, position: Int = 0) -> some View {
         let selected = model.selectedID == item.id
         let isAgent = model.view == .agents && item.kind != "pr"
@@ -268,7 +297,7 @@ struct PickerView: View {
         .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PickerStyle.rowInset)
-        .frame(height: isAgent ? PickerStyle.agentRowHeight : (model.page == .worktrees ? PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1) : PickerStyle.rowHeight))
+        .frame(height: rowHeight(item, isAgent: isAgent, selected: selected))
         .background {
             if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground) }
         }
@@ -282,12 +311,9 @@ struct PickerView: View {
             guard !model.busy, !model.loading else { return }
             model.selectedID = item.id
         }
-        .help(isAgent ? [item.agentHelp, item.updatedAt].compactMap { $0 }.joined(separator: " · ") : launcherRowHelp(item))
+        .help(rowHelp(item, isAgent: isAgent))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(isAgent ? item.agentAccessibility
-            : (item.kind == "pr" ? item.label ?? item.path : (isSessionRow ? item.label ?? item.path : displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? "")))
-              + (item.active == true && !isAgent ? ", Active" : "")
-              + (item.activityAccessibility.isEmpty ? "" : ", " + item.activityAccessibility))
+        .accessibilityLabel(rowAccessibility(item, isAgent: isAgent, isSessionRow: isSessionRow))
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("path-row:\(item.path)")
