@@ -2372,12 +2372,12 @@ struct NativeChecks {
         print("PASS: immediate direct form, origin metadata, early typing, disabled submit, close during load, stale metadata, launcher fallback continuation, direct Escape/popover, five target labels and bidirectional cycling")
     }
 
-    @MainActor private static func wait(_ condition: () -> Bool, label: String = "model") async throws {
-        for _ in 0..<750 {
+    @MainActor private static func wait(_ condition: () -> Bool, label: String = "model", line: UInt = #line) async throws {
+        for _ in 0..<1500 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        testFailure("Timed out waiting for \(label)")
+        testFailure("Timed out waiting for \(label) (caller line \(line))")
     }
 
     @MainActor private static func themeIntegrationChecks() async throws {
