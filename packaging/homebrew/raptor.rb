@@ -27,10 +27,13 @@ class Raptor < Formula
       zips = patterns.flat_map { |pattern| Dir.glob(pattern) }
       raise "release archive for #{version} not found in HOMEBREW_CACHE" if zips.empty?
       system "unzip", "-q", zips.first, "-d", buildpath
-      # Copy the plugin BEFORE the app: Homebrew dedupes nested installs by
-      # moving the source out, which would strip a sealed resource otherwise.
-      pkgshare.install buildpath/"Raptor.app/Contents/Resources/rex/init.lua"
-      libexec.install buildpath/"Raptor.app"
+      # Preserve the sealed bundle byte-for-byte: copy the plugin out with cp
+      # (Homebrew's install helpers move, stripping sealed resources).
+      app = buildpath/"Raptor.app"
+      system "cp", "-p", app/"Contents/Resources/rex/init.lua", buildpath/"init.lua"
+      pkgshare.mkpath
+      system "cp", "-p", buildpath/"init.lua", pkgshare/"init.lua"
+      libexec.install app
       bin.install_symlink libexec/"Raptor.app/Contents/MacOS/raptor-cli" => "raptor"
       return
     end
