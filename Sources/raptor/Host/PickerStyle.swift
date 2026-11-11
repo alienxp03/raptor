@@ -104,7 +104,8 @@ enum PickerStyle {
         let wrappedRow = model.view == .sessions && model.page == .worktrees && model.selected.map({ branchLines(for: $0) > 1 }) == true ? rowHeight : 0
         let groupCount = model.view == .agents ? model.agentSections.count : 0
         let groups = CGFloat(groupCount) * agentGroupHeight + CGFloat(max(groupCount - 1, 0)) * agentGroupSpacing
-        let content = searchHeight + rows * rowHeight + groups + wrappedRow + 8 + detail + footerHeight + status
+        let content = searchHeight + rows * rowHeight + groups + wrappedRow + model.sessionDeletionDetailHeight
+            + 8 + detail + footerHeight + status
         let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
         return min(content, max(available, 180))
     }

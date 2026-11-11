@@ -222,6 +222,7 @@ extension Handler {
                 let created = try apiCreateSessionOn(host, dir)
                 sid = created.id
                 existing = created.existing
+                reviveDeletedPath(host, dir)
             } catch {
                 return (nil, error)
             }
@@ -239,6 +240,8 @@ extension Handler {
             }
             addLauncherItems(to: &fields)
             return (.creation(fields: fields.sorted { $0.0 < $1.0 }), nil)
+        case "sessions.delete.preview", "sessions.delete":
+            return sessionDeletion(method, params)
         case "sessions.close":
             return runSessionAction(params) { p, entry in
                 if entry.kind == "session" && (entry.host.isEmpty || entry.host == Rex.localHostLabel)
@@ -248,6 +251,7 @@ extension Handler {
                 let host = Rex.apiNormalizeHost(entry.host)
                 if entry.kind == "session" {
                     try Rex.closeSession(host, entry.sessionID)
+                    recordDeletedResources(host, entry.sessionID, "", sessionClosed: true)
                 } else {
                     try Rex.closeWindow(host, entry.sessionID, entry.id)
                 }
@@ -460,6 +464,7 @@ extension Handler {
                             MessageError("worktree preserved at \(resolvedPath): \(describe(createError))")
                         )
                     }
+                    reviveDeletedPath("", resolvedPath)
                     return (.path(resolvedPath), nil)
                 }
             }

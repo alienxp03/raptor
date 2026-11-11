@@ -94,6 +94,20 @@ actor DemoBackend: BackendClient {
         case "sessions.close":
             sessionEntries.removeAll { $0.path == text("session_id") }
             return APIResult()
+        case "sessions.delete.preview", "sessions.delete":
+            let session = text("session_id")
+            let token = "demo-delete:" + session
+            let plan = APIResult(repo: repo, path: repo + "-worktrees/native-picker", branch: "feat/native-picker", deleteToken: token)
+            if method == "sessions.delete.preview" { return plan }
+            guard text("delete_token") == token else { throw APIError.message("Deletion plan changed. Start again.") }
+            if session == "session:demo-2", case .flag(false) = params["force"] {
+                var result = plan
+                result.error = "Worktree has uncommitted changes. Normal deletion stopped."
+                result.forceAvailable = true
+                return result
+            }
+            sessionEntries.removeAll { $0.path == session }
+            return APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true)
         case "pins.toggle":
             if pinned.contains(text("path")) { pinned.remove(text("path")) } else { pinned.insert(text("path")) }
             return APIResult()

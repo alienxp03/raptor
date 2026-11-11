@@ -79,6 +79,25 @@ final class PickerModel: ObservableObject {
     @Published var notice: String?
     @Published var splitMode = false
     @Published var removalCandidate: PickerItem?
+    struct SessionDeletion {
+        enum Phase { case loading, confirm, deleting, failed, forceOffered, forceConfirm }
+        let id = UUID()
+        let candidate: PickerItem
+        var phase: Phase = .loading
+        var plan: APIResult?
+        var error: String?
+    }
+    @Published private(set) var sessionDeletion: SessionDeletion?
+    private var deletionPreviewTask: Task<Void, Never>?
+    private var pendingSessionRemoval: (context: Int, item: PickerItem)?
+    var sessionCloseCandidate: PickerItem? {
+        view == .sessions && page == .directories ? removalCandidate : nil
+    }
+    var hasSessionAction: Bool { sessionCloseCandidate != nil || sessionDeletion != nil }
+    var sessionDeletionDetailHeight: CGFloat {
+        guard let sessionDeletion else { return 0 }
+        return sessionDeletion.error == nil ? 76 : 110
+    }
     @Published var renameCandidate: PickerItem?
     @Published var renameLabel = ""
     private var pendingRename: (context: Int, item: PickerItem, label: String)?
@@ -123,9 +142,13 @@ final class PickerModel: ObservableObject {
     private var agentGroups: [CacheKey: [String: AgentGroup]] = [:]
 
     private func orderedAgents(_ rows: [PickerItem], key: CacheKey, capture: Bool = true) -> [PickerItem] {
+        let visibleRows = rows.filter { row in
+            guard let pendingSessionRemoval, pendingSessionRemoval.context == contextGeneration else { return true }
+            return row.id != pendingSessionRemoval.item.id || row.host != pendingSessionRemoval.item.host
+        }
         let rows: [PickerItem] = if let pendingRename, pendingRename.context == contextGeneration {
-            renamedRows(rows, candidate: pendingRename.item, label: pendingRename.label, sessionLabel: pendingRename.label)
-        } else { rows }
+            renamedRows(visibleRows, candidate: pendingRename.item, label: pendingRename.label, sessionLabel: pendingRename.label)
+        } else { visibleRows }
         guard key.view == .agents else { return rows }
         if agentOrder[key] == nil, capture {
             agentOrder[key] = rows.map(\.id)
@@ -212,7 +235,8 @@ final class PickerModel: ObservableObject {
 
     private func activityChanged() {
         guard presented, contextReady, !closed, !isForm, renameCandidate == nil,
-              pendingRename?.context != contextGeneration, Self.pullRequestLink(query) == nil else { return }
+              pendingRename?.context != contextGeneration, pendingSessionRemoval?.context != contextGeneration,
+              !hasSessionAction, Self.pullRequestLink(query) == nil else { return }
         activityDirty = true
         guard activityTask == nil else { return }
         let epoch = eventEpoch
@@ -358,7 +382,7 @@ final class PickerModel: ObservableObject {
     /// Resident recovery: did the shared backend connection die?
     var backendIsClosed: Bool { closed || ((backend as? ProcessBackend)?.isClosed ?? false) }
     var canOpen: Bool {
-        guard renameCandidate == nil else { return false }
+        guard renameCandidate == nil, !hasSessionAction else { return false }
         if selected?.kind == "pr", !isForm {
             return contextReady && !busy && !loading && Self.pullRequestLink(query) != nil
                 && selected?.path == query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -440,7 +464,7 @@ final class PickerModel: ObservableObject {
     func prepareReconfigure(_ options: LaunchOptions) -> Int {
         reconfigureGeneration += 1
         let token = reconfigureGeneration
-        if createdPath != nil || (page == .pr && busy) {
+        if createdPath != nil || (page == .pr && busy) || (busy && (sessionDeletion != nil || pendingSessionRemoval != nil)) {
             // Keep the backend origin, repo, target and createParent together.
             // Reopening must neither cancel a mutation nor turn recovery into
             // another create (even when the incoming request is unrelated).
@@ -497,6 +521,7 @@ final class PickerModel: ObservableObject {
             createdPath = nil; splitMode = false; error = nil; notice = nil
             removalCandidate = nil
             cancelRenameSession()
+            cancelDeleteSession()
             basePickerPresented = false; targetPickerPresented = false
             changingContext = false
             // Launcher opens retain the existing no-RPC warm fast path.
@@ -548,6 +573,7 @@ final class PickerModel: ObservableObject {
         createdPath = nil
         removalCandidate = nil
         cancelRenameSession()
+        cancelDeleteSession()
         basePickerPresented = false
         targetPickerPresented = false
         changingContext = false
@@ -610,7 +636,7 @@ final class PickerModel: ObservableObject {
     func selectView(_ desired: ViewKind) {
         guard contextReady, desired != view else { return }
         guard !busy, !isForm,
-              removalCandidate == nil, renameCandidate == nil,
+              removalCandidate == nil, renameCandidate == nil, sessionDeletion == nil,
               !basePickerPresented, !targetPickerPresented else { return }
         saveListPosition()
         viewQueries[view] = query
@@ -629,7 +655,7 @@ final class PickerModel: ObservableObject {
     /// Open the row at a 1-based position (⌘1–9 / alt-1–9).
     func openNumbered(_ number: Int) {
         guard contextReady else { return }
-        guard number >= 1, number <= items.count, !busy, !loading, renameCandidate == nil else { return }
+        guard number >= 1, number <= items.count, !busy, !loading, renameCandidate == nil, !hasSessionAction else { return }
         selectedID = items[number - 1].id
         choose()
     }
@@ -652,6 +678,7 @@ final class PickerModel: ObservableObject {
         cancelPullRequestCommitCheckout()
         removalCandidate = nil
         cancelRenameSession()
+        if !busy { cancelDeleteSession() }
         dismiss()
     }
 
@@ -674,6 +701,7 @@ final class PickerModel: ObservableObject {
         busy = false
         contextGeneration += 1
         queryTask?.cancel(); previewTask?.cancel(); operationTask?.cancel(); themeTask?.cancel()
+        deletionPreviewTask?.cancel()
         prGeneration += 1; prTask?.cancel()
         onAdvanceFormFocus = nil; onFocusSearch = nil
         backend.close()
@@ -848,7 +876,7 @@ final class PickerModel: ObservableObject {
 
     func move(_ delta: Int) {
         guard contextReady else { return }
-        guard !loading, !busy, !items.isEmpty, renameCandidate == nil else { return }
+        guard !loading, !busy, !items.isEmpty, renameCandidate == nil, !hasSessionAction else { return }
         let index = items.firstIndex { $0.id == selectedID } ?? 0
         selectedID = items[min(max(index + delta, 0), items.count - 1)].id
         // The view reveals selection with minimal scrolling. scrollID tracks
@@ -857,7 +885,7 @@ final class PickerModel: ObservableObject {
 
     func cycleTarget(backward: Bool) {
         guard contextReady else { return }
-        guard !busy, !targets.isEmpty, renameCandidate == nil else { return }
+        guard !busy, !targets.isEmpty, renameCandidate == nil, !hasSessionAction else { return }
         let index = targets.firstIndex(of: target) ?? 0
         target = targets[(index + (backward ? targets.count - 1 : 1)) % targets.count]
     }
@@ -984,6 +1012,11 @@ final class PickerModel: ObservableObject {
     }
 
     func escape() {
+        if sessionCloseCandidate != nil { removalCandidate = nil; return }
+        if sessionDeletion != nil {
+            if busy { dismiss() } else { cancelDeleteSession() }
+            return
+        }
         if renameCandidate != nil { cancelRenameSession(); return }
         if prCommitConfirmationPresented { cancelPullRequestCommitCheckout(); return }
         if busy || !contextReady || (createdPath != nil && notice == nil) { dismiss(); return }
@@ -1117,7 +1150,7 @@ final class PickerModel: ObservableObject {
 
     func beginRenameSession() {
         guard contextReady, canOpen, view == .sessions, page == .directories,
-              removalCandidate == nil, renameCandidate == nil,
+              removalCandidate == nil, renameCandidate == nil, sessionDeletion == nil,
               let selected, selected.kind == "session" else { return }
         // Keep the editing row mounted, even when a live refresh removes it.
         generation += 1
@@ -1153,6 +1186,10 @@ final class PickerModel: ObservableObject {
         items = renamedRows(items, candidate: candidate, label: label, sessionLabel: sessionLabel)
         // Keep the visible snapshot during revalidation. Clearing it here would
         // replace the instant rename with an empty list and a loading state.
+        cacheSessionSnapshot()
+    }
+
+    private func cacheSessionSnapshot() {
         let snapshot = APIResult(items: items, hosts: sessionHosts, targets: targets, target: target)
         cache[cacheKey] = CachedList(result: snapshot, selectedID: selectedID, scrollID: scrollID, target: target)
         activeKey = cacheKey
@@ -1193,21 +1230,144 @@ final class PickerModel: ObservableObject {
         guard contextReady else { return }
         guard canOpen, view == .sessions, page == .directories,
               let selected, selected.kind == "session" else { return }
+        pauseSessionUpdates()
         removalCandidate = selected
+    }
+
+    private func pauseSessionUpdates() {
+        generation += 1
+        queryTask?.cancel()
+        activityTask?.cancel(); activityTask = nil; activityDirty = false
+        refreshing = false
+    }
+
+    private func removeSessionRow(_ candidate: PickerItem, worktreePath: String? = nil) {
+        let index = items.firstIndex { $0.id == candidate.id && $0.host == candidate.host } ?? 0
+        invalidateLists()
+        items.removeAll { item in
+            item.host == candidate.host && (item.id == candidate.id
+                || (item.kind == "dir" && item.path == worktreePath))
+        }
+        if !items.contains(where: { $0.id == selectedID }) {
+            selectedID = items.isEmpty ? nil : items[min(index, items.count - 1)].id
+        }
+        cacheSessionSnapshot()
     }
 
     func confirmCloseSession(_ candidate: PickerItem) {
         guard contextReady else { return }
-        guard view == .sessions, page == .directories, !busy, candidate.kind == "session" else { return }
+        guard view == .sessions, page == .directories, !busy, candidate.kind == "session",
+              sessionCloseCandidate?.id == candidate.id else { return }
+        let context = contextGeneration
+        let index = items.firstIndex { $0.id == candidate.id && $0.host == candidate.host } ?? 0
         removalCandidate = nil
+        pendingSessionRemoval = (context, candidate)
+        removeSessionRow(candidate)
         perform {
-            _ = try await self.request("sessions.close", params: [
-                "kind": .text("session"),
-                "session_id": .text(candidate.sessionID ?? candidate.path),
-                "host": .text(candidate.host ?? ""),
-            ])
-            self.invalidateLists()
-            self.scheduleQuery(immediate: true)
+            do {
+                _ = try await self.request("sessions.close", params: [
+                    "kind": .text("session"),
+                    "session_id": .text(candidate.sessionID ?? candidate.path),
+                    "host": .text(candidate.host ?? ""),
+                ])
+            } catch {
+                guard context == self.contextGeneration, !self.closed else { throw error }
+                self.pendingSessionRemoval = nil
+                self.invalidateLists()
+                self.items.insert(candidate, at: min(index, self.items.count))
+                self.selectedID = candidate.id
+                self.cacheSessionSnapshot()
+                throw error
+            }
+            self.pendingSessionRemoval = nil
+        }
+    }
+
+    func beginDeleteSession() {
+        guard contextReady, canOpen, view == .sessions, page == .directories,
+              let selected, selected.kind == "session" else { return }
+        pauseSessionUpdates()
+        let deletion = SessionDeletion(candidate: selected)
+        sessionDeletion = deletion
+        let context = contextGeneration
+        deletionPreviewTask?.cancel()
+        deletionPreviewTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await self.request("sessions.delete.preview", params: [
+                    "kind": .text("session"), "session_id": .text(selected.sessionID ?? selected.path),
+                    "host": .text(selected.host ?? ""),
+                ])
+                guard context == self.contextGeneration, self.sessionDeletion?.id == deletion.id else { return }
+                if let error = result.error, !error.isEmpty { throw APIError.message(error) }
+                guard result.deleteToken != nil, result.path != nil, result.branch != nil else {
+                    throw APIError.message("Backend returned no deletion plan.")
+                }
+                self.sessionDeletion?.plan = result
+                self.sessionDeletion?.phase = .confirm
+            } catch {
+                guard !Task.isCancelled, context == self.contextGeneration,
+                      self.sessionDeletion?.id == deletion.id else { return }
+                self.sessionDeletion?.error = error.localizedDescription
+                self.sessionDeletion?.phase = .failed
+            }
+        }
+    }
+
+    func cancelDeleteSession() {
+        guard !busy else { return }
+        deletionPreviewTask?.cancel(); deletionPreviewTask = nil
+        sessionDeletion = nil
+    }
+
+    func offerForceDeleteSession() {
+        guard !busy, sessionDeletion?.phase == .forceOffered else { return }
+        sessionDeletion?.phase = .forceConfirm
+    }
+
+    func confirmDeleteSession() {
+        guard contextReady, !busy, let deletion = sessionDeletion,
+              deletion.phase == .confirm || deletion.phase == .forceConfirm,
+              let token = deletion.plan?.deleteToken else { return }
+        let context = contextGeneration
+        sessionDeletion?.phase = .deleting
+        sessionDeletion?.error = nil
+        perform {
+            do {
+                let result = try await self.request("sessions.delete", params: [
+                    "kind": .text("session"),
+                    "session_id": .text(deletion.candidate.sessionID ?? deletion.candidate.path),
+                    "host": .text(deletion.candidate.host ?? ""), "delete_token": .text(token),
+                    "force": .flag(deletion.phase == .forceConfirm),
+                ])
+                guard self.sessionDeletion?.id == deletion.id else { return }
+                if result.worktreeRemoved == true, let path = deletion.plan?.path {
+                    self.items.removeAll { item in
+                        item.host == deletion.candidate.host && item.kind == "dir"
+                            && (item.path == path || item.path.hasPrefix(path + "/"))
+                    }
+                    self.cacheSessionSnapshot()
+                }
+                if let error = result.error, !error.isEmpty, result.sessionClosed != true {
+                    self.sessionDeletion?.error = error
+                    self.sessionDeletion?.phase = result.forceAvailable == true ? .forceOffered : .failed
+                    if result.deleteToken != nil { self.sessionDeletion?.plan = result }
+                    return
+                }
+                guard result.sessionClosed == true, result.worktreeRemoved == true, result.branchRemoved == true else {
+                    self.sessionDeletion?.error = "Backend did not confirm complete deletion. Check resources before retrying."
+                    self.sessionDeletion?.phase = .failed
+                    return
+                }
+                self.sessionDeletion = nil
+                self.removeSessionRow(deletion.candidate, worktreePath: deletion.plan?.path)
+                if let warning = result.error, !warning.isEmpty { self.notice = warning }
+            } catch {
+                guard context == self.contextGeneration, !self.closed,
+                      self.sessionDeletion?.id == deletion.id else { return }
+                self.sessionDeletion?.error = error.localizedDescription
+                self.sessionDeletion?.phase = .failed
+            }
         }
     }
 

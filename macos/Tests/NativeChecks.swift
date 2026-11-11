@@ -214,6 +214,124 @@ struct NativeChecks {
         print("PASS: outside-click hit regions include popovers/sheets; dismissal clears transient UI and preserves input/recovery")
     }
 
+    @MainActor private static func sessionDeletionChecks() async throws {
+        let backend = CachedListBackend()
+        await backend.hold("sessions.delete.preview")
+        await backend.hold("sessions.delete")
+        let options = try LaunchOptions(arguments: ["--demo", "--mode", "sessions", "--session", "origin"])
+        let model = PickerModel(options: options, backend: backend)
+        let candidate = PickerItem(path: "session:delete", label: "feature", kind: "session", sessionID: "session:delete", host: "Remote Host")
+        let payload = APIResult(items: [candidate, PickerItem(path: "/repo/feature", kind: "dir", host: "Remote Host")], targets: ["session"], target: "session")
+        let plan = APIResult(repo: "/repo/main", path: "/repo/feature", branch: "feat/example", deleteToken: "checked-plan")
+        model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", payload)
+        try await wait { !model.refreshing }
+        model.selectedID = "/repo/feature"
+        model.beginDeleteSession()
+        require(model.sessionDeletion == nil, "Directory rows must not delete sessions")
+        model.selectedID = candidate.id
+        let listHeight = PickerStyle.height(for: model)
+        model.beginDeleteSession()
+        try await pending("sessions.delete.preview", backend)
+        model.escape()
+        await backend.reply("sessions.delete.preview", plan)
+        try await Task.sleep(for: .milliseconds(20))
+        require(model.sessionDeletion == nil, "Canceled preview replies must not reopen Delete")
+
+        for attempt in 0..<3 {
+            model.beginDeleteSession()
+            try await pending("sessions.delete.preview", backend)
+            await backend.reply("sessions.delete.preview", plan)
+            try await wait { model.sessionDeletion?.phase == .confirm }
+            require(PickerStyle.height(for: model) > listHeight && !model.canOpen,
+                    "Inline Delete must reserve themed detail space and block navigation")
+            model.move(1); model.askCloseSession(); model.beginRenameSession()
+            require(model.selectedID == candidate.id && model.removalCandidate == nil && model.renameCandidate == nil)
+            model.confirmDeleteSession()
+            model.confirmDeleteSession()
+            try await pending("sessions.delete", backend)
+            let params = await backend.parameters("sessions.delete")
+            if case .text("Remote Host") = params["host"], case .text("checked-plan") = params["delete_token"],
+               case .text("session:delete") = params["session_id"], case .flag(false) = params["force"] {} else {
+                testFailure("Normal Delete must send exact host/session, preview token, and force=false")
+            }
+            require(model.items.contains { $0.id == candidate.id }, "Failed deletion must remain recoverable in its row")
+            if attempt == 0 {
+                await backend.fail("sessions.delete")
+                try await wait { !model.busy }
+                model.offerForceDeleteSession()
+                require(model.sessionDeletion?.phase == .failed, "Transport errors must not offer Force")
+                model.escape()
+                continue
+            }
+            var refusal = plan
+            refusal.error = "Worktree is dirty."
+            refusal.forceAvailable = true
+            await backend.reply("sessions.delete", refusal)
+            try await wait { !model.busy }
+            require(model.sessionDeletion?.phase == .forceOffered)
+            let calls = await backend.count("sessions.delete")
+            model.confirmDeleteSession()
+            let afterEnter = await backend.count("sessions.delete")
+            require(afterEnter == calls, "Enter on a refusal must never silently force deletion")
+            model.offerForceDeleteSession()
+            require(model.sessionDeletion?.phase == .forceConfirm)
+            if attempt == 1 {
+                model.escape()
+                require(model.sessionDeletion == nil && model.items.count == 2, "Cancel Force must keep all rows")
+                continue
+            }
+            model.confirmDeleteSession()
+            try await pending("sessions.delete", backend)
+            let forceParams = await backend.parameters("sessions.delete")
+            if case .flag(true) = forceParams["force"] {} else { testFailure("Explicit Force confirmation must send force=true") }
+            model.escape()
+            let token = model.prepareReconfigure(options)
+            require(model.sessionDeletion?.phase == .deleting && model.busy,
+                    "Reopen must preserve an issued deletion and its original context")
+            await model.completeReconfigure(token)
+            await backend.reply("sessions.delete", APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true))
+            try await wait { !model.busy }
+            require(model.sessionDeletion == nil && model.items.isEmpty && !model.loading && !model.refreshing,
+                    "Successful Delete must remove session and worktree directory without reloading")
+        }
+        model.close()
+        for outcome in [
+            APIResult(error: "Resources removed, but close failed", worktreeRemoved: true, branchRemoved: true, sessionClosed: false),
+            APIResult(error: "Cleanup warning", worktreeRemoved: true, branchRemoved: true, sessionClosed: true),
+            APIResult(),
+        ] {
+            let partialBackend = CachedListBackend()
+            await partialBackend.hold("sessions.delete.preview")
+            await partialBackend.hold("sessions.delete")
+            let partial = PickerModel(options: options, backend: partialBackend)
+            partial.start()
+            try await pending("sessions", partialBackend)
+            await partialBackend.reply("sessions", payload)
+            try await wait { !partial.refreshing }
+            partial.beginDeleteSession()
+            try await pending("sessions.delete.preview", partialBackend)
+            await partialBackend.reply("sessions.delete.preview", plan)
+            try await wait { partial.sessionDeletion?.phase == .confirm }
+            partial.confirmDeleteSession()
+            try await pending("sessions.delete", partialBackend)
+            await partialBackend.reply("sessions.delete", outcome)
+            try await wait { !partial.busy }
+            if outcome.sessionClosed == true {
+                require(partial.items.isEmpty && partial.sessionDeletion == nil && partial.notice == "Cleanup warning",
+                        "A confirmed deletion with a warning must not leave a ghost session")
+            } else {
+                require(partial.items.first?.id == candidate.id && partial.sessionDeletion?.phase == .failed,
+                        "Partial or unconfirmed deletion must keep the session and offer no Force retry")
+                require(partial.items.count == (outcome.worktreeRemoved == true ? 1 : 2),
+                        "Remove only resources the backend confirmed were removed")
+            }
+            partial.close()
+        }
+        print("PASS: inline Close/Delete separation, safe preview cancellation, exact remote target, two-step Force, transport/partial errors, busy reopen, and row-only completion")
+    }
+
     @MainActor private static func textEditingChecks() {
         let editor = ShortcutEditor()
         editor.isEditable = true
@@ -260,6 +378,7 @@ struct NativeChecks {
             return
         }
         textEditingChecks()
+        try await sessionDeletionChecks()
         outsideClickChecks()
         try await pullRequestClipboardChecks()
         try await pullRequestChecks()
@@ -1323,9 +1442,12 @@ struct NativeChecks {
         model.askCloseSession()
         require(model.removalCandidate?.id == "session:x", "Close must confirm like removal")
         model.escape()
-        require(model.removalCandidate != nil, "Esc must not navigate behind the confirmation")
+        require(model.removalCandidate == nil && model.page == .directories,
+                "Esc must cancel inline Close without dismissing the picker")
+        model.askCloseSession()
         await backend.hold("sessions.close")
         model.confirmCloseSession(model.removalCandidate!)
+        require(!model.items.contains { $0.id == "session:x" }, "Close must hide the row immediately")
         try await pending("sessions.close", backend)
         let failedCloseParams = await backend.parameters("sessions.close")
         if case .text("session") = failedCloseParams["kind"],
@@ -1335,16 +1457,16 @@ struct NativeChecks {
         }
         await backend.fail("sessions.close")
         try await wait { !model.busy }
-        require(model.removalCandidate == nil && model.error != nil,
-                     "A failed close must surface the backend error without refreshing")
+        require(model.removalCandidate == nil && model.error != nil && model.selectedID == "session:x"
+                    && model.items.first?.id == "session:x",
+                     "A failed close must restore the row and surface the error without refreshing")
         model.askCloseSession()
         model.confirmCloseSession(model.removalCandidate!)
         try await pending("sessions.close", backend)
         await backend.reply("sessions.close", APIResult())
-        try await pending("sessions", backend)
-        await backend.reply("sessions", payload)
         try await wait { !model.busy && !model.refreshing }
-        require(model.items.count == 4 && model.error == nil, "A completed close must refresh the list")
+        require(model.items.count == 3 && model.error == nil && !model.loading,
+                "A completed close must keep the updated list without a reload")
 
         // Tab cycles only between Sessions and Agents now.
         require(!model.showsPills, "Internal view helpers must not imply a visible tab row")

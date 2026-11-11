@@ -51,10 +51,14 @@ Sessions come first (the current one marked), then directories by frequency. `En
 | `↑`/`↓`, `Ctrl+J`/`Ctrl+K` | Move through results |
 | `Ctrl+O` | Change where the item opens |
 | `Ctrl+R` | Rename the selected session; `Enter` saves, `Esc` cancels |
+| `Ctrl+X` | Close the selected session; keep its worktree and branch |
+| `Ctrl+Shift+X` | Delete the selected session, its worktree, and its local branch |
 | `Enter` | Switch or open |
 | `Ctrl+P`, then `H J K L` | Open in a pane split |
 | `⇧⌘P` | Open a pull request (or paste a PR URL) |
 | `Esc` | Clear filter, then dismiss |
+
+Close and Delete use inline confirmation: `Enter` confirms, `Esc` cancels. Delete shows the host, worktree path, and local branch before removal. Dirty worktrees or unmerged commits require a separate Force confirmation (`Ctrl+Shift+X`, then `Enter`); Force can discard files and commits. Primary worktrees and the picker’s origin session are protected. Remote Git branches are never changed.
 
 Optional bindings for your managed block: `cmd+p` → `raptor_session_last`, `shift+cmd+p` → `raptor_pr_open`.
 

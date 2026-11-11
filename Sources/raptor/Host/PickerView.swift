@@ -48,17 +48,6 @@ struct PickerView: View {
         } message: {
             Text(model.pullRequestCommitExplanation)
         }
-        .alert("Close session?", isPresented: Binding(
-            get: { model.removalCandidate != nil && model.view == .sessions && model.page == .directories },
-            set: { if !$0 { model.removalCandidate = nil } }
-        ), presenting: model.view == .sessions && model.page == .directories ? model.removalCandidate : nil) { candidate in
-            Button("Cancel", role: .cancel) { model.removalCandidate = nil }
-                .keyboardShortcut(.defaultAction)
-            Button("Close", role: .destructive) { model.confirmCloseSession(candidate) }
-                .accessibilityIdentifier("confirm-remove")
-        } message: { candidate in
-            Text("Close \(candidate.label ?? candidate.path)? Every pane in it closes.")
-        }
     }
 
     private var header: some View {
@@ -82,7 +71,7 @@ struct PickerView: View {
                         .font(.system(size: PickerStyle.rowFontSize))
                         .focused($field, equals: .search)
                         .task { await Task.yield(); field = .search }
-                        .disabled(model.busy || model.renameCandidate != nil)
+                        .disabled(model.busy || model.renameCandidate != nil || model.hasSessionAction)
                         .accessibilityLabel("Search \(model.heading.lowercased())")
                         .accessibilityIdentifier("picker-search")
                     if model.loading {
@@ -251,6 +240,14 @@ struct PickerView: View {
                     Text(item.label ?? item.path)
                         .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.sessionText)
                         .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                    if model.sessionCloseCandidate?.id == item.id {
+                        Spacer(minLength: 8)
+                        Text("Close?  ↵ Confirm · Esc Cancel")
+                            .font(.system(size: 10))
+                            .foregroundStyle(PickerStyle.selectionText.opacity(0.8))
+                            .fixedSize()
+                            .help("Close all panes. Keep the worktree and branch.")
+                    }
                 }
             } else if let branch = item.branch {
                 Text(branch + (item.isMain == true ? " · primary" : ""))
@@ -279,6 +276,7 @@ struct PickerView: View {
 
     private func rowHeight(_ item: PickerItem, isAgent: Bool, selected: Bool) -> CGFloat {
         if isAgent { return PickerStyle.agentRowHeight }
+        if model.sessionDeletion?.candidate.id == item.id { return PickerStyle.rowHeight + model.sessionDeletionDetailHeight }
         if model.page == .worktrees {
             return PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1)
         }
@@ -303,7 +301,9 @@ struct PickerView: View {
         }
         let active = item.active == true && !isAgent ? ", Active" : ""
         let activity = item.activityAccessibility.isEmpty ? "" : ", " + item.activityAccessibility
-        return primary + active + activity
+        let close = model.sessionCloseCandidate?.id == item.id
+            ? ", Close session? Return confirms. Escape cancels. Worktree and branch kept." : ""
+        return primary + active + activity + close
     }
 
     private func row(_ item: PickerItem, position: Int = 0) -> some View {
@@ -312,7 +312,18 @@ struct PickerView: View {
         let isSessionRow = model.view == .sessions && item.isSessionEntry
         let isLauncherDir = model.view == .sessions && item.kind == "dir"
         return HoverRow(selected: selected, enabled: true) {
-            rowContent(item, position: position, selected: selected, isAgent: isAgent, isSessionRow: isSessionRow, isLauncherDir: isLauncherDir)
+            if let deletion = model.sessionDeletion, deletion.candidate.id == item.id {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 10) {
+                        rowContent(item, position: position, selected: selected, isAgent: isAgent, isSessionRow: isSessionRow, isLauncherDir: isLauncherDir)
+                    }
+                    deletionDetails(deletion)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 8)
+            } else {
+                rowContent(item, position: position, selected: selected, isAgent: isAgent, isSessionRow: isSessionRow, isLauncherDir: isLauncherDir)
+            }
         }
         .font(.system(size: PickerStyle.rowFontSize, weight: selected ? .medium : .regular))
         .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
@@ -324,24 +335,83 @@ struct PickerView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            guard !model.busy, !model.loading, model.renameCandidate == nil else { return }
+            guard !model.busy, !model.loading, model.renameCandidate == nil, !model.hasSessionAction else { return }
             model.selectedID = item.id
             model.choose()
         }
         .onTapGesture {
-            guard !model.busy, !model.loading, model.renameCandidate == nil else { return }
+            guard !model.busy, !model.loading, model.renameCandidate == nil, !model.hasSessionAction else { return }
             model.selectedID = item.id
         }
         .help(rowHelp(item, isAgent: isAgent))
-        .accessibilityElement(children: model.renameCandidate?.id == item.id ? .contain : .ignore)
+        .accessibilityElement(children: model.renameCandidate?.id == item.id || model.sessionDeletion?.candidate.id == item.id ? .contain : .ignore)
         .accessibilityLabel(rowAccessibility(item, isAgent: isAgent, isSessionRow: isSessionRow))
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("path-row:\(item.path)")
         .accessibilityAction {
-            guard model.renameCandidate == nil else { return }
+            guard model.renameCandidate == nil, !model.hasSessionAction else { return }
             model.selectedID = item.id; model.choose()
         }
+        .accessibilityActions {
+            if model.sessionCloseCandidate?.id == item.id {
+                Button("Confirm close session") { model.confirmCloseSession(item) }
+                Button("Cancel close session") { model.escape() }
+            }
+            if let deletion = model.sessionDeletion, deletion.candidate.id == item.id {
+                if deletion.phase == .confirm || deletion.phase == .forceConfirm {
+                    Button(deletion.phase == .forceConfirm ? "Confirm force delete" : "Confirm delete session") {
+                        model.confirmDeleteSession()
+                    }
+                }
+                Button(model.busy ? "Hide deletion progress" : "Cancel delete session") { model.escape() }
+            }
+        }
+    }
+
+    private func deletionDetails(_ deletion: PickerModel.SessionDeletion) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let plan = deletion.plan {
+                Text("Close session · delete worktree + local branch · \(plan.branch ?? "")")
+                    .font(.system(size: 11, weight: .medium))
+                Text("\(deletion.candidate.host ?? "This Mac") · \(displayPath(plan.path ?? ""))")
+                    .font(.system(size: 10))
+                    .lineLimit(1).truncationMode(.middle)
+                    .help(plan.path ?? "")
+            }
+            if let error = deletion.error {
+                Text(error).font(.system(size: 11)).lineLimit(2)
+                    .help(error)
+                    .accessibilityIdentifier("delete-session-error")
+            }
+            HStack(spacing: 12) {
+                switch deletion.phase {
+                case .loading:
+                    Text("Checking worktree…")
+                case .confirm:
+                    Text("↵ Delete · Esc Cancel")
+                    Spacer()
+                    Text("Remote branches kept")
+                case .deleting:
+                    Text("Deleting…")
+                case .failed:
+                    Text("Esc Cancel")
+                case .forceOffered:
+                    Button("⌃⇧X Force delete…") { model.offerForceDeleteSession() }
+                        .accessibilityIdentifier("offer-force-delete-session")
+                    Text("Esc Cancel")
+                case .forceConfirm:
+                    Text("Discard uncommitted files and unmerged commits?")
+                        .fontWeight(.semibold)
+                    Text("↵ Force delete · Esc Cancel")
+                }
+            }
+            .font(.system(size: 10))
+            .buttonStyle(.plain)
+        }
+        .foregroundStyle(PickerStyle.selectionText.opacity(0.85))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("delete-session-details")
     }
 
     private var selectedWorktreePath: some View {
@@ -662,7 +732,7 @@ struct PickerView: View {
             }
             .frame(height: PickerStyle.footerHeight)
         }
-        .disabled(model.renameCandidate != nil)
+        .disabled(model.renameCandidate != nil || model.hasSessionAction)
         .font(.system(size: 11)).foregroundStyle(PickerStyle.foreground.opacity(0.65))
         .lineLimit(1)
         .buttonStyle(.plain)
@@ -684,8 +754,11 @@ struct PickerView: View {
                     .disabled(!model.canOpen)
                     .accessibilityIdentifier("rename-session")
                 Button("⌃X Close") { model.askCloseSession() }
-                    .disabled(model.busy || model.loading || model.selected?.kind != "session")
+                    .disabled(!model.canOpen)
                     .accessibilityIdentifier("remove-session")
+                Button("⌃⇧X Delete") { model.beginDeleteSession() }
+                    .disabled(!model.canOpen)
+                    .accessibilityIdentifier("delete-session")
             }
         }
         .font(.system(size: 10))

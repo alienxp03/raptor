@@ -365,6 +365,19 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return true
         }
         guard let panel, let model else { return false }
+        if let candidate = model.sessionCloseCandidate {
+            if event.keyCode == 53 { model.escape(); return true }
+            if event.keyCode == 36 || event.keyCode == 76 { model.confirmCloseSession(candidate); return true }
+            return true
+        }
+        if model.sessionDeletion != nil {
+            if event.keyCode == 53 { model.escape(); return true }
+            if event.keyCode == 36 || event.keyCode == 76 { model.confirmDeleteSession(); return true }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if flags.intersection([.control, .shift, .command, .option]) == [.control, .shift],
+               event.charactersIgnoringModifiers?.lowercased() == "x" { model.offerForceDeleteSession() }
+            return true
+        }
         if model.removalCandidate != nil {
             // The sheet owns its keys. Explicitly cancel Escape without letting
             // it navigate the picker beneath the confirmation.
@@ -440,7 +453,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if control && !command && !option && key == "x" {
             // askCloseSession only acts on a selected session row of the launcher.
-            model.askCloseSession(); return true
+            if shift { model.beginDeleteSession() } else { model.askCloseSession() }
+            return true
         }
         if control && !command && !option {
             switch key {

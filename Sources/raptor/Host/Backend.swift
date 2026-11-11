@@ -261,6 +261,11 @@ struct APIResult: Codable, Sendable {
     var windowID: String? = nil
     var blockID: String? = nil
     var error: String? = nil
+    var deleteToken: String? = nil
+    var forceAvailable: Bool? = nil
+    var worktreeRemoved: Bool? = nil
+    var branchRemoved: Bool? = nil
+    var sessionClosed: Bool? = nil
     var theme: ThemePayload? = nil
     enum CodingKeys: String, CodingKey {
         case items, hosts, targets, target, repo, branches, path, theme
@@ -270,6 +275,8 @@ struct APIResult: Codable, Sendable {
         case headDeleted = "head_deleted", headOID = "head_oid"
         case cloneRequired = "clone_required"
         case sessionID = "session_id", windowID = "window_id", blockID = "block_id"
+        case deleteToken = "delete_token", forceAvailable = "force_available"
+        case worktreeRemoved = "worktree_removed", branchRemoved = "branch_removed", sessionClosed = "session_closed"
         case destinationRoot = "destination_root"
         case suggestedBranch = "suggested_branch"
         case needsRepo = "needs_repo", baseBranch = "base_branch", validationError = "validation_error"
@@ -412,7 +419,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     static func timeoutSeconds(for method: String) -> Double {
         switch method {
         case "pullrequests.prepare": return 600
-        case "pullrequests.resolve", "pullrequests.open", "worktrees.create", "worktrees.remove", "dispatch": return 180
+        case "pullrequests.resolve", "pullrequests.open", "worktrees.create", "worktrees.remove", "sessions.delete", "dispatch": return 180
         default: return 30
         }
     }

@@ -70,7 +70,8 @@ extension Handler {
             }
             items = merged
         }
-        launcher = LauncherCacheEntry(timestamp: Date(), scanStarted: started, items: items, hosts: hosts)
+        launcher = filterDeleted(LauncherCacheEntry(timestamp: Date(), scanStarted: started, items: items, hosts: hosts))
+        items = launcher.items ?? []
         launcherLoaded = true
         launcherGeneration = generation
         writeLauncherCache(items, hosts)
@@ -263,7 +264,7 @@ extension Handler {
     func readLauncherCache() -> (LauncherCacheEntry, Bool) {
         cacheMu.lock()
         if launcherLoaded {
-            let entry = overlayLauncher(launcher)
+            let entry = filterDeleted(overlayLauncher(launcher))
             cacheMu.unlock()
             return (entry, true)
         }
@@ -277,8 +278,9 @@ extension Handler {
         cacheMu.lock()
         launcher = entry
         launcherLoaded = true
+        let filtered = filterDeleted(overlayLauncher(entry))
         cacheMu.unlock()
-        return (overlayLauncher(entry), true)
+        return (filtered, true)
     }
 
     /// writeLauncherCache replaces the cache atomically so a crashed write never

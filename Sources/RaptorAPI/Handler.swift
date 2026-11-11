@@ -47,6 +47,11 @@ public final class Handler {
     var validateFocus: ((CancelToken, Int) -> Bool)?
     var resolveFocus: ((String) -> (host: String, ok: Bool))?
     var recordFocus: ((String, String, Date, Bool) -> Void)?
+    var deleteTickets: [String: SessionDeletionTicket] = [:]
+    var deletionTombstones: [DeletionTombstone] = []
+    var loadDeletionSession: ((String, String) throws -> DeletionSessionState)?
+    var runDeletionCommand: ((String, String, String) -> DeletionCommand)?
+    var closeDeletedSession: ((String, String) throws -> Void)?
 
     public init(ctx: Ctx, cfg: RaptorConfig) {
         self.ctx = ctx
