@@ -108,3 +108,14 @@ final class RexconfigTests: XCTestCase {
         )
     }
 }
+
+func testStabilizeOptRewritesCellarPaths() {
+    XCTAssertEqual(Rexconfig.stabilizeOpt("/opt/homebrew/Cellar/raptor/HEAD-1234/share/raptor/init.lua"),
+                   "/opt/homebrew/opt/raptor/share/raptor/init.lua")
+    XCTAssertEqual(Rexconfig.stabilizeOpt("/opt/homebrew/Cellar/raptor/0.1.0/libexec/Raptor.app/Contents/Resources/rex/init.lua"),
+                   "/opt/homebrew/opt/raptor/libexec/Raptor.app/Contents/Resources/rex/init.lua")
+    XCTAssertEqual(Rexconfig.stabilizeOpt("/usr/local/Cellar/raptor/1.2.3/share/raptor/init.lua"),
+                   "/usr/local/opt/raptor/share/raptor/init.lua")
+    XCTAssertEqual(Rexconfig.stabilizeOpt("/Users/x/.local/bin/raptor"), "/Users/x/.local/bin/raptor")
+    XCTAssertEqual(Rexconfig.stabilizeOpt("/opt/homebrew/Cellar/raptor/"), "/opt/homebrew/Cellar/raptor/")
+}

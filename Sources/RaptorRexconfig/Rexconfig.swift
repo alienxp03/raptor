@@ -35,6 +35,16 @@ public enum Rexconfig {
     /// Locates the packaged init.lua for the running executable: Homebrew opt
     /// layouts, an app bundle's bundled plugin, or an installer-owned copy under
     /// the Rex config directory. Empty means "use plain require".
+    /// Rewrites …/Cellar/<name>/<version>/rest to …/opt/<name>/rest so wired
+    /// configs track Homebrew upgrades through the stable opt symlink.
+    static func stabilizeOpt(_ path: String) -> String {
+        guard let cellar = path.range(of: "/Cellar/") else { return path }
+        let tail = path[cellar.upperBound...]
+        let parts = tail.split(separator: "/", maxSplits: 2).map(String.init)
+        guard parts.count == 3, !parts[1].isEmpty else { return path }
+        return path[..<cellar.lowerBound] + "/opt/" + parts[0] + "/" + parts[2]
+    }
+
     public static func locatePlugin() -> String {
         if let executable = Bundle.main.executableURL?.path {
             var exe = executable
@@ -48,8 +58,8 @@ public enum Rexconfig {
             candidates.append(join(bundle, "Resources", "rex", "init.lua"))
             // macOS app next to a standalone CLI installation.
             candidates.append(join(bundle, "..", "..", "Resources", "rex", "init.lua"))
-            for candidate in candidates where isFile(clean(candidate)) {
-                return clean(candidate)
+            for candidate in candidates where isFile(clean(stabilizeOpt(candidate))) {
+                return clean(stabilizeOpt(candidate))
             }
         }
         let home = homeDir()
