@@ -1,6 +1,7 @@
 -- Discovery is setup-time, paired, upgrade-safe, and independent of Rex's PATH.
--- Routing is native-only: a client viewing this Mac gets the app; anything
--- else gets a clear error. No terminal layers, no ui option.
+-- Routing is native-only: a client viewing this Mac gets the bare host picker;
+-- anything else gets a clear error. No terminal layers, no app bundle, no ui
+-- option, no Launch Services fallback.
 local real_open, real_getenv, real_debug, real_searchpath = io.open, os.getenv, debug, package.searchpath
 local file = assert(real_open("init.lua", "r"))
 local source = file:read("*a")
@@ -51,7 +52,7 @@ local function check(case)
 	}
 	local plugin = assert(load(source, "@" .. (case.source or "/checkout/init.lua")))()
 	if case.unknown_option then
-		local ok, err = pcall(plugin.setup, { ui = "terminal" })
+		local ok, err = pcall(plugin.setup, case.unknown_option)
 		assert(not ok and tostring(err):find("unknown option", 1, true), case.name .. ": " .. tostring(err))
 		io.open, os.getenv, debug, package.searchpath = real_open, real_getenv, real_debug, real_searchpath
 		return
@@ -67,49 +68,32 @@ local function check(case)
 	if case.panel_bin then
 		assert(commands[1] and commands[1][1] == case.panel_bin and commands[1][8] == "panel", case.name .. ": IPC must be first and paired")
 	end
-	if case.open then
-		local command = commands[#commands]
-		assert(command[3] == case.open[1] and command[4] == case.open[2], case.name .. ": wrong app")
-		assert(command[5] == "raptor://picker?mode=dirs&session=S&block=B&client=C")
-		assert(#command == 5 and command[2] == "-g")
-	end
 	io.open, os.getenv, debug, package.searchpath = real_open, real_getenv, real_debug, real_searchpath
 end
 
 for _, prefix in ipairs({ "/opt/homebrew", "/usr/local", "/custom/homebrew" }) do
 	local root = prefix .. "/opt/raptor"
-	local bin, app = root .. "/bin/raptor", root .. "/libexec/Raptor.app"
-	local files = { [bin] = true, [app .. "/Contents/Info.plist"] = true }
+	local bin = root .. "/bin/raptor"
+	local files = { [bin] = true }
 	local env = prefix == "/custom/homebrew" and prefix or nil
 	check { name = prefix .. " IPC", prefix = env, files = files, ipc = true, commands = 1, panel_bin = bin }
-	check { name = prefix .. " paired launch", prefix = env, files = files, launch = true, commands = 2, panel_bin = bin, open = { "-a", app } }
-	check { name = prefix .. " launch failure", prefix = env, files = files, commands = 2, panel_bin = bin, open = { "-a", app }, error = "could not be launched" }
-	check { name = prefix .. " missing paired app", prefix = env, files = { [bin] = true }, commands = 1, panel_bin = bin, error = "could not be launched" }
-	check { name = prefix .. " iPhone client", prefix = env, files = files, platform = "ios", error = "requires the Raptor Mac app" }
-	check { name = prefix .. " remote Mac client", prefix = env, files = files, transport = "tls", error = "requires the Raptor Mac app" }
-	check { name = prefix .. " server CLI client", prefix = env, files = files, kind = "cli", error = "requires the Raptor Mac app" }
+	check { name = prefix .. " host missing still errors clearly", prefix = env, files = files, ipc = false, commands = 1, panel_bin = bin,
+		error = "the native picker could not be opened" }
+	check { name = prefix .. " iPhone client", prefix = env, files = files, platform = "ios", error = "requires the native picker" }
+	check { name = prefix .. " remote Mac client", prefix = env, files = files, transport = "tls", error = "requires the native picker" }
+	check { name = prefix .. " server CLI client", prefix = env, files = files, kind = "cli", error = "requires the native picker" }
 	-- Loaded module wins over env and standard prefixes, including resolved Cellar paths.
 	for _, location in ipairs({ root .. "/share/raptor/init.lua", prefix .. "/Cellar/raptor/1.2.3/share/raptor/init.lua" }) do
-		local competing = { ["/opt/homebrew/opt/raptor/bin/raptor"] = true, [bin] = true, [app .. "/Contents/Info.plist"] = true }
-		check { name = location, source = location, prefix = "/other/brew", files = competing, commands = 2, panel_bin = bin, launch = true, open = { "-a", app } }
+		local competing = { ["/opt/homebrew/opt/raptor/bin/raptor"] = true, [bin] = true }
+		check { name = location, source = location, prefix = "/other/brew", files = competing, commands = 1, panel_bin = bin, ipc = true }
 		check { name = location .. " restricted Lua", source = location, no_debug = true, files = competing, commands = 1, panel_bin = bin, ipc = true }
 	end
 end
-check { name = "missing module package cannot select another install", source = "/custom/opt/raptor/share/raptor/init.lua", files = { ["/opt/homebrew/opt/raptor/bin/raptor"] = true }, commands = 1, panel_bin = "/custom/opt/raptor/bin/raptor", error = "could not be launched" }
+check { name = "missing module package cannot select another install", source = "/custom/opt/raptor/share/raptor/init.lua", files = { ["/opt/homebrew/opt/raptor/bin/raptor"] = true }, commands = 1, panel_bin = "/custom/opt/raptor/bin/raptor", error = "could not be opened" }
 local standalone = home .. "/.local/bin/raptor"
-check { name = "relocated app via bundle ID", commands = 2, panel_bin = standalone, launch = true, open = { "-b", "com.alienxp03.raptor" } }
-check { name = "resident IPC before discovery", commands = 1, panel_bin = standalone, ipc = true }
-check { name = "missing app", commands = 2, panel_bin = standalone, nil_launch = true, error = "could not be launched" }
-check { name = "ui option removed", unknown_option = true }
-check { name = "explicit bin", files = { ["/opt/homebrew/opt/raptor/bin/raptor"] = true }, options = { bin = "/custom/cli" }, commands = 2, panel_bin = "/custom/cli", open = { "-b", "com.alienxp03.raptor" }, launch = true }
-local app = "/somewhere/Not The App Name.app"
-local app_files = { [app .. "/Contents/Info.plist"] = true, ["/opt/homebrew/opt/raptor/bin/raptor"] = true }
-check { name = "explicit app never uses unrelated package IPC", files = app_files, options = { app = app }, commands = 1, open = { "-a", app }, launch = true }
-app_files[app .. "/Contents/MacOS/raptor-cli"] = true
-check { name = "explicit app paired IPC", files = app_files, options = { app = app }, commands = 1, panel_bin = app .. "/Contents/MacOS/raptor-cli", ipc = true }
-check { name = "explicit app paired fallback", files = app_files, options = { app = app }, commands = 2, panel_bin = app .. "/Contents/MacOS/raptor-cli", open = { "-a", app }, launch = true }
-check { name = "explicit bin and app", files = app_files, options = { bin = "/custom/cli", app = app }, commands = 2, panel_bin = "/custom/cli", open = { "-a", app }, launch = true }
-check { name = "missing explicit app never launches another app", options = { app = app }, bin = standalone, error = "could not be launched" }
-check { name = "failed explicit app never launches another app", files = { [app .. "/Contents/Info.plist"] = true }, options = { app = app }, commands = 1, open = { "-a", app }, error = "could not be launched" }
-check { name = "empty explicit app disables app fallback", options = { app = "" }, bin = standalone, error = "could not be launched" }
-print("Homebrew routing: passed (paired stable opt, module-relative/custom prefix, overrides, IPC, bundle ID, native-only routing, failures)")
+check { name = "standalone CLI IPC spawns the host on demand", commands = 1, panel_bin = standalone, ipc = true }
+check { name = "standalone CLI host failure errors clearly", commands = 1, panel_bin = standalone, ipc = false, error = "could not be opened" }
+check { name = "app option removed", unknown_option = { app = "/somewhere/Raptor.app" } }
+check { name = "ui option removed", unknown_option = { ui = "terminal" } }
+check { name = "explicit bin", files = { ["/opt/homebrew/opt/raptor/bin/raptor"] = true }, options = { bin = "/custom/cli" }, commands = 1, panel_bin = "/custom/cli", ipc = true }
+print("Homebrew routing: passed (stable opt, module-relative/custom prefix, standalone CLI, overrides, IPC, native-only routing, removed options)")

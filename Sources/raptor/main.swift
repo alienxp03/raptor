@@ -7,7 +7,6 @@ import RaptorPaths
 import RaptorPullrequest
 import RaptorRex
 import RaptorRexconfig
-import RaptorService
 import RaptorTask
 
 // Go's flag package, subset: -flag value / -flag=value / bool -flag.
@@ -201,6 +200,11 @@ case "init":
     } catch {
         fail(String(describing: error))
     }
+case "serve":
+    // Resident panel host: owns the NSPanel and the backend child. Spawned
+    // detached by the panel client when the socket is missing; under Rex's
+    // process chain so file-access grants are inherited.
+    MainActor.assumeIsolated { HostMain.run() }
 case "panel":
     let (values, _, _) = Flags.parse(sub, valueFlags: ["mode", "repo"])
     let req = RaptorPanel.Request(
@@ -216,33 +220,7 @@ case "panel":
         try Panel.open(req)
     } catch let e as UnavailableError {
         FileHandle.standardError.write(Data((String(describing: e) + "\n").utf8))
-        exit(3) // Callers fall back to launching the app.
-    } catch {
-        fail(String(describing: error))
-    }
-case "service":
-    let (values, bools, positional) = Flags.parse(sub, valueFlags: ["app", "config"], boolFlags: ["debug", "yes"], continuePastPositional: true)
-    let app = values["app"] ?? ""
-    let command2 = positional.first ?? ""
-    do {
-        switch command2 {
-        case "install":
-            try Service.install(appPath: app)
-        case "uninstall":
-            try Service.uninstall()
-        case "start":
-            try Service.start()
-        case "stop":
-            try Service.stop()
-        case "restart":
-            try? Service.stop()
-            try Service.start()
-        case "status":
-            out(Service.status() ? "running" : "stopped")
-        default:
-            FileHandle.standardError.write(Data(("usage: raptor service install|uninstall|start|stop|restart|status [--app Raptor.app]\n").utf8))
-            exit(2)
-        }
+        exit(3) // Callers surface the error; there is no app fallback.
     } catch {
         fail(String(describing: error))
     }
@@ -255,6 +233,6 @@ case "last", "last-session":
 case "version":
     out(raptorVersion)
 default:
-    FileHandle.standardError.write(Data(("usage: raptor [context flags] <init|task|setup|api|direct|last-session|panel|service> [command flags]\n").utf8))
+    FileHandle.standardError.write(Data(("usage: raptor [context flags] <init|task|setup|api|direct|last-session|panel|serve> [command flags]\n").utf8))
     exit(2)
 }

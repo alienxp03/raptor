@@ -16,8 +16,11 @@ func overlayLauncher(_ entry: LauncherCacheEntry) -> LauncherCacheEntry {
     for s in Launcherupdate.since(Rex.zeroTime) {
         // A scan that started before (or at the same instant as) the creation
         // cannot know about it; only a strictly later completed scan is
-        // authoritative. Clocks tie, so equality merges — bounded by TTL.
-        if !failed.contains(s.host) && s.created < entry.scanStarted {
+        // authoritative. Clocks tie, so equality merges — and the record's
+        // timestamp is millisecond-precision while the cache keeps full
+        // precision, so a creation recorded within the same millisecond as
+        // the scan start must merge too: grant one millisecond of grace.
+        if !failed.contains(s.host) && s.created < entry.scanStarted - 0.001 {
             continue
         }
         var found = false

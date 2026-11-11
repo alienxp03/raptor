@@ -13,30 +13,36 @@ sdk=$(xcrun --sdk macosx --show-sdk-path)
 export CLANG_MODULE_CACHE_PATH="$work/clang-cache"
 export SWIFT_MODULECACHE_PATH="$work/swift-cache"
 common=(-swift-version 6 -warnings-as-errors -parse-as-library -sdk "$sdk" -target "$arch-apple-macosx14.0")
-app="$work/Fixture.app"
-mkdir -p "$app/Contents/MacOS"
+host_sources=("$SCRIPT_ROOT"/Sources/raptor/Host/*.swift)
+[[ -f ${host_sources[0]} ]] || fail 'Host sources are not ready: Sources/raptor/Host/*.swift'
+# Native checks run against the bare host sources; the resh model has no app
+# bundle, so the fixture is a plain directory holding the check binary and a
+# fake backend child where the old fixture used an .app bundle.
+fixture="$work/Fixture"
+mkdir -p "$fixture"
 xcrun swiftc "${common[@]}" -framework SwiftUI -framework AppKit \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/Backend.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/DemoBackend.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/PickerModel.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/FocusFileWatcher.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/RexFocusTracker.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/Backend.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/DemoBackend.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/PickerModel.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/FocusFileWatcher.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/RexFocusTracker.swift" \
   "$SCRIPT_ROOT/macos/Tests/RexFocusChecks.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/PathDisplay.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/PickerStyle.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/RexTheme.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/TextEditingShortcuts.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/OutsideClickMonitor.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/PathDisplay.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/PickerStyle.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/RexTheme.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/TextEditingShortcuts.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/OutsideClickMonitor.swift" \
   "$SCRIPT_ROOT/macos/Tests/NativeChecks.swift" \
-  -o "$app/Contents/MacOS/NativeChecks"
-xcrun swiftc "${common[@]}" "$SCRIPT_ROOT/macos/Tests/TransportFixture.swift" \
-  -o "$app/Contents/MacOS/raptor-cli"
-"$app/Contents/MacOS/NativeChecks" --transport-fixture
+  -o "$fixture/NativeChecks"
+xcrun swiftc "${common[@]}" \
+  "$SCRIPT_ROOT/macos/Tests/TransportFixture.swift" \
+  -o "$fixture/raptor"
+"$fixture/NativeChecks" --transport-fixture
 # Exercise the real Swift response envelope through ProcessBackend, not a mock.
 (cd "$SCRIPT_ROOT" && swift build -c release --product raptor --scratch-path "$work/spm" \
-  && rm -f "$app/Contents/MacOS/raptor-cli" \
+  && rm -f "$fixture/raptor" \
   && cp "$(swift build -c release --product raptor --scratch-path "$work/spm" --show-bin-path)/raptor" \
-  "$app/Contents/MacOS/raptor-cli")
+    "$fixture/raptor")
 theme_app="$work/Rex.app"
 theme_resources="$theme_app/Contents/Resources/SuperUI_SuperDesignTokens.bundle/Contents/Resources"
 mkdir -p "$theme_resources" "$work/theme-bin"
@@ -66,19 +72,13 @@ cat > "$theme_resources/themes.json" <<'JSON'
 }}]
 JSON
 PATH="$work/theme-bin:$PATH" RAPTOR_REX_APP="$theme_app" RAPTOR_THEME= \
-  "$app/Contents/MacOS/NativeChecks" --theme-integration
+  "$fixture/NativeChecks" --theme-integration
 xcrun swiftc "${common[@]}" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/Backend.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/PickerRequest.swift" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/RexTheme.swift" \
-  "$SCRIPT_ROOT/macos/Tests/PickerRequestChecks.swift" \
-  -o "$work/PickerRequestChecks"
-"$work/PickerRequestChecks"
-xcrun swiftc "${common[@]}" \
-  "$SCRIPT_ROOT/macos/Sources/Raptor/PathDisplay.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/PathDisplay.swift" \
   "$SCRIPT_ROOT/macos/Tests/PathDisplayChecks.swift" \
   -o "$work/PathDisplayChecks"
 "$work/PathDisplayChecks"
 # Also type-check the real panel and keyboard integration in Swift 6 mode.
 xcrun swiftc "${common[@]}" -typecheck -framework SwiftUI -framework AppKit \
-  "$SCRIPT_ROOT"/macos/Sources/Raptor/*.swift
+  "$SCRIPT_ROOT"/Sources/raptor/Host/*.swift
+printf 'Native checks passed.\n'

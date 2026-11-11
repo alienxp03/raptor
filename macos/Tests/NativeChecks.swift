@@ -252,7 +252,9 @@ struct NativeChecks {
         require(options.backendArguments == ["--session", "S", "--block", "B", "--client", "C", "--title", "A title", "api"])
         let sessionsMode = try LaunchOptions(arguments: ["--mode", "sessions", "--session", "S", "--block", "B", "--client", "C"])
         require(sessionsMode.mode == "sessions")
-        require(sessionsMode.backendArguments == ["--session", "S", "--block", "B", "--client", "C", "--title", "", "api"])
+        // Empty context values are omitted: flag parsing stops at the first
+        // non-flag argument, and an empty string is non-flag.
+        require(sessionsMode.backendArguments == ["--session", "S", "--block", "B", "--client", "C", "api"])
         let sessionsPanel = try LaunchOptions(panelRequest: PanelRequest(mode: "sessions", session: "S", block: "B", client: "C"))
         require(sessionsMode.matches(sessionsPanel), "The panel variant must route Sessions like the flag form")
         do {
@@ -493,9 +495,9 @@ struct NativeChecks {
             require(model.view == .sessions && model.page == .directories && !model.showsPills)
             model.close()
         }
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let view = try String(contentsOf: root.appendingPathComponent("Sources/Raptor/PickerView.swift"), encoding: .utf8)
-        let app = try String(contentsOf: root.appendingPathComponent("Sources/Raptor/RaptorApp.swift"), encoding: .utf8)
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let view = try String(contentsOf: root.appendingPathComponent("Sources/raptor/Host/PickerView.swift"), encoding: .utf8)
+        let app = try String(contentsOf: root.appendingPathComponent("Sources/raptor/Host/RaptorApp.swift"), encoding: .utf8)
         for removed in ["view-pills", "pill-agents", "pill-sessions", "show-worktrees", "remove-worktree", "confirmRemove("] {
             require(!view.contains(removed), "Removed native UI: \(removed)")
         }

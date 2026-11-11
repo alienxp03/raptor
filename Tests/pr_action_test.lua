@@ -1,13 +1,14 @@
 -- PR opening is native-only by design; with the terminal picker removed the
--- whole action errors outside a local Mac app client.
+-- whole action errors outside a local Mac client. The bare host spawns on
+-- demand from the panel client, so a missing host still opens natively.
 local real_open = io.open
 io.open = function() return nil end
 for _, case in ipairs({
  { platform = "macos", transport = "unix", available = true, native = true },
- { platform = "macos", transport = "unix", available = false, error = "native Mac app" },
- { platform = "ios", transport = "tls", available = true, error = "requires the Raptor Mac app" },
- { platform = "macos", transport = "tls", available = true, error = "requires the Raptor Mac app" },
- { platform = "macos", transport = "unix", available = true, kind = "cli", error = "requires the Raptor Mac app" },
+ { platform = "macos", transport = "unix", available = false, error = "Opening a pull request requires the native picker" },
+ { platform = "ios", transport = "tls", available = true, error = "requires the native picker" },
+ { platform = "macos", transport = "tls", available = true, error = "requires the native picker" },
+ { platform = "macos", transport = "unix", available = true, kind = "cli", error = "requires the native picker" },
 }) do
  local actions, commands = {}, {}
  rex = {

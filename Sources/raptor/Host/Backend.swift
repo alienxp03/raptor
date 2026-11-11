@@ -36,7 +36,18 @@ struct LaunchOptions: Sendable {
     }
 
     var backendArguments: [String] {
-        ["--session", session, "--block", block, "--client", client, "--title", title, "api"]
+        // Empty context values must be omitted, not passed as empty strings:
+        // flag parsing stops at the first non-flag argument, and an empty
+        // string is non-flag. A warmup spawn with all-empty context would
+        // otherwise exit before reaching api mode and read as a closed
+        // backend on the first query.
+        var arguments: [String] = []
+        for (flag, value) in [("--session", session), ("--block", block),
+                              ("--client", client), ("--title", title)] {
+            if !value.isEmpty { arguments += [flag, value] }
+        }
+        arguments.append("api")
+        return arguments
     }
 
     /// Resident opens compare the full origin context: a repeated ⌘S with the
@@ -293,6 +304,14 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     private var nextID = 0 // I/O queue only
     private var input: FileHandle? // I/O queue only
     private var output: FileHandle? // I/O queue only
+    // The Pipe objects must outlive the handles: Foundation closes both pipe
+    // fds when the Pipe deallocates, even if a fileHandleForWriting reference
+    // is still alive. Losing the write end sends the child stdin EOF and it
+    // exits after its first request, which reads as a closed backend.
+    private var stdinPipe: Pipe?
+    private var stdoutPipe: Pipe?
+    private var repliedOnce = false
+    private var wroteOnce = false
 
     init(options: LaunchOptions) { self.options = options }
 
@@ -320,15 +339,21 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     private func startIfNeeded() throws {
         lock.lock()
         defer { lock.unlock() }
-        guard !closed else { throw APIError.message("Backend connection is closed. Close and reopen Raptor.") }
+        guard !closed else { throw APIError.message("Backend connection is closed. Close and reopen the picker.") }
         if process != nil { return }
-        let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/raptor-cli")
+        // The backend is this same binary in api mode, sitting next to the
+        // host. No bundle, no app: the resh model keeps one executable that
+        // serves, hosts the panel, and answers the wire protocol.
+        let selfPath = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let executable = selfPath.deletingLastPathComponent().appendingPathComponent("raptor")
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            throw APIError.message("Bundled backend is missing: \(executable.path)")
+            throw APIError.message("Backend binary is missing: \(executable.path)")
         }
         let child = Process()
         let stdin = Pipe()
         let stdout = Pipe()
+        stdinPipe = stdin
+        stdoutPipe = stdout
         child.executableURL = executable
         child.arguments = options.backendArguments
         child.standardInput = stdin
@@ -389,6 +414,42 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
 
     private func exchange(_ method: String, params: [String: APIValue], read: QueuedRead? = nil) throws -> APIResult {
         struct Request: Encodable { let id: Int; let method: String; let params: [String: APIValue] }
+        do {
+            return try exchangeOnce(method, params: params, read: read)
+        } catch let error as APIError {
+            // A child killed at spawn (a race with orphan adoption when the
+            // panel CLI detaches) must not poison the backend for the life of
+            // the host. Respawn once and resend — but only when the child
+            // never received nor answered anything: a designed exit (PR
+            // recovery hands the worktree to Rex and closes) and a protocol
+            // violation (which must close the connection) both happen after
+            // real traffic and keep their established semantics.
+            lock.lock()
+            let diedAtBirth = process != nil && connectionFailure != nil
+                && !repliedOnce && !wroteOnce
+            lock.unlock()
+            guard diedAtBirth else { throw error }
+            fputs("raptor: backend child died before its first reply; respawning once\n", stderr)
+            lock.lock()
+            let child = process
+            closed = true
+            lock.unlock()
+            stop(child, input: input)
+            lock.lock()
+            closed = false
+            process = nil
+            reply = nil
+            connectionFailure = nil
+            activeID = nil
+            repliedOnce = false
+            wroteOnce = false
+            lock.unlock()
+            return try exchangeOnce(method, params: params, read: nil)
+        }
+    }
+
+    private func exchangeOnce(_ method: String, params: [String: APIValue], read: QueuedRead? = nil) throws -> APIResult {
+        struct Request: Encodable { let id: Int; let method: String; let params: [String: APIValue] }
         try startIfNeeded()
         // Process launch can take time. Recheck before reserving a wire ID.
         try read?.claim()
@@ -418,6 +479,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
             }
             try writer?.write(contentsOf: data)
             lock.lock()
+            wroteOnce = true
             while reply == nil && !closed { lock.wait() }
             let received = reply
             let failure = connectionFailure
@@ -484,6 +546,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
                         }
                         if let error = message.error { reply = .failure(APIError.message(error)) }
                         else { reply = .success(message.result!) }
+                        repliedOnce = true
                         lock.broadcast()
                         lock.unlock()
                     }
@@ -548,6 +611,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         // EOF lets Go run deferred watcher cleanup before escalation. Its
         // SIGTERM handler also cancels subscriptions during a blocked request.
         try? input?.close()
+        lock.lock(); stdinPipe = nil; stdoutPipe = nil; lock.unlock()
         if let child, child.isRunning {
             DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
                 guard child.isRunning else { return }

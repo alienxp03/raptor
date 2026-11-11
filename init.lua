@@ -1,5 +1,6 @@
--- Raptor Rex plugin. The picker renders in the native Mac app; keep key
--- bindings in the user's init.lua.
+-- Raptor Rex plugin. The picker renders in a bare native host process
+-- spawned under Rex (the resh model); keep key bindings in the user's
+-- init.lua.
 --
 --   require("raptor").setup{}
 --   rex.bind("shift+cmd+o", "raptor")
@@ -33,9 +34,8 @@ end
 
 function M.setup(options)
 	options = options or {}
-	-- Prefer this plugin's package over another Homebrew installation. Never
-	-- mix its CLI/app with a different prefix, even if its CLI is missing.
-	local brew_bin, brew_app
+	-- Prefer this plugin's package over another Homebrew installation.
+	local brew_bin
 	local roots = module_root and { module_root } or {}
 	if not module_root then
 		for _, prefix in ipairs({ os.getenv("HOMEBREW_PREFIX") or "", "/opt/homebrew", "/usr/local" }) do
@@ -45,14 +45,16 @@ function M.setup(options)
 	for _, root in ipairs(roots) do
 		local bin = root .. "/bin/raptor"
 		if module_root or exists(bin) then
-			brew_bin, brew_app = bin, root .. "/libexec/Raptor.app"
+			brew_bin = bin
 			break
 		end
 	end
 	local cfg = {
 		bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
 		bin = brew_bin or (os.getenv("HOME") .. "/.local/bin/raptor"),
-		app = brew_app or "", -- Explicit options override automatic package discovery.
+		-- Legacy options from the app era: accepted so existing configs keep
+		-- loading, and ignored — the bare host positions its own panel.
+		mobile_bounds = { x = 0.08, y = 0.15, w = 0.84, h = 0.60 },
 	}
 	for key, value in pairs(options) do
 		if cfg[key] == nil then
@@ -60,18 +62,7 @@ function M.setup(options)
 		end
 		cfg[key] = value
 	end
-
-	-- A CLI override must not silently launch a different package's app.
-	if options.bin ~= nil and options.app == nil and options.bin ~= brew_bin then
-		cfg.app = ""
-	end
-	-- An app override is authoritative. Prefer its own backend over the
-	-- discovered package's IPC client; explicit bin+app remains an escape hatch.
 	local panel_bin = cfg.bin
-	if options.app ~= nil and options.bin == nil then
-		local bundled_bin = cfg.app .. "/Contents/MacOS/raptor-cli"
-		panel_bin = cfg.app ~= "" and exists(bundled_bin) and bundled_bin or nil
-	end
 
 	local function client_platform(ctx)
 		if ctx.client_id == nil then
@@ -109,23 +100,6 @@ function M.setup(options)
 		return args
 	end
 
-	local function picker_url(ctx, mode)
-		local function encode(value)
-			return (
-				value:gsub("[^A-Za-z0-9%-%._~]", function(byte)
-					return string.format("%%%02X", string.byte(byte))
-				end)
-			)
-		end
-		local parts = { "mode=" .. encode(mode) }
-		for _, pair in ipairs({ { "session", ctx.session_id }, { "block", ctx.block_id }, { "client", ctx.client_id } }) do
-			if pair[2] ~= nil and pair[2] ~= "" then
-				table.insert(parts, pair[1] .. "=" .. encode(pair[2]))
-			end
-		end
-		return "raptor://picker?" .. table.concat(parts, "&")
-	end
-
 	local function resolve_context(ctx)
 		-- Function key bindings can omit client_id. The origin terminal's
 		-- owner is the client controlling its input/size, not a random viewer.
@@ -144,16 +118,17 @@ function M.setup(options)
 
 	local function show_picker(ctx, mode)
 		ctx = resolve_context(ctx)
-		-- The native picker renders in Raptor.app, which only a client viewing
-		-- this Mac can show. CLI clients may serve remote viewers, so their
-		-- platform/transport alone is not proof.
+		-- The native picker renders in the bare host process, which only a
+		-- client viewing this Mac can show. CLI clients may serve remote
+		-- viewers, so their platform/transport alone is not proof.
 		local platform, local_client = client_platform(ctx)
 		if platform ~= "macos" or not local_client then
-			error("raptor: requires the Raptor Mac app on this Mac", 0)
+			error("raptor: requires the native picker on this Mac", 0)
 		end
-		-- Fast path: the resident panel host answers over a local socket.
-		-- No process spawn, no app activation, no flicker. Failure falls
-		-- back to Launch Services, which starts the host when installed.
+		-- The resident panel host answers over a local socket. When the host
+		-- is missing, the panel client spawns it detached under this process
+		-- chain, so its fd scan inherits Rex's file-access grants. No app,
+		-- no Launch Services, no TCC prompts.
 		local panel_args = { panel_bin or cfg.bin }
 		for _, pair in ipairs({
 			{ "-session", ctx.session_id },
@@ -173,26 +148,11 @@ function M.setup(options)
 		if panel_result ~= nil and panel_result.ok then
 			return { ui = "native" }
 		end
-		-- Do not use -n: reuse the resident host and deliver fresh context.
-		-- Explicit/package paths stay authoritative (including launch failure).
-		-- Only unpaired discovery uses the bundle ID, so relocated dev apps
-		-- work without guessing a name, scanning disks, or invoking brew.
-		local cmd
-		if cfg.app ~= "" then
-			if exists(cfg.app .. "/Contents/Info.plist") then
-				cmd = { "/usr/bin/open", "-g", "-a", cfg.app, picker_url(ctx, mode) }
-			end
-		elseif options.app == nil then
-			cmd = { "/usr/bin/open", "-g", "-b", "com.alienxp03.raptor", picker_url(ctx, mode) }
-		end
-		local result = cmd and rex.exec(cmd, { timeout = 5 })
-		if result ~= nil and result.ok then
-			return { ui = "native" }
-		end
 		if mode == "pr" then
-			error("raptor: Open pull request requires the native Mac app", 0)
+			error("raptor: Opening a pull request requires the native picker", 0)
 		end
-		error("raptor: Raptor.app was not found or could not be launched", 0)
+		error("raptor: the native picker could not be opened; run "
+			.. (panel_bin or cfg.bin) .. " serve and try again", 0)
 	end
 
 	rex.action({
@@ -230,7 +190,7 @@ function M.setup(options)
 	rex.action({
 		name = "raptor_worktree_new",
 		title = "Raptor: Create Worktree",
-		description = "Open the create-worktree form for the origin pane's repository in the Mac app.",
+		description = "Open the create-worktree form for the origin pane's repository in the native picker.",
 		category = "Navigate",
 		run = function(ctx)
 			if ctx.session_id == nil then
@@ -243,7 +203,7 @@ function M.setup(options)
 	rex.action({
 		name = "raptor_pr_open",
 		title = "Raptor: Open Pull Request",
-		description = "Open a GitHub pull request in a Worktrunk worktree. Mac app only.",
+		description = "Open a GitHub pull request in a Worktrunk worktree. Native picker only.",
 		category = "Navigate",
 		keywords = "github pull request pr worktree",
 		run = function(ctx)

@@ -1,11 +1,11 @@
 import Foundation
 import RaptorPaths
-import RaptorService
 
 /// The client side of the resident host IPC. One short-lived connection per
-/// open: write a request, read a reply, close. The host lives in the Raptor
-/// app (serve mode) and keeps the panel plus backend pre-created. Ported from
-/// internal/panel.
+/// open: write a request, read a reply, close. The host is this same binary
+/// running `serve` — a bare, resident AppKit process spawned under Rex's
+/// process chain so the fd scan inherits Rex's file-access grants. Ported
+/// from internal/panel.
 
 /// Request opens (or toggles) the panel. Empty fields keep their defaults.
 public struct Request: Codable {
@@ -105,6 +105,25 @@ public struct UnavailableError: Error, CustomStringConvertible {
 public enum Panel {
     public static let errUnavailable = UnavailableError()
 
+    /// Spawns the resident host when no socket answers. The child detaches by
+    /// orphaning: this process exits right after, launchd adopts the host, and
+    /// the audit trail still leads back through the Rex-spawned caller, which
+    /// is what keeps TCC grants inherited instead of re-prompted.
+    static func spawnServe() throws {
+        let selfPath = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        let executable = selfPath.deletingLastPathComponent().appendingPathComponent("raptor")
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw UnavailableError(message: "host binary is missing: \(executable.path)")
+        }
+        let child = Process()
+        child.executableURL = executable
+        child.arguments = ["serve"]
+        child.standardInput = FileHandle.nullDevice
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        try child.run()
+    }
+
     /// Sends one request and reads one reply.
     public static func call(_ req: Request) throws -> Reply {
         var req = req
@@ -148,7 +167,7 @@ public enum Panel {
         }
         if err is UnavailableError {
             do {
-                try Service.kickstart()
+                try spawnServe()
             } catch {
                 throw errUnavailable
             }

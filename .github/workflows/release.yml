@@ -39,7 +39,7 @@ jobs:
       - name: Package universal app
         run: |
           scripts/package-macos.sh --universal
-          dist/Raptor.app/Contents/MacOS/raptor-cli version
+          dist/raptor version
           ruby scripts/release-formula.rb "$VERSION" dist > dist/raptor.rb
           ruby -c dist/raptor.rb
       - uses: actions/upload-artifact@v4

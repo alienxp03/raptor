@@ -1,6 +1,6 @@
 # Resh Model — dropping the .app
 
-Decision record and migration plan. Status: **decided, not started**.
+Decision record and migration plan. Status: **implemented** — the host lives in the raptor binary (`raptor serve`), the app bundle, LaunchAgent, and `raptor service` are deleted, and the plugin spawns nothing: the panel client spawns the host on demand under Rex's process chain.
 
 ## Problem
 

@@ -4,8 +4,10 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 mkdir -p "$root/aux"
 work=$(mktemp -d "$root/aux/release-tests.XXXXXX")
 trap 'rm -rf "$work"' EXIT
-# Fixture bytes test hashing only; the release job builds the real signed ZIP.
-printf 'release fixture\n' > "$work/Raptor-1.2.3-universal.zip"
+# Fixture bytes test hashing only; the release job builds the real archive.
+# The resh-model payload is the bare binary plus the Rex plugin.
+printf 'release fixture\n' > "$work/raptor-1.2.3-universal.zip"
+printf 'plugin\n' > "$work/init.lua"
 ruby "$root/scripts/release-formula.rb" 1.2.3 "$work" > "$work/raptor.rb"
 ruby -c "$work/raptor.rb"
 checksum=$(shasum -a 256 "$work/Raptor-1.2.3-universal.zip" | awk '{print $1}')
@@ -13,16 +15,14 @@ grep -Fq "sha256 \"$checksum\"" "$work/raptor.rb"
 grep -Fq 'releases/download/v1.2.3/Raptor-1.2.3-universal.zip' "$work/raptor.rb"
 grep -Fq 'version "1.2.3"' "$work/raptor.rb"
 grep -Fq 'head "https://github.com/alienxp03/raptor.git"' "$work/raptor.rb"
-for dependency in zoxide worktrunk gh; do
+for dependency in zoxide fd worktrunk gh; do
   grep -Fq "depends_on \"$dependency\"" "$work/raptor.rb"
 done
-# Both stable and HEAD formulas keep the app, backend and plugin together.
-# The stable branch preserves the sealed bundle: app installed via variable,
-# plugin copied out with cp -p because Homebrew install helpers move files.
-grep -Fq 'libexec.install app' "$work/raptor.rb"
-grep -Fq 'bin.install_symlink libexec/"Raptor.app/Contents/MacOS/raptor-cli" => "raptor"' "$work/raptor.rb"
-grep -Fq 'system "cp", "-p", buildpath/"init.lua", pkgshare/"init.lua"' "$work/raptor.rb"
+# The resh-model formula installs the bare binary and the Rex plugin.
+grep -Fq 'bin.install buildpath/"raptor"' "$work/raptor.rb"
+grep -Fq 'pkgshare.install buildpath/"init.lua"' "$work/raptor.rb"
 grep -Fq 'license "MIT"' "$work/raptor.rb"
+grep -Fq 'depends_on "fd"' "$work/raptor.rb"
 grep -Fq 'raptor init' "$work/raptor.rb"
 grep -Fq 'rex config reload' "$work/raptor.rb"
 ! grep -Fq 'package.path' "$work/raptor.rb"

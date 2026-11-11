@@ -7,7 +7,11 @@ import Darwin
 struct TransportFixture {
     static func main() throws {
         let expected = ["--session", "S", "--block", "B", "--client", "C", "--title", "A title", "api"]
-        guard Array(CommandLine.arguments.dropFirst()) == expected else { exit(3) }
+        if Array(CommandLine.arguments.dropFirst()) != expected {
+            FileHandle.standardError.write(Data("FIXTURE argv mismatch: \(CommandLine.arguments)\n".utf8))
+            exit(3)
+        }
+        FileManager.default.createFile(atPath: "/tmp/fixture-started", contents: Data("yes".utf8))
         var requests: [String] = []
         while let line = readLine() {
             guard let request = try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],

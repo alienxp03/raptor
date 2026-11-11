@@ -4,7 +4,7 @@ import Combine
 import CoreGraphics
 
 @MainActor
-final class RaptorPanel: NSPanel {
+final class PickerPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
@@ -16,28 +16,21 @@ final class RaptorPanel: NSPanel {
 
 @MainActor
 final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    private var panel: RaptorPanel?
+    private var panel: PickerPanel?
     private var model: PickerModel?
     private var keyboardMonitor: Any?
     private let outsideClickMonitor = OutsideClickMonitor()
     private var sizeSubscription: AnyCancellable?
     private var themeTimer: Timer?
-    private var reopenTask: DispatchWorkItem?
     private var ready = false
-    private var pendingOptions: LaunchOptions?
-    // Resident mode ("Raptor serve", launched by launchd): the panel and the
-    // Go backend stay alive across opens, so opening never spawns a process
-    // and never activates the app.
-    private var resident = false
+    // The resident host: the panel and the backend child stay alive across
+    // opens, so opening never spawns a process and never activates an app.
+    // Spawned under Rex's process chain (plugin → panel → serve), so the fd
+    // scan inherits Rex's file-access grants instead of facing TCC alone.
     private var panelHost: PanelHost?
     private var focusTracker: RexFocusTracker?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        var arguments = Array(CommandLine.arguments.dropFirst())
-        if arguments.first == "serve" {
-            arguments.removeFirst()
-            resident = true
-        }
         installKeyboardMonitor()
         let tracker = RexFocusTracker { [weak self] observation in
             guard let model = self?.model else { return false }
@@ -46,22 +39,11 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         focusTracker = tracker
         tracker.start()
         ready = true
-        if resident {
-            startResident()
-        } else if arguments.count > 0 {
-            pendingOptions = nil
-            do { present(try LaunchOptions(arguments: arguments)) }
-            catch { report(error) }
-        } else if let pendingOptions {
-            self.pendingOptions = nil
-            present(pendingOptions)
-        }
-        // URL launches arrive through application(_:open:). Do not first show a
-        // picker with empty or stale context while waiting for that Apple event.
+        startResident()
     }
 
     private func startResident() {
-        // Pre-create the panel and model so the first ⌘S only has to show a
+        // Pre-create the panel and model so the first open only has to show a
         // window; the backend child starts with the model.
         guard let options = try? LaunchOptions(arguments: []) else {
             fatalError("LaunchOptions must accept empty arguments")
@@ -75,6 +57,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sizeSubscription = next.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.resizePanel() }
         }
+        // Must match RaptorPaths.panelSocket(): this file is also type-checked
+        // standalone (scripts/test-macos.sh) without the package modules.
         let cacheBase = ProcessInfo.processInfo.environment["XDG_CACHE_HOME"]
             .flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory() + "/Library/Caches"
         let host = PanelHost(path: cacheBase + "/raptor/panel.sock") { [weak self] request in
@@ -202,82 +186,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel?.orderOut(nil)
     }
 
-    func application(_ application: NSApplication, open urls: [URL]) {
-        reopenTask?.cancel()
-        guard urls.count == 1, let url = urls.first else { return }
-        do { request(try LaunchOptions(pickerURL: url)) }
-        catch { report(error) }
-    }
-
-    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        if let panel, model != nil { bringForward(panel); return true }
-        do { request(try LaunchOptions(arguments: [])) }
-        catch { report(error) }
-        return true
-    }
-
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        // A URL launch can also deliver a reopen event. Give its fresh Rex
-        // context priority over Finder's ordinary untitled-window behavior.
-        reopenTask?.cancel()
-        let task = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            if let panel = self.panel, self.model != nil {
-                self.bringForward(panel)
-            } else {
-                do { self.request(try LaunchOptions(arguments: [])) }
-                catch { self.report(error) }
-            }
-        }
-        reopenTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: task)
-        return false
-    }
-
-    private func request(_ options: LaunchOptions) {
-        if !ready { pendingOptions = options; return }
-        if resident { openResident(options); return }
-        present(options)
-    }
-
-    private func present(_ options: LaunchOptions) {
-        // Never replace context beneath a Git mutation or removal confirmation.
-        if let current = model, current.busy || current.removalCandidate != nil {
-            current.error = "Finish the current operation before opening another picker."
-            if let panel { bringForward(panel) }
-            return
-        }
-        let anchor = invocationAnchor()
-        sizeSubscription?.cancel()
-        model?.onClose = nil
-        model?.close()
-        let backend: any BackendClient = options.demo ? DemoBackend() : ProcessBackend(options: options)
-        let next = PickerModel(options: options, backend: backend,
-                               pullRequestClipboard: { NSPasteboard.general.string(forType: .string) })
-        model = next
-        bindDismissal(next)
-        let picker: RaptorPanel
-        if let panel {
-            picker = panel
-            if let host = panelPickerHost {
-                host.rootView = PickerView(model: next)
-            }
-        } else {
-            picker = makePanel(for: next)
-        }
-        picker.title = next.heading
-        if let (area, screen) = anchor {
-            picker.setFrame(PickerStyle.panelFrame(in: area, height: PickerStyle.height(for: next)).clamped(to: screen.visibleFrame), display: false)
-        } else { picker.center() }
-        sizeSubscription = next.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { self?.resizePanel() }
-        }
-        next.start()
-        bringForward(picker)
-    }
-
-    private func makePanel(for next: PickerModel) -> RaptorPanel {
-        let picker = RaptorPanel(contentRect: NSRect(x: 0, y: 0, width: PickerStyle.width, height: PickerStyle.height(for: next)),
+    private func makePanel(for next: PickerModel) -> PickerPanel {
+        let picker = PickerPanel(contentRect: NSRect(x: 0, y: 0, width: PickerStyle.width, height: PickerStyle.height(for: next)),
                                  styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel], backing: .buffered, defer: false)
         panel = picker
         picker.identifier = NSUserInterfaceItemIdentifier("raptor-panel")
@@ -384,7 +294,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func bindDismissal(_ next: PickerModel) {
-        next.keepsBackendWarmOnNavigation = resident
+        next.keepsBackendWarmOnNavigation = true
         // Resolve self.model at delivery, never retain an old context/model.
         focusTracker?.retryDelivery()
         let dismiss: () -> Void = { [weak self, weak next] in
@@ -397,21 +307,12 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func dismissPicker() {
         outsideClickMonitor.stop()
-        if resident || model?.busy == true {
-            // Keep resident state warm. In either mode, hiding pending work
-            // must not close its backend or cancel its task.
+        if model?.busy == true {
+            // Keep resident state warm. Hiding pending work must not close
+            // its backend or cancel its task.
             dismissResidentPanel()
             return
         }
-        stopThemeRefresh()
-        sizeSubscription?.cancel()
-        model?.onClose = nil
-        model?.close()
-        model = nil
-        panel?.orderOut(nil)
-        // Retain AppKit/SwiftUI and the panel, but stop the Go child. Never reuse
-        // its Rex context: the next invocation creates a fresh model and backend.
-        NSApp.hide(nil)
     }
 
     private func resizePanel() {
@@ -441,7 +342,6 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         outsideClickMonitor.stop()
         focusTracker?.stop()
-        reopenTask?.cancel()
         stopThemeRefresh()
         sizeSubscription?.cancel()
         if let keyboardMonitor { NSEvent.removeMonitor(keyboardMonitor) }
@@ -464,14 +364,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func handle(_ event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "q" {
-            if resident {
-                // A resident host must survive ⌘Q; hide the picker instead.
-                model?.dismiss()
-            } else if model?.busy == true {
-                model?.dismiss()
-            } else {
-                NSApp.terminate(nil)
-            }
+            // A resident host must survive ⌘Q; hide the picker instead.
+            model?.dismiss()
             return true
         }
         guard let panel, let model else { return false }
@@ -564,9 +458,12 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 }
 
-@main
-struct RaptorApplication {
-    @MainActor static func main() {
+/// Host entry for `raptor serve`: a bare, resident AppKit process that owns
+/// the panel and the backend child. No bundle, no launchd job — the Rex
+/// plugin reaches it over the panel socket and the process chain stays under
+/// Rex, so file-access grants are inherited rather than re-prompted.
+enum HostMain {
+    @MainActor static func run() -> Never {
         let application = NSApplication.shared
         application.setActivationPolicy(.accessory)
         // Seed the palette from the system appearance; the first backend
@@ -575,5 +472,6 @@ struct RaptorApplication {
         let delegate = RaptorDelegate()
         application.delegate = delegate
         withExtendedLifetime(delegate) { application.run() }
+        exit(0)
     }
 }

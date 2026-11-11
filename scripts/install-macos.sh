@@ -4,105 +4,49 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/macos-common.sh"
 
 if [[ ${1:-} == --help || ${1:-} == -h ]]; then
-  # shellcheck disable=SC2016 # Help shows variable names, not current values.
-  printf '%s\n' 'Usage: scripts/install-macos.sh [--app-only] [PATH/TO/Raptor.app]' \
-    'Install an already-built, signed app and its bundled CLI and Rex plugin.' \
-    '--app-only installs only the app, including its internal backend; no standalone CLI or plugin.' \
-    'Defaults: DIST_DIR/Raptor.app, APP_DESTINATION=$HOME/Applications,' \
-    'PREFIX=$HOME/.local, REX_PLUGIN_DIR=$HOME/.config/rex/raptor.' \
+  printf '%s\n' 'Usage: scripts/install-macos.sh' \
+    'Build nothing; install the already-built bare backend/host binary and the Rex plugin.' \
+    'Defaults: DIST_DIR/raptor, PREFIX=$HOME/.local, REX_PLUGIN_DIR=$HOME/.config/rex/raptor.' \
     'Customized plugin files and symlinks are kept; unchanged installer-owned copies upgrade.' \
-    'No user init.lua edits or key bindings.' \
-    'No sudo, build, app launch, or publishing. Use make install-cli for terminal-only installs.'
+    'Also removes the pre-resh-model LaunchAgent and Raptor.app panel service if present.' \
+    'No user init.lua edits or key bindings. No sudo, build, or publishing.'
   exit 0
 fi
-app_only=false
-if [[ ${1:-} == --app-only ]]; then
-  app_only=true
-  shift
-fi
-[[ $# -le 1 ]] || fail 'Expected at most one app path; see --help.'
 macos_only
-need /usr/bin/ditto
+need install
 need shasum
-source_app=${1:-${DIST_DIR:-"$SCRIPT_ROOT/dist"}/Raptor.app}
-[[ -d $source_app ]] || fail "App not found: $source_app (run build-macos.sh first)"
-source_app=$(cd "$source_app" && pwd -P)
-[[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_app/Contents/Info.plist") == com.alienxp03.raptor ]] || fail 'Unexpected app bundle identifier.'
-[[ -x $source_app/Contents/MacOS/raptor-cli && -f $source_app/Contents/Resources/rex/init.lua ]] || fail 'App lacks the CLI or Rex plugin.'
-verify_app "$source_app"
-APP_DESTINATION=${APP_DESTINATION:-"$HOME/Applications"}
+[[ -f $SCRIPT_ROOT/init.lua ]] || fail 'Missing root init.lua'
+[[ -f ${DIST_DIR:-"$SCRIPT_ROOT/dist"}/raptor ]] || fail "Missing ${DIST_DIR:-$SCRIPT_ROOT/dist}/raptor binary (run make build first)."
 PREFIX=${PREFIX:-"$HOME/.local"}
 REX_PLUGIN_DIR=${REX_PLUGIN_DIR:-"$HOME/.config/rex/raptor"}
-mkdir -p "$APP_DESTINATION"
-APP_DESTINATION=$(cd "$APP_DESTINATION" && pwd -P)
-if [[ $app_only == false ]]; then
-  mkdir -p "$PREFIX/bin"
-  PREFIX_BIN=$(cd "$PREFIX/bin" && pwd -P)
-fi
-target="$APP_DESTINATION/Raptor.app"
-# The resident panel host runs the app binary from the target path; stop it
-# before replacing anything. Best effort: an absent service must not block.
-if [[ -x $target/Contents/MacOS/raptor-cli ]]; then
-	"$target/Contents/MacOS/raptor-cli" service stop >/dev/null 2>&1 || true
-fi
-require_stopped_app "$target"
-[[ ! -L $target ]] || fail "Refusing to replace app symlink: $target"
-if [[ $app_only == false ]]; then
-  [[ ! -L $PREFIX_BIN/raptor && ! -d $PREFIX_BIN/raptor ]] || fail "Refusing to replace CLI symlink/directory: $PREFIX_BIN/raptor"
-fi
-if [[ -e $target ]]; then
-  [[ -d $target ]] || fail "App target is not a directory: $target"
-  [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$target/Contents/Info.plist") == com.alienxp03.raptor ]] || fail 'Refusing to replace an unrelated app.'
-fi
-mkdir -p "$SCRIPT_ROOT/aux"
-work=$(mktemp -d "$SCRIPT_ROOT/aux/macos-install.XXXXXX")
-restore=false
-cleanup() {
-  local status=$?
-  if [[ $restore == true ]]; then
-    # Only this installer-created path is removed during rollback.
-    rm -rf "$target"
-    mv "$work/previous.app" "$target" || { printf 'Restore failed; backup kept at %s\n' "$work/previous.app" >&2; exit 1; }
-  fi
-  rm -rf "$work"
-  exit "$status"
-}
-trap cleanup EXIT
-if [[ $source_app != "$target" ]]; then
-  /usr/bin/ditto "$source_app" "$work/Raptor.app"
-  verify_app "$work/Raptor.app"
-  if [[ -e $target ]]; then
-    mv "$target" "$work/previous.app"
-    restore=true
-  fi
-  /usr/bin/ditto "$work/Raptor.app" "$target"
-  verify_app "$target"
-  restore=false
-fi
-# Install and start the resident panel service. Optional: without it the
-# picker falls back to launching the app through Launch Services.
-if "$target/Contents/MacOS/raptor-cli" service install --app "$target" >/dev/null 2>&1 && \
-	"$target/Contents/MacOS/raptor-cli" service start >/dev/null 2>&1; then
-	printf 'Installed resident panel service: %s\n' "$("$target/Contents/MacOS/raptor-cli" service status)"
-else
-	printf 'Panel service not installed; the picker will launch the app on demand\n'
-fi
-if [[ $app_only == true ]]; then
-  printf 'Installed app: %s\n' "$target"
-  exit 0
-fi
-install -m 0755 "$target/Contents/MacOS/raptor-cli" "$PREFIX_BIN/raptor"
-# Upgrade only installer-owned, unmodified plugin files. Never write through
-# checkout symlinks or replace a user's customized module.
+mkdir -p "$PREFIX/bin"
+PREFIX_BIN=$(cd "$PREFIX/bin" && pwd -P)
+[[ ! -L $PREFIX_BIN/raptor && ! -d $PREFIX_BIN/raptor ]] || fail "Refusing to replace CLI symlink/directory: $PREFIX_BIN/raptor"
+
+# The resh model has no resident service job: the panel client spawns the host
+# on demand under Rex. Retire the pre-resh-model LaunchAgent if it exists, and
+# stop any app-bundle host so the bare host owns the panel socket.
+OLD_LABEL=com.alienxp03.raptor.panel
+launchctl bootout "gui/$(id -u)/$OLD_LABEL" >/dev/null 2>&1 || true
+rm -f "$HOME/Library/LaunchAgents/$OLD_LABEL.plist" "$HOME/Library/Caches/raptor/launcher.plist" 2>/dev/null || true
+# Never execute the old app binary to stop it: an app-era binary with an
+# unknown argument falls through to its GUI run loop and hangs the install.
+pkill -f 'Raptor.app/Contents/MacOS/Raptor serve' 2>/dev/null || true
+pkill -f 'raptor serve' 2>/dev/null || true
+rm -f "$HOME/Library/Caches/raptor/panel.sock" 2>/dev/null || true
+
+install -m 0755 "${DIST_DIR:-$SCRIPT_ROOT/dist}/raptor" "$PREFIX_BIN/raptor"
+# The backend child resolves its sibling binary through symlinks; keep the
+# real file installed so PATH shims and symlinked prefixes both work.
+
+mkdir -p "$REX_PLUGIN_DIR"
 marker="$REX_PLUGIN_DIR/.raptor-installed-sha256"
 write_plugin() {
-  install -m 0644 "$target/Contents/Resources/rex/init.lua" "$REX_PLUGIN_DIR/init.lua"
+  install -m 0644 "$SCRIPT_ROOT/init.lua" "$REX_PLUGIN_DIR/init.lua"
   shasum -a 256 "$REX_PLUGIN_DIR/init.lua" | awk '{print $1}' > "$marker"
 }
 if [[ -L $REX_PLUGIN_DIR ]]; then
   printf 'Kept plugin symlink: %s\n' "$REX_PLUGIN_DIR"
-elif [[ -e $REX_PLUGIN_DIR && ! -d $REX_PLUGIN_DIR ]]; then
-  printf 'Kept existing plugin path (not a directory): %s\n' "$REX_PLUGIN_DIR"
 elif [[ -f $REX_PLUGIN_DIR/init.lua && ! -L $REX_PLUGIN_DIR/init.lua && -f $marker && ! -L $marker ]]; then
   expected=''
   IFS= read -r expected < "$marker" || true
@@ -113,12 +57,10 @@ elif [[ -f $REX_PLUGIN_DIR/init.lua && ! -L $REX_PLUGIN_DIR/init.lua && -f $mark
   else
     printf 'Kept customized plugin: %s\n' "$REX_PLUGIN_DIR/init.lua"
   fi
-elif [[ -e $REX_PLUGIN_DIR/init.lua || -L $REX_PLUGIN_DIR/init.lua || -L $marker ]]; then
-  printf 'Kept existing plugin init.lua: %s\n' "$REX_PLUGIN_DIR/init.lua"
 else
-  mkdir -p "$REX_PLUGIN_DIR"
   write_plugin
+  printf 'Installed plugin: %s\n' "$REX_PLUGIN_DIR/init.lua"
 fi
-printf 'Installed app: %s\nInstalled CLI: %s\n' "$target" "$PREFIX_BIN/raptor"
+printf 'Installed host/CLI: %s\n' "$PREFIX_BIN/raptor"
 printf '%s\n' 'Rex configuration unchanged. Add require("raptor").setup{} and bindings manually if needed.'
 printf 'For a custom PREFIX, set the plugin setup bin option to: %s\n' "$PREFIX_BIN/raptor"
