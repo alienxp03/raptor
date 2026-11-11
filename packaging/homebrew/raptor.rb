@@ -19,7 +19,12 @@ class Raptor < Formula
     if build.stable?
       # Homebrew stages url downloads as bare files in HOMEBREW_CACHE;
       # unzip the release archive into the buildpath ourselves.
-      zips = Dir.glob(HOMEBREW_CACHE.join("*Raptor-#{version}-universal.zip"))
+      patterns = [
+        HOMEBREW_CACHE.join("downloads/*Raptor-#{version}-universal.zip"),
+        HOMEBREW_CACHE.join("*Raptor-#{version}-universal.zip"),
+        HOMEBREW_CACHE.join("raptor--#{version}.zip"),
+      ]
+      zips = patterns.flat_map { |pattern| Dir.glob(pattern) }
       raise "release archive for #{version} not found in HOMEBREW_CACHE" if zips.empty?
       system "unzip", "-q", zips.first, "-d", buildpath
       libexec.install buildpath/"Raptor.app"
