@@ -149,7 +149,7 @@ case "$1 $2" in
   elif [ -n "$PR_HOOK_JSON" ]; then printf '%s\n' "$PR_HOOK_JSON"
   else
    case " $PR_HOOK_PHASES $LOCAL_PHASE " in
-    *" $3 "*) echo '[{"name":"check"}]';;
+    *" $3 "*) echo '[{"name":"check","template":"echo {{ branch }}"}]';;
     *) echo '[]';;
    esac
   fi;;

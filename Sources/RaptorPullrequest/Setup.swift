@@ -1,6 +1,19 @@
 import Foundation
 import RaptorWorktree
 
+// Worktrunk forwards unreferenced --KEY=VALUE options as hook arguments.
+// Restrict overrides to template expressions, not literal command text.
+func hookVariableArguments(_ values: [String], hooks: [Any]) -> [String] {
+    let templates = hooks.compactMap { ($0 as? [String: Any])?["template"] as? String }
+    return values.compactMap { value in
+        let key = String(value.prefix { $0 != "=" })
+        let identifier = NSRegularExpression.escapedPattern(for: key)
+        let pattern = #"\{\{[^}]*\b"# + identifier + #"\b[^}]*\}\}|\{%[^%]*\b"# + identifier + #"\b[^%]*%\}"#
+        return templates.contains { $0.range(of: pattern, options: .regularExpression) != nil }
+            ? "--" + value : nil
+    }
+}
+
 /// checkPreSwitch fails closed: Prepare has no interactive destination yet. A
 /// source pre-switch hook must never be moved after creation or auto-approved.
 func checkPreSwitch(_ repo: String) throws {
@@ -194,8 +207,8 @@ extension Pullrequest {
             }
             // Manual hooks run in destination cwd with destination config. Identical
             // project config is required above. Preserve source/base and PR variables.
-            // --KEY=VALUE forwards UNUSED keys into {{ args }}. Use the verified
-            // explicit --var form instead: it binds without changing hook arguments.
+            // Shorthand binds referenced variables, but forwards unused keys into
+            // {{ args }}. Send only values referenced by this phase's templates.
             var values = ["branch=\(state.branch)", "worktree_path=\(path)",
                           "target=\(state.branch)", "target_worktree_path=\(path)"]
             if !state.url.isEmpty {
@@ -212,12 +225,8 @@ extension Pullrequest {
                     throw MessageError("\(phase) uses base_worktree_path but the base has no worktree; run this setup manually")
                 }
             }
-            for value in values {
-                args.append(contentsOf: ["--var", value])
-            }
-            if !state.base.isEmpty {
-                args.append(contentsOf: ["--var", "base=\(state.base)"])
-            }
+            if !state.base.isEmpty { values.append("base=\(state.base)") }
+            args.append(contentsOf: hookVariableArguments(values, hooks: configured))
             state.failed = phase + " interrupted"
             try save(path, state)
             var stageErr: (any Error)?

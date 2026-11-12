@@ -9,6 +9,7 @@ final class LocalContextTests: XCTestCase {
         defer { env.restore() }
         let (repo, source) = try localFixture(env)
         env.set("LOCAL_PHASE", "pre-start")
+        env.set("PR_HOOK_JSON", #"[{"name":"check","template":"echo {{ base_worktree_path }} {{ args }}"}]"#)
         _ = try git(repo, ["worktree", "add", "-b", "source", source])
         let plan = try Pullrequest.preflightLocal(source: source)
         let target = dirOf(source) + "/local-target"
@@ -22,9 +23,18 @@ final class LocalContextTests: XCTestCase {
         try RaptorPullrequest.save(target, s)
         try Pullrequest.setup(path: target, retry: false)
         let log = try readLog(env)
-        XCTAssertTrue(log.contains("--var base_worktree_path=" + repo), log)
-        XCTAssertFalse(log.contains("--var pr_url="), log)
-        XCTAssertFalse(log.contains("--var pr_number="), log)
+        XCTAssertTrue(log.contains("--base_worktree_path=" + repo), log)
+        XCTAssertFalse(log.contains("--var"), log)
+        XCTAssertFalse(log.contains("--pr_url="), log)
+        XCTAssertFalse(log.contains("--pr_number="), log)
+        XCTAssertFalse(log.contains("--branch="), "Unused variables must not become hook arguments: \(log)")
+    }
+
+    func testHookVariableShorthandOnlyIncludesTemplateReferences() {
+        let hooks: [Any] = [["template": "echo branch {{ args }} {{ target_worktree_path }} {% if base %}{{ base }}{% endif %}"]]
+        XCTAssertEqual(hookVariableArguments(["branch=feature", "target_worktree_path=/worktree", "base=main", "target=feature"], hooks: hooks),
+                       ["--target_worktree_path=/worktree", "--base=main"])
+        XCTAssertEqual(hookVariableArguments(["branch=feature"], hooks: []), [])
     }
 
     func testFinishedLocalSetupDoesNotBlockOrdinaryNavigation() throws {
