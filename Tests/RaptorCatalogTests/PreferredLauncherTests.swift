@@ -32,7 +32,7 @@ final class PreferredLauncherTests: XCTestCase {
             LauncherItem(kind: "dir", id: "/repo", path: "/repo", label: "repo"),
         ]
         let filtered = Catalog.filterLauncherItems(items, "repo", "current")
-        XCTAssertEqual(Catalog.preferredLauncherID(filtered, "repo"), "/repo", "rank overridden")
-        XCTAssertTrue(filtered.count == 2 && filtered[1].active, "current session must stay available")
+        XCTAssertEqual(Catalog.preferredLauncherID(filtered, "repo"), "current", "matching open sessions must precede folders")
+        XCTAssertTrue(filtered.count == 2 && filtered[0].active, "current session must stay available")
     }
 }

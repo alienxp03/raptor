@@ -37,14 +37,33 @@ public extension Catalog {
     static func rankLauncherItems(_ items: [LauncherItem], _ query: String) -> [FuzzyMatch] {
         var texts: [String] = []
         var names: [String] = []
-        texts.reserveCapacity(items.count)
-        names.reserveCapacity(items.count)
-        for item in items {
+        var owners: [Int] = []
+        texts.reserveCapacity(items.count * 3)
+        names.reserveCapacity(items.count * 3)
+        owners.reserveCapacity(items.count * 3)
+        for (index, item) in items.enumerated() {
             let directory = item.kind == "session" ? "" : item.path
-            texts.append(item.label + " " + RaptorPaths.homeRelative(directory) + " " + item.host)
-            names.append(launcherMatchName(item.label, directory))
+            let name = launcherMatchName(item.label, directory)
+            // Never assemble a match from parts of different fields.
+            let path = directory.isEmpty ? "" : RaptorPaths.homeRelative(directory)
+            for field in [item.label, path, item.host] where !field.isEmpty {
+                texts.append(field)
+                names.append(name)
+                owners.append(index)
+            }
         }
-        return rankLauncherMatches(query, texts, names)
+        var seen = Set<Int>()
+        let matches = rankLauncherMatches(query, texts, names).compactMap { fieldMatch -> FuzzyMatch? in
+            let index = owners[fieldMatch.index]
+            guard seen.insert(index).inserted else { return nil }
+            var match = fieldMatch
+            match.index = index
+            return match
+        }
+        // Opening an existing session takes priority over starting another one.
+        // Keep search rank and recency ties unchanged within each row kind.
+        return matches.filter { items[$0.index].kind == "session" }
+            + matches.filter { items[$0.index].kind != "session" }
     }
 }
 

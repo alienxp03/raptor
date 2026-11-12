@@ -43,7 +43,7 @@ rex config reload
 
 ## Usage
 
-Sessions come first (the current one marked), then directories by frequency. `Enter` switches to a session or opens a directory; the target row shows where it will open.
+Sessions come first (the current one marked), then directories by frequency. Search also puts matching open sessions before directories. Each match must fit within a name, path, or hostname; it cannot span fields. `Enter` switches to a session or opens a directory; the target row shows where it will open.
 
 | Key | Action |
 | --- | --- |

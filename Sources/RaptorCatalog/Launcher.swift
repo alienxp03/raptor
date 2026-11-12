@@ -88,7 +88,7 @@ public extension Catalog {
     /// pinned local directories floating first. Directories whose label already
     /// has a live session on the same host are skipped: selecting the session is
     /// the same action. A query fuzzy-ranks the composed rows over label, path,
-    /// and host.
+    /// and host, with matching sessions before directories.
     static func launcherItems(
         _ groups: [HostGroup], _ hostOrder: [String], _ hostDirs: [String: [Directory]],
         _ query: String, _ agents: [AgentEntry], _ localDisplay: String
@@ -184,7 +184,7 @@ public extension Catalog {
 
     /// FilterLauncherItems applies the query to a cached (unfiltered) launcher
     /// composition: everything when the query is empty, exact names then fuzzy
-    /// quality otherwise. A path-like query that resolves to an unlisted local
+    /// quality within sessions-first groups otherwise. A path-like query that resolves to an unlisted local
     /// directory appends one typed-path row after the ranked matches.
     static func filterLauncherItems(_ items: [LauncherItem], _ query: String, _ originSession: String) -> [LauncherItem] {
         if query.isEmpty {
