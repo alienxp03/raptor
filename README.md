@@ -46,7 +46,7 @@ rex config reload
 
 ## Usage
 
-Session activity: working `...`, highlighted unread result `✓`, seen result no completion indicator. Working and unread can show together. Rex owns seen receipts; Raptor does not mark results seen. The local Mac preference adapter is client-specific; unavailable receipt data hides the checkmark.
+Session activity: working `...`, unread result marked by a tiny themed icon dot, seen result no completion indicator. Working and unread can show together. Rex owns seen receipts; Raptor does not mark results seen. The local Mac preference adapter is client-specific; unavailable receipt data hides the dot.
 
 Pinned rows come first, ahead of the current session, then other sessions and directories by frequency. Session pins persist with their host identity; local directory pins persist too. Opening selects the current session, even below pinned rows. Search puts matching open sessions before directories. Each match must fit within a name, path, or hostname; it cannot span fields. `Enter` switches to a session or opens a directory; the target row shows where it will open.
 

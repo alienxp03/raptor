@@ -4,7 +4,8 @@ import SwiftUI
 struct ActivityIndicator: View {
     let activity: ActivityProjection
     var workingColor: Color = .primary
-    var unreadColor: Color = .accentColor
+    var showUnread = true
+    var selected = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var visible = false
     @State private var panelVisible = false
@@ -12,10 +13,8 @@ struct ActivityIndicator: View {
     var body: some View {
         HStack(spacing: 4) {
             if activity.blocked { dot(.orange) }
-            if activity.unreadDone {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(unreadColor)
+            if activity.unreadDone && showUnread {
+                UnreadCompletionDot(selected: selected)
                     .help("Finished, unread")
             }
             if activity.working {
@@ -43,6 +42,30 @@ struct ActivityIndicator: View {
 
     private func dot(_ color: Color) -> some View {
         Circle().fill(color).frame(width: 5, height: 5)
+    }
+}
+
+struct UnreadCompletionDot: View {
+    var selected = false
+
+    var body: some View {
+        Circle()
+            .fill(PickerStyle.unreadIndicatorColor(selected: selected))
+            .frame(width: PickerStyle.unreadIndicatorSize, height: PickerStyle.unreadIndicatorSize)
+            .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    func unreadCompletionBadge(_ unread: Bool, selected: Bool) -> some View {
+        overlay(alignment: .topTrailing) {
+            if unread {
+                UnreadCompletionDot(selected: selected)
+                    .background(Circle().fill(selected ? PickerStyle.selectionBackground : PickerStyle.background).padding(-1))
+                    .offset(x: 2, y: -2)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 }
 

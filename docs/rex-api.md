@@ -14,9 +14,9 @@ Rex owns status-record lifetime. Raptor does not infer record removal from a sep
 
 ### Unread completion
 
-The backend sends explicit `unread_done`; missing or false means no unread indicator. Raw `done` or `idle` state does not establish unread completion. Working `...`, blocked activity, and the highlighted unread `✓` are independent. A seen result has no completion indicator. Unread-only rows need no animation timer; accessibility announces “Finished, unread”.
+The backend sends explicit `unread_done`; missing or false means no unread indicator. Raw `done` or `idle` state does not establish unread completion. Working `...`, blocked activity, and the subtle unread icon dot are independent. A seen result has no completion indicator. Unread-only rows need no animation timer; accessibility announces “Finished, unread”.
 
-An isolated local Mac adapter reads `com.superlogical.rex` → `Workspace.programActivitySeen`. The backend matches block ID, record ID, and update time in milliseconds. Idle completion requires an alerted receipt. Unavailable or unsupported receipt data fails closed: no checkmark. This is a private client preference, not a public server receipt API or cross-client read history. Raptor neither keeps its own ledger nor writes Rex receipts.
+An isolated local Mac adapter reads `com.superlogical.rex` → `Workspace.programActivitySeen`. The backend matches block ID, record ID, and update time in milliseconds. Idle completion requires an alerted receipt. Unavailable or unsupported receipt data fails closed: no unread dot. This is a private client preference, not a public server receipt API or cross-client read history. Raptor neither keeps its own ledger nor writes Rex receipts.
 
 Preference changes invalidate cached freshness and request rows only while presented with a ready context. They need no status event, changed status snapshot, or full discovery scan. Selection, query, target, and scroll stay unchanged. Cached reopen reconciles current receipts, including changes made while hidden.
 

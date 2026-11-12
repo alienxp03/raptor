@@ -21,11 +21,13 @@ Two row types, one verb:
 
 Cmd+Shift+P pins or unpins the selected session or local directory. Pinned rows appear ahead of the current session. Session pins persist with their host identity, so equal session IDs on different hosts stay separate. Local directory pins also persist. Remote directories cannot be pinned. The origin pane context is kept when refreshing.
 
+Rows have one leading session or directory icon. Pins follow the title. The current session has no extra circle; accessibility still announces its active state.
+
 ## Activity
 
-Working shows `...`; a finished unread result shows a highlighted `✓`. A matching Rex seen receipt removes the checkmark. Working and unread are independent, so both can show. Blocked activity stays independent too. Unread-only rows do not animate. Accessibility announces “Finished, unread”. Raw `done` or `idle` state alone does not mean unread.
+Working shows `...`; a finished unread result shows a small, static theme-accent dot on the session or agent icon. A matching Rex seen receipt removes the dot. Working and unread are independent, so both can show. Blocked activity stays independent too. Unread-only rows do not animate. Accessibility announces “Finished, unread”. Raw `done` or `idle` state alone does not mean unread.
 
-The backend reads the local Mac client's `com.superlogical.rex` preference `Workspace.programActivitySeen`. Receipts match block ID, record ID, and update time in milliseconds. Idle completion needs an alerted receipt. Missing or unsupported receipt data hides the checkmark; local preferences cannot establish another client's seen state. Raptor keeps no receipt ledger and writes no seen receipts.
+The backend reads the local Mac client's `com.superlogical.rex` preference `Workspace.programActivitySeen`. Receipts match block ID, record ID, and update time in milliseconds. Idle completion needs an alerted receipt. Missing or unsupported receipt data hides the dot; local preferences cannot establish another client's seen state. Raptor keeps no receipt ledger and writes no seen receipts.
 
 Receipt changes refresh rows only while the picker is visible and its context is ready. Selection, query, target, and scroll stay unchanged. This needs no status event or full scan. Reopen reconciles cached rows with current receipts.
 

@@ -1629,6 +1629,7 @@ struct NativeChecks {
     }
 
     @MainActor private static func unreadCompletionChecks() async throws {
+        require(PickerStyle.unreadIndicatorSize == 5, "Unread completion must use a compact, visible icon badge")
         require(!ActivityProjection(blocked: false, working: false).unreadDone,
                 "Unread completion must default to false")
         for flag in [nil, false, true] as [Bool?] {
@@ -2726,6 +2727,14 @@ struct NativeChecks {
                              PickerStyle.selectionText.contrastRatio(with: PickerStyle.selectionBackground) >= 4.5 &&
                              PickerPalette.selectionOpacity == (dark ? 0.18 : 0.10),
                              "Row tint must use native UI roles with readable composited labels")
+                for selected in [false, true] {
+                    let surface = selected ? PickerStyle.selectionBackground : PickerStyle.background
+                    let badge = PickerStyle.unreadIndicatorColor(selected: selected)
+                    require(badge.contrastRatio(with: surface) >= 3, "Unread badges must remain visible on normal and selected rows")
+                    if PickerStyle.selection.contrastRatio(with: surface) >= 3 {
+                        require(NSColor(badge) == NSColor(PickerStyle.selection), "Unread badges must use the theme accent when readable")
+                    }
+                }
                 let label = NSColor(PickerStyle.foreground).usingColorSpace(.sRGB)!
                 if style == "useTheme" {
                     require(NSColor(PickerStyle.foreground) == NSColor(hexColor("#ddbbcc")!),

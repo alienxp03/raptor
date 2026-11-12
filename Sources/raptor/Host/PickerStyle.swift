@@ -26,6 +26,7 @@ enum PickerStyle {
     static let footerHeight: CGFloat = 34
     static let maxVisibleRows = 16
     static let rowHeight: CGFloat = 32
+    static let unreadIndicatorSize: CGFloat = 5
     static let pinReorderDuration = 0.24
     static let pinGlyphDuration = 0.16
 
@@ -48,6 +49,10 @@ enum PickerStyle {
         let preferred = PickerPalette.selectionText
         return preferred.contrastRatio(with: selectionBackground) >= 4.5
             ? preferred : contrastText(for: selectionBackground)
+    }
+    static func unreadIndicatorColor(selected: Bool) -> Color {
+        let surface = selected ? selectionBackground : background
+        return selection.contrastRatio(with: surface) >= 3 ? selection : contrastText(for: surface)
     }
     static var editingAccent: Color { Color(nsColor: .controlAccentColor) }
     static var background: Color { PickerPalette.background }

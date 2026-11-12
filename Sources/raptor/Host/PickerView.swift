@@ -325,13 +325,6 @@ struct PickerView: View {
             .help(updated ?? "")
     }
 
-    private func sessionMarker(selected: Bool) -> some View {
-        Circle().fill(selected ? PickerStyle.selectionText : PickerStyle.selection)
-            .frame(width: 5, height: 5)
-            .opacity(0.9)
-            .accessibilityLabel("Active")
-    }
-
     private func hostLabel(_ host: String, selected: Bool) -> some View {
         let color = selected ? PickerStyle.selectionText.opacity(0.7) : PickerStyle.secondaryText
         // Never truncates: the label yields its space instead.
@@ -349,19 +342,18 @@ struct PickerView: View {
             if position >= 1, position <= 9 {
                 cmdBadge(position, selected: selected)
             }
-            if !isAgent && item.isPinned == true {
-                pinnedIcon(selected: selected, id: item.id)
-            }
             if item.kind == "pr" {
                 Text(item.label ?? item.path).lineLimit(1).truncationMode(.middle)
             } else if isAgent {
                 AgentIcon(app: item.app)
-                    .frame(width: 16, height: 16).accessibilityHidden(true)
+                    .frame(width: 16, height: 16)
+                    .unreadCompletionBadge(item.unreadDone == true, selected: selected)
+                    .accessibilityHidden(true)
                 Text(item.label ?? item.agentID ?? "Agent")
                     .lineLimit(1).truncationMode(.tail).layoutPriority(1)
                 ActivityIndicator(activity: item.activity,
                                   workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground,
-                                  unreadColor: selected ? PickerStyle.selectionText : PickerStyle.selection)
+                                  showUnread: false)
                 Spacer(minLength: 8)
                 if !item.agentContext.isEmpty {
                     agentContextLabel(item.agentContext, selected: selected)
@@ -373,10 +365,8 @@ struct PickerView: View {
                 Image(systemName: "terminal.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.sessionText)
+                    .unreadCompletionBadge(item.unreadDone == true, selected: selected)
                     .accessibilityHidden(true)
-                if item.active == true {
-                    sessionMarker(selected: selected)
-                }
                 if model.renameCandidate?.id == item.id {
                     InlineSessionNameField(text: $model.renameLabel,
                         onSubmit: { model.confirmRenameSession() },
@@ -411,6 +401,7 @@ struct PickerView: View {
                 Image(systemName: "folder")
                     .font(.system(size: 11))
                     .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.directoryText)
+                    .unreadCompletionBadge(item.unreadDone == true, selected: selected)
                     .accessibilityHidden(true)
                 // Use hue, not disabled text, to distinguish folders from sessions.
                 Text(displayPath(item.path))
@@ -420,10 +411,13 @@ struct PickerView: View {
                 Text(displayPath(item.path))
                     .lineLimit(1).truncationMode(.middle)
             }
+            if !isAgent && item.isPinned == true {
+                pinnedIcon(selected: selected, id: item.id)
+            }
             if !isAgent {
                 ActivityIndicator(activity: item.activity,
                                   workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground,
-                                  unreadColor: selected ? PickerStyle.selectionText : PickerStyle.selection)
+                                  showUnread: !isSessionRow && !(isLauncherDir && item.branch == nil), selected: selected)
             }
             if !isAgent, item.isLocal == false, let host = item.host, !host.isEmpty {
                 hostLabel(host, selected: selected)
