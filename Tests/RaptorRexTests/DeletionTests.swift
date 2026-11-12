@@ -39,7 +39,12 @@ final class DeletionRexTests: XCTestCase {
             error_marker = re.search(r'RAPTOR-STDERR-[A-Fa-f0-9-]+:', command[2]).group(0)
             with open(os.environ['DELETE_REX_LOG'] + '.marker', 'w') as f: json.dump([marker, error_marker], f)
             if os.environ.get('DELETE_EXECUTE_FIXTURE') == '1':
-                output = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                helper_env = os.environ.copy()
+                if os.environ.get('DELETE_TOOL_HOME'):
+                    helper_env['HOME'] = os.environ['DELETE_TOOL_HOME']
+                if os.environ.get('DELETE_MINIMAL_PATH') == '1':
+                    helper_env['PATH'] = '/usr/bin:/bin:/usr/sbin:/sbin'
+                output = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, env=helper_env)
                 with open(os.environ['DELETE_REX_LOG'] + '.output', 'wb') as f: f.write(output.stdout)
             result = {'block_id': 'block:helper'}
         elif method == 'com.superlogical.terminal.format':
@@ -89,6 +94,28 @@ final class DeletionRexTests: XCTestCase {
                                             name: "/usr/bin/printf", arguments: ["local fixture"])
         XCTAssertEqual(local.stdout, "local fixture")
         XCTAssertEqual(local.code, 0)
+    }
+
+    func testHelperResolvesToolsOnSelectedHostWithoutShellProfiles() throws {
+        let root = try fixture()
+        let home = root + "/selected host"
+        try FileManager.default.createDirectory(atPath: home + "/.local/bin", withIntermediateDirectories: true)
+        writeExecutable(home + "/.local/bin/wt", contents: "#!/bin/sh\nprintf '%s' 'selected host tool'\n")
+        try "printf 'profile must not run'; exit 9\n".write(toFile: home + "/.profile", atomically: true, encoding: .utf8)
+        setenvTemp("DELETE_EXECUTE_FIXTURE", "1")
+        setenvTemp("DELETE_TOOL_HOME", home)
+        setenvTemp("DELETE_MINIMAL_PATH", "1")
+        for host in ["", "devbox"] {
+            let result = try Rex.deletionCommand(host, "session:target", host.isEmpty ? "local-id" : "remote-id",
+                                                 directory: root, name: "wt", arguments: ["--version"])
+            XCTAssertEqual(result.code, 0, result.stderr)
+            XCTAssertEqual(result.stdout, "selected host tool")
+        }
+        writeExecutable(root + "/wt", contents: "#!/bin/sh\nprintf '%s' 'inherited tool wins'\n")
+        setenvTemp("DELETE_MINIMAL_PATH", "")
+        let inherited = try Rex.deletionCommand("devbox", "session:target", "remote-id", directory: root, name: "wt", arguments: [])
+        XCTAssertEqual(inherited.code, 0, inherited.stderr)
+        XCTAssertEqual(inherited.stdout, "inherited tool wins")
     }
 
     func testPinnedRemoteExecutionAndStrictQuoting() throws {

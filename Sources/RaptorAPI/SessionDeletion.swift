@@ -23,6 +23,12 @@ extension Handler {
         do {
             var parser = JSONParser(params)
             let obj = try parser.parseTop().value
+            if try Params.bool(obj, "review_worktrees") {
+                return reviewSessionDeletion(method, obj)
+            }
+            guard method != "sessions.delete.check", method != "sessions.delete.prepare" else {
+                throw MessageError("Check and Prepare require review_worktrees=true")
+            }
             guard try Params.string(obj, "kind") == "session" else { throw MessageError("Delete requires kind=session") }
             let sid = try Params.string(obj, "session_id")
             let host = try Rex.deletionHost(Params.string(obj, "host"))

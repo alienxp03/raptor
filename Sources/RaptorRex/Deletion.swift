@@ -115,7 +115,10 @@ public extension Rex {
         let child = "(cd " + quote(directory) + " && " + command + "); r=$?; printf '\\n" + marker + "%s' \"$r\""
         // FD 3 carries base64 stdout past the stderr command substitution.
         // Git's NUL-delimited output never enters a shell variable.
-        let script = "{ errors=$( { ( " + child + " ) | base64 >&3; } 2>&1 ); printf '\\n"
+        // Helper terminals do not load shell profiles. Preserve inherited tool
+        // priority, then add install locations on the selected host only.
+        let environment = #"PATH="${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}:$HOME/.local/bin:${MISE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mise}/shims:${CARGO_HOME:-$HOME/.cargo}/bin:/opt/homebrew/bin:/usr/local/bin"; export PATH; "#
+        let script = environment + "{ errors=$( { ( " + child + " ) | base64 >&3; } 2>&1 ); printf '\\n"
             + errorMarker + "\\n'; printf '%s' \"$errors\" | base64; } 3>&1"
         let created = try deletionAPI(host, "session.new_block", [
             "session_id": sessionID, "flavor": "com.superlogical.terminal.shell", "label": "Raptor Delete check",

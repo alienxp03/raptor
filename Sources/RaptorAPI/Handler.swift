@@ -48,6 +48,7 @@ public final class Handler {
     var resolveFocus: ((String) -> (host: String, ok: Bool))?
     var recordFocus: ((String, String, Date, Bool) -> Void)?
     var deleteTickets: [String: SessionDeletionTicket] = [:]
+    var worktreeReviewTickets: [String: WorktreeReviewTicket] = [:]
     var deletionTombstones: [DeletionTombstone] = []
     var loadDeletionSession: ((String, String) throws -> DeletionSessionState)?
     var runDeletionCommand: ((String, String, String) -> DeletionCommand)?

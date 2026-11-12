@@ -27,6 +27,8 @@ More screenshots in the [gallery](docs/screenshots/README.md).
 
 Requires macOS 14+, [Rex](https://www.superlogical.com/rex/docs), Git, [zoxide](https://github.com/ajeetdsouza/zoxide), [Worktrunk](https://github.com/bvdeenen/worktrunk), and [gh](https://cli.github.com/) for pull requests. Homebrew installs zoxide, Worktrunk, and gh for you.
 
+Deletion checks use Bash, find, tar, and a SHA-256 tool (`sha256sum`, `shasum`, or `openssl`) on the selected host. They hash symlinks without following them and report scan errors without enabling deletion.
+
 ```sh
 brew install alienxp03/tap/raptor
 raptor init
@@ -52,8 +54,8 @@ Sessions come first (the current one marked), then directories by frequency. Sea
 | `↑`/`↓`, `Ctrl+J`/`Ctrl+K` | Move through results |
 | `Ctrl+O` | Change where the item opens |
 | `Ctrl+R` | Rename the selected session; `Enter` saves, `Esc` cancels |
-| `Ctrl+X` | Close the selected session; keep its worktree and branch |
-| `Ctrl+Shift+X` | Delete the selected session, its worktree, and its local branch |
+| `Ctrl+X` | Close the selected session; keep all worktrees and branches |
+| `Cmd+Shift+X` | Review and delete selected worktrees, with consent to close the session |
 | `Enter` | Switch or open |
 | `Ctrl+P`, then `H J K L` | Open in a pane split |
 | `⇧⌘P` | Open a pull request (or paste a PR URL) |
@@ -61,7 +63,7 @@ Sessions come first (the current one marked), then directories by frequency. Sea
 
 The **Shortcuts** footer button opens the same help page. Search action names or keys, such as `rename`, `ctrl r`, or `split`. Use `↑`/`↓` or `Ctrl+J`/`Ctrl+K` to move through shortcuts. The selected row uses the picker theme and stays visible. Help lists Raptor actions only, with action names and keys. Split directions and form keys appear only in their active context. Help never runs an action, and returning preserves the picker search and selection. `?` also opens help when no text field is active; in a text field it stays normal text.
 
-Close and Delete use inline confirmation: `Enter` confirms, `Esc` cancels. Delete shows the host, worktree path, and local branch before removal. Dirty worktrees or unmerged commits require a separate Force confirmation (`Ctrl+Shift+X`, then `Enter`); Force can discard files and commits. Primary worktrees and the picker’s origin session are protected. Remote Git branches are never changed.
+Close uses inline confirmation: `Enter` confirms, `Esc` cancels. Delete first lists pane directories from Rex, then checks them one at a time and merges duplicates by Git worktree. Each row shows its own progress or error; Retry checks a failed row without clearing completed results. These initial checks read Git metadata only, not dependency contents. Deletable worktrees start selected; primary checkouts, unknown directories, and parents containing another reviewed checkout stay locked. Clear any worktree you want to keep, then choose **Prepare deletion**. Only selected worktrees get full file verification, with per-row progress and elapsed time. Nothing is deleted during preparation. After preparation, explicitly consent to closing the whole session, including tabs for unselected repos. **Delete selected** or `Enter` is the separate final confirmation. Unselected worktrees and remote branches stay unchanged. Dirty worktrees or unmerged commits need a separate Force confirmation (`Cmd+Shift+X` or **Force delete…**, then `Enter`); Force can discard files and commits. The picker’s origin session stays protected. Partial failures report removed worktrees and keep the session open without automatic retry.
 
 Optional bindings for your managed block: `cmd+p` → `raptor_session_last`, `shift+cmd+p` → `raptor_pr_open`.
 

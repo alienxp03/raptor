@@ -4,6 +4,32 @@ import XCTest
 @testable import RaptorWorktree
 
 final class DeletionTests: XCTestCase {
+    func testPrimaryWorktreeErrorUsesItsActualBranch() throws {
+        for branch in ["master", "main", "feat/custom-primary", ""] {
+            let record = branch.isEmpty ? "detached" : "branch refs/heads/" + branch
+            let run: DeletionCommand = { _, name, args in
+                XCTAssertEqual(name, "git")
+                switch args {
+                case ["rev-parse", "--show-toplevel"]:
+                    return ExecResult(stdout: "/repo\n")
+                case ["rev-parse", "--path-format=absolute", "--git-common-dir"]:
+                    return ExecResult(stdout: "/repo/.git\n")
+                case ["worktree", "list", "--porcelain", "-z"]:
+                    return ExecResult(stdout: "worktree /repo\0HEAD abc123\0\(record)\0\0")
+                default:
+                    XCTFail("Primary worktree refusal must not run further commands: \(args)")
+                    return ExecResult(code: 1)
+                }
+            }
+            XCTAssertThrowsError(try WorktreeKit.inspectDeletion(cwd: "/repo", run: run)) { error in
+                let expected = branch.isEmpty
+                    ? "Cannot delete the primary worktree (detached HEAD)."
+                    : "Cannot delete branch `\(branch)`."
+                XCTAssertEqual(String(describing: error), expected)
+            }
+        }
+    }
+
     func testFixtureRemovalAndForceNeverDeleteRemoteRefs() throws {
         let env = TestEnv()
         defer { env.restore() }
@@ -29,7 +55,9 @@ final class DeletionTests: XCTestCase {
             calls.append((name, args))
             return try Execx.run(dir: dir, timeout: 30, name: name, args: args)
         }
-        XCTAssertThrowsError(try WorktreeKit.inspectDeletion(cwd: repo, run: run))
+        XCTAssertThrowsError(try WorktreeKit.inspectDeletion(cwd: repo, run: run)) { error in
+            XCTAssertEqual(String(describing: error), "Cannot delete branch `main`.")
+        }
         let head = try git(["rev-parse", "HEAD"])
         _ = try git(["update-ref", "refs/remotes/origin/feat/delete-fixture", head])
         try "keep me".write(toFile: path + "/dirty", atomically: true, encoding: .utf8)

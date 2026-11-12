@@ -18,6 +18,17 @@ public struct DeletionPlan: Equatable {
     public let fileHashes: String
     public let unmerged: Bool
     public var needsForce: Bool { !status.isEmpty || unmerged }
+
+    /// Only registrations removed by this operation may differ from the preview.
+    public func accountingForDeletedWorktrees(_ paths: Set<String>) -> DeletionPlan {
+        let records = registration.components(separatedBy: "\0\0").filter { record in
+            !paths.contains(where: { record.hasPrefix("worktree " + $0 + "\0") })
+        }
+        return DeletionPlan(repo: repo, path: path, branch: branch, head: head,
+                            registration: records.joined(separator: "\0\0"), commonDir: commonDir,
+                            defaultBranch: defaultBranch, defaultHead: defaultHead, status: status,
+                            diff: diff, fileHashes: fileHashes, unmerged: unmerged)
+    }
 }
 
 public struct DeletionOutcome {
@@ -46,7 +57,13 @@ public extension WorktreeKit {
             throw MessageError("unknown primary worktree")
         }
         let repo = String(primary.dropFirst(9))
-        guard path != repo else { throw MessageError("primary worktree cannot be deleted") }
+        guard path != repo else {
+            if let ref = records.first?.first(where: { $0.hasPrefix("branch refs/heads/") }) {
+                let branch = String(ref.dropFirst("branch refs/heads/".count))
+                throw MessageError("Cannot delete branch `\(branch)`.")
+            }
+            throw MessageError("Cannot delete the primary worktree (detached HEAD).")
+        }
         let matches = records.filter { $0.first == "worktree " + path }
         guard matches.count == 1, let record = matches.first,
               !record.contains(where: { $0 == "locked" || $0.hasPrefix("locked ") || $0.hasPrefix("prunable") }) else {
@@ -58,6 +75,13 @@ public extension WorktreeKit {
             throw MessageError("worktree has no unique local Git branch")
         }
         let branch = String(ref.dropFirst(11))
+        // A nested checkout may have no Rex pane and can belong to another
+        // repository. Never let Force remove its Git metadata through a parent.
+        let nested = try command(path, "find", [".", "-path", "./.git", "-prune", "-o", "-name", ".git", "-print", "-quit"])
+            .trimmingCharacters(in: .newlines)
+        guard nested.isEmpty else {
+            throw MessageError("Cannot delete this worktree: nested Git metadata found at `\(nested)`.")
+        }
         let head = try git(path, ["rev-parse", "--verify", "HEAD"])
         guard record.contains("HEAD " + head), try git(repo, ["rev-parse", "--verify", ref]) == head else {
             throw MessageError("worktree branch changed during inspection")
@@ -69,21 +93,28 @@ public extension WorktreeKit {
         let defaultHead = try git(repo, ["rev-parse", "--verify", "refs/heads/" + base])
         let merged = try run(repo, "git", ["merge-base", "--is-ancestor", head, defaultHead])
         guard merged.code == 0 || merged.code == 1 else { throw MessageError("cannot check unmerged commits") }
-        let status = try command(path, "git", ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"])
+        let status = try command(path, "git", ["status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignored=matching"])
         let diff = try command(path, "git", ["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"])
             + command(path, "git", ["diff", "--cached", "--no-ext-diff", "--no-textconv", "HEAD", "--"])
-        // Git quotes unusual filenames for --stdin-paths. Hash in one host
-        // command, not one Rex round trip per ignored dependency file. Check
-        // each producer before the final digest; no pipe can hide a Git error.
+        // Archive the listed entries without following symlinks, including
+        // ignored dependencies. NUL-delimited names support every Git filename.
+        // Stream SHA-256 on the host; never buffer a dependency tree in Git or
+        // send its contents through Rex. pipefail keeps producer errors fatal.
         let fingerprint = """
-        files=$(git -c core.quotePath=true ls-files --others) || exit $?
-        hashes=''
-        if [ -n "$files" ]; then
-          hashes=$(printf '%s\\n' "$files" | git hash-object --stdin-paths --no-filters) || exit $?
+        export COPYFILE_DISABLE=1
+        if command -v sha256sum >/dev/null 2>&1; then
+          digest() { sha256sum; }
+        elif command -v shasum >/dev/null 2>&1; then
+          digest() { shasum -a 256; }
+        elif command -v openssl >/dev/null 2>&1; then
+          digest() { openssl dgst -sha256; }
+        else
+          printf '%s\\n' 'SHA-256 tool required: sha256sum, shasum, or openssl' >&2
+          exit 1
         fi
-        printf '%s\\n%s\\n' "$files" "$hashes" | git hash-object --stdin
+        git ls-files --others -z | tar --no-xattrs --no-acls -cf - --null -T - | digest
         """
-        let hashes = try command(path, "/bin/sh", ["-c", fingerprint])
+        let hashes = try command(path, "/bin/bash", ["-o", "pipefail", "-c", fingerprint])
         return DeletionPlan(repo: repo, path: path, branch: branch, head: head, registration: registration,
                             commonDir: common, defaultBranch: base, defaultHead: defaultHead,
                             status: status, diff: diff, fileHashes: hashes, unmerged: merged.code == 1)
@@ -121,6 +152,7 @@ public extension WorktreeKit {
         } catch { diagnostic = "Worktrunk removal failed: \(error)" }
         // Check actual resources even on a timeout or a malformed result. Never
         // turn a partially removed worktree into an unsafe Force retry.
+        var worktreeRemoved = false
         do {
             let listing = try run(plan.repo, "git", ["worktree", "list", "--porcelain", "-z"])
             guard listing.ok, listing.stdout.hasPrefix("worktree " + plan.repo + "\0") else {
@@ -133,6 +165,7 @@ public extension WorktreeKit {
             }
             let removed = !listing.stdout.components(separatedBy: "\0").contains("worktree " + plan.path)
                 && exists.code == 1 && symlink.code == 1
+            worktreeRemoved = removed
             let branch = try run(plan.repo, "git", ["show-ref", "--verify", "--quiet", "refs/heads/" + plan.branch])
             guard branch.code == 0 || branch.code == 1 else { throw MessageError("cannot verify branch removal") }
             let branchRemoved = branch.code == 1
@@ -141,7 +174,7 @@ public extension WorktreeKit {
             }
             return DeletionOutcome(worktreeRemoved: removed, branchRemoved: branchRemoved, error: diagnostic)
         } catch {
-            return DeletionOutcome(worktreeRemoved: false, branchRemoved: false,
+            return DeletionOutcome(worktreeRemoved: worktreeRemoved, branchRemoved: false,
                                    error: "\(diagnostic ?? "removal returned"); verification failed: \(error)")
         }
     }

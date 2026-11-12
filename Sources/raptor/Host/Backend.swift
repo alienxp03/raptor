@@ -93,12 +93,13 @@ enum APIError: Error, LocalizedError, Sendable {
 }
 
 enum APIValue: Encodable, Sendable {
-    case text(String), flag(Bool)
+    case text(String), flag(Bool), texts([String])
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .text(let value): try container.encode(value)
         case .flag(let value): try container.encode(value)
+        case .texts(let value): try container.encode(value)
         }
     }
 }
@@ -232,6 +233,26 @@ struct HostHeader: Codable, Equatable, Sendable {
     let error: String?
 }
 
+struct DeletionWorktree: Codable, Sendable, Identifiable {
+    var repo: String = ""
+    var path: String
+    var branch: String = ""
+    var error: String? = nil
+    var isPrimary: Bool? = nil
+    var needsForce: Bool? = nil
+    var checked: Bool? = nil
+    var prepared: Bool? = nil
+    var id: String { path }
+    var isChecked: Bool { checked != false }
+    var isPrepared: Bool { prepared != false && error == nil }
+    var deletable: Bool { isChecked && error == nil && isPrimary != true && !repo.isEmpty && !path.isEmpty && !branch.isEmpty }
+    var retryable: Bool { error != nil && isPrimary != true && !path.isEmpty }
+    enum CodingKeys: String, CodingKey {
+        case repo, path, branch, error, checked, prepared
+        case isPrimary = "is_primary", needsForce = "needs_force"
+    }
+}
+
 struct APIResult: Codable, Sendable {
     var items: [PickerItem]? = nil
     var launcherItems: [PickerItem]? = nil
@@ -266,9 +287,12 @@ struct APIResult: Codable, Sendable {
     var worktreeRemoved: Bool? = nil
     var branchRemoved: Bool? = nil
     var sessionClosed: Bool? = nil
+    var worktrees: [DeletionWorktree]? = nil
+    var deletedPaths: [String]? = nil
     var theme: ThemePayload? = nil
     enum CodingKeys: String, CodingKey {
-        case items, hosts, targets, target, repo, branches, path, theme
+        case items, hosts, targets, target, repo, branches, path, theme, worktrees
+        case deletedPaths = "deleted_paths"
         case selectedID = "selected_id"
         case launcherItems = "launcher_items"
         case input, url, number, title, branch, existing, error, state
@@ -403,7 +427,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
 
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         let read = ["sessions", "agents", "directories", "worktrees.list", "worktrees.branches",
-                    "worktrees.preview", "pullrequests.resolve", "theme"].contains(method) ? QueuedRead() : nil
+                    "worktrees.preview", "pullrequests.resolve", "sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare", "theme"].contains(method) ? QueuedRead() : nil
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async { [self] in
@@ -419,7 +443,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     static func timeoutSeconds(for method: String) -> Double {
         switch method {
         case "pullrequests.prepare": return 600
-        case "pullrequests.resolve", "pullrequests.open", "worktrees.create", "worktrees.remove", "sessions.delete", "dispatch": return 180
+        case "pullrequests.resolve", "pullrequests.open", "worktrees.create", "worktrees.remove", "sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare", "sessions.delete", "dispatch": return 180
         default: return 30
         }
     }

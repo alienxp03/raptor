@@ -39,7 +39,7 @@ final class PickerModel: ObservableObject {
             .init(title: "Show sessions", keys: "⇧⌘S", group: "Sessions", keywords: "shift command cmd s view"),
             .init(title: "Rename session", keys: "⌃R", group: "Sessions", keywords: "ctrl control r name"),
             .init(title: "Close session", keys: "⌃X", group: "Sessions", keywords: "ctrl control x stop"),
-            .init(title: "Delete session and worktree", keys: "⌃⇧X", group: "Sessions", keywords: "ctrl control shift x remove"),
+            .init(title: "Review worktrees for deletion", keys: "⇧⌘X", group: "Sessions", keywords: "shift command cmd x remove delete branch repo"),
             .init(title: "Open pull request", keys: "⇧⌘P", group: "Actions", keywords: "shift command cmd p pr github"),
             .init(title: "Next open target", keys: "⌃O", group: "Actions", keywords: "ctrl control o tab window destination"),
             .init(title: "Previous open target", keys: "⌃⇧O", group: "Actions", keywords: "ctrl control shift o tab window destination"),
@@ -59,7 +59,7 @@ final class PickerModel: ObservableObject {
             ]
         }
         if sessionDeletion != nil {
-            entries.append(.init(title: "Offer force delete", keys: "⌃⇧X", group: "Confirmation", keywords: "ctrl control shift x force remove"))
+            entries.append(.init(title: "Offer force delete", keys: "⇧⌘X", group: "Confirmation", keywords: "shift command cmd x force remove"))
         }
         if renameCandidate != nil || hasSessionAction {
             entries.append(.init(title: "Confirm rename or session action", keys: "↵", group: "Confirmation", keywords: "enter return close delete"))
@@ -157,12 +157,18 @@ final class PickerModel: ObservableObject {
     @Published var splitMode = false
     @Published var removalCandidate: PickerItem?
     struct SessionDeletion {
-        enum Phase { case loading, confirm, deleting, failed, forceOffered, forceConfirm }
+        enum Phase { case loading, review, preparing, confirm, deleting, failed, forceOffered, forceConfirm }
         let id = UUID()
         let candidate: PickerItem
         var phase: Phase = .loading
         var plan: APIResult?
         var error: String?
+        var selectedPaths: Set<String> = []
+        var deletedPaths: Set<String> = []
+        var closeSessionConfirmed = false
+        var checkingPath: String?
+        var checkStartedAt: Date?
+        var preparationSelection: Set<String>?
     }
     @Published private(set) var sessionDeletion: SessionDeletion?
     private var deletionPreviewTask: Task<Void, Never>?
@@ -171,10 +177,6 @@ final class PickerModel: ObservableObject {
         view == .sessions && page == .directories ? removalCandidate : nil
     }
     var hasSessionAction: Bool { sessionCloseCandidate != nil || sessionDeletion != nil }
-    var sessionDeletionDetailHeight: CGFloat {
-        guard let sessionDeletion else { return 0 }
-        return sessionDeletion.error == nil ? 76 : 110
-    }
     @Published var renameCandidate: PickerItem?
     @Published var renameLabel = ""
     private var pendingRename: (context: Int, item: PickerItem, label: String)?
@@ -1374,15 +1376,13 @@ final class PickerModel: ObservableObject {
             do {
                 let result = try await self.request("sessions.delete.preview", params: [
                     "kind": .text("session"), "session_id": .text(selected.sessionID ?? selected.path),
-                    "host": .text(selected.host ?? ""),
+                    "host": .text(selected.host ?? ""), "review_worktrees": .flag(true),
+                    "discover_only": .flag(true),
                 ])
-                guard context == self.contextGeneration, self.sessionDeletion?.id == deletion.id else { return }
+                guard !Task.isCancelled, context == self.contextGeneration, self.sessionDeletion?.id == deletion.id else { return }
                 if let error = result.error, !error.isEmpty { throw APIError.message(error) }
-                guard result.deleteToken != nil, result.path != nil, result.branch != nil else {
-                    throw APIError.message("Backend returned no deletion plan.")
-                }
-                self.sessionDeletion?.plan = result
-                self.sessionDeletion?.phase = .confirm
+                try self.acceptDeletionReview(result)
+                await self.checkDeletionWorktrees(context: context, id: deletion.id)
             } catch {
                 guard !Task.isCancelled, context == self.contextGeneration,
                       self.sessionDeletion?.id == deletion.id else { return }
@@ -1392,23 +1392,221 @@ final class PickerModel: ObservableObject {
         }
     }
 
+    private func acceptDeletionReview(_ result: APIResult) throws {
+        guard let token = result.deleteToken, !token.isEmpty, let worktrees = result.worktrees,
+              Set(worktrees.map(\.path)).count == worktrees.count,
+              sessionDeletion?.plan?.deleteToken == nil || sessionDeletion?.plan?.deleteToken == token else {
+            throw APIError.message("Backend returned no valid worktree review.")
+        }
+        let previous = Set((sessionDeletion?.plan?.worktrees ?? []).filter(\.deletable).map(\.path))
+        let ready = Set(worktrees.filter(\.deletable).map(\.path))
+        sessionDeletion?.selectedPaths.formIntersection(ready)
+        sessionDeletion?.selectedPaths.formUnion(ready.subtracting(previous))
+        sessionDeletion?.plan = result
+        if worktrees.contains(where: { !$0.isChecked }) { sessionDeletion?.phase = .loading }
+        else { sessionDeletion?.phase = worktrees.contains(where: { $0.deletable && !$0.isPrepared }) ? .review : .confirm }
+    }
+
+    private func checkDeletionWorktrees(context: Int, id: UUID, firstPath: String? = nil) async {
+        var preferred = firstPath
+        while !Task.isCancelled, context == contextGeneration, let deletion = sessionDeletion, deletion.id == id {
+            let preferredRow = preferred.flatMap { path in deletion.plan?.worktrees?.first { $0.path == path && !$0.isChecked } }
+            preferred = nil
+            guard let row = preferredRow ?? deletion.plan?.worktrees?.first(where: { !$0.isChecked }), let token = deletion.plan?.deleteToken else {
+                sessionDeletion?.checkingPath = nil
+                sessionDeletion?.checkStartedAt = nil
+                return
+            }
+            sessionDeletion?.checkingPath = row.path
+            sessionDeletion?.checkStartedAt = Date()
+            do {
+                let result = try await request("sessions.delete.check", params: [
+                    "kind": .text("session"), "session_id": .text(deletion.candidate.sessionID ?? deletion.candidate.path),
+                    "host": .text(deletion.candidate.host ?? ""), "review_worktrees": .flag(true),
+                    "delete_token": .text(token), "path": .text(row.path), "metadata_only": .flag(true),
+                ])
+                guard !Task.isCancelled, context == contextGeneration, sessionDeletion?.id == id else { return }
+                if let error = result.error, !error.isEmpty {
+                    sessionDeletion?.error = error
+                    sessionDeletion?.phase = .failed
+                    sessionDeletion?.checkingPath = nil
+                    return
+                }
+                try acceptDeletionReview(result)
+                // A successful check must resolve or finish its requested row.
+                let before = deletion.plan?.worktrees?.filter { !$0.isChecked }.count ?? 0
+                let remaining = result.worktrees?.filter { !$0.isChecked }.count ?? before
+                guard remaining < before,
+                      result.worktrees?.contains(where: { $0.path == row.path && !$0.isChecked }) != true else {
+                    throw APIError.message("Worktree check did not finish. Retry this check.")
+                }
+            } catch {
+                guard !Task.isCancelled, context == contextGeneration, sessionDeletion?.id == id else { return }
+                if backendIsClosed {
+                    sessionDeletion?.error = "Connection lost. Refresh the review to check paths again. \(error.localizedDescription)"
+                    sessionDeletion?.phase = .failed
+                } else if let index = sessionDeletion?.plan?.worktrees?.firstIndex(where: { $0.path == row.path }) {
+                    sessionDeletion?.plan?.worktrees?[index].error = error.localizedDescription
+                } else {
+                    sessionDeletion?.error = error.localizedDescription
+                    sessionDeletion?.phase = .failed
+                }
+                sessionDeletion?.checkingPath = nil
+                return
+            }
+        }
+    }
+
+    var canPrepareSessionDeletion: Bool {
+        guard contextReady, !backendIsClosed, !busy, let deletion = sessionDeletion,
+              deletion.phase == .review, deletion.checkingPath == nil, deletion.preparationSelection == nil,
+              deletion.plan?.worktrees?.allSatisfy(\.isChecked) == true, !deletion.selectedPaths.isEmpty else { return false }
+        let eligible = Set((deletion.plan?.worktrees ?? []).filter(\.deletable).map(\.path))
+        return deletion.selectedPaths.isSubset(of: eligible)
+    }
+
+    func prepareSessionDeletion() {
+        guard canPrepareSessionDeletion, let deletion = sessionDeletion else { return }
+        sessionDeletion?.preparationSelection = deletion.selectedPaths
+        sessionDeletion?.phase = .preparing
+        let context = contextGeneration
+        deletionPreviewTask?.cancel()
+        deletionPreviewTask = Task { [weak self] in await self?.prepareDeletionWorktrees(context: context, id: deletion.id) }
+    }
+
+    private func prepareDeletionWorktrees(context: Int, id: UUID, firstPath: String? = nil) async {
+        var preferred = firstPath
+        while !Task.isCancelled, context == contextGeneration, let deletion = sessionDeletion, deletion.id == id,
+              let selection = deletion.preparationSelection, let token = deletion.plan?.deleteToken {
+            let pending = (deletion.plan?.worktrees ?? []).filter { selection.contains($0.path) && !$0.isPrepared }
+            let row = preferred.flatMap { path in pending.first { $0.path == path } } ?? pending.first
+            preferred = nil
+            guard let row else {
+                sessionDeletion?.phase = .confirm
+                sessionDeletion?.checkingPath = nil
+                sessionDeletion?.checkStartedAt = nil
+                return
+            }
+            sessionDeletion?.checkingPath = row.path
+            sessionDeletion?.checkStartedAt = Date()
+            do {
+                let result = try await request("sessions.delete.prepare", params: [
+                    "kind": .text("session"), "session_id": .text(deletion.candidate.sessionID ?? deletion.candidate.path),
+                    "host": .text(deletion.candidate.host ?? ""), "review_worktrees": .flag(true),
+                    "delete_token": .text(token), "path": .text(row.path), "selected_paths": .texts(selection.sorted()),
+                ])
+                guard !Task.isCancelled, context == contextGeneration, sessionDeletion?.id == id else { return }
+                if let error = result.error, !error.isEmpty {
+                    sessionDeletion?.error = error
+                    sessionDeletion?.phase = .failed
+                    sessionDeletion?.checkingPath = nil
+                    return
+                }
+                guard result.deleteToken == token, let rows = result.worktrees,
+                      Set(rows.map(\.path)).count == rows.count, rows.allSatisfy(\.isChecked),
+                      selection.isSubset(of: Set(rows.map(\.path))),
+                      let finished = rows.first(where: { $0.path == row.path }), finished.isPrepared || finished.error != nil else {
+                    throw APIError.message("Preparation did not finish. Retry this worktree.")
+                }
+                sessionDeletion?.plan = result
+                if finished.error != nil {
+                    sessionDeletion?.checkingPath = nil
+                    return
+                }
+            } catch {
+                guard !Task.isCancelled, context == contextGeneration, sessionDeletion?.id == id else { return }
+                if backendIsClosed {
+                    sessionDeletion?.error = "Connection lost. Refresh the review before preparing again. \(error.localizedDescription)"
+                    sessionDeletion?.phase = .failed
+                } else if let index = sessionDeletion?.plan?.worktrees?.firstIndex(where: { $0.path == row.path }) {
+                    sessionDeletion?.plan?.worktrees?[index].error = error.localizedDescription
+                } else {
+                    sessionDeletion?.error = error.localizedDescription
+                    sessionDeletion?.phase = .failed
+                }
+                sessionDeletion?.checkingPath = nil
+                return
+            }
+        }
+    }
+
+    private func retryDeletionPreparation(_ path: String) {
+        guard !busy, let deletion = sessionDeletion, deletion.checkingPath == nil,
+              deletion.preparationSelection?.contains(path) == true,
+              deletion.plan?.worktrees?.contains(where: { $0.path == path && !$0.isPrepared }) == true else { return }
+        let context = contextGeneration
+        deletionPreviewTask?.cancel()
+        deletionPreviewTask = Task { [weak self] in await self?.prepareDeletionWorktrees(context: context, id: deletion.id, firstPath: path) }
+    }
+
+    func retryDeletionWorktree(_ path: String) {
+        if sessionDeletion?.phase == .preparing { retryDeletionPreparation(path); return }
+        guard !busy, let deletion = sessionDeletion, deletion.checkingPath == nil, deletion.preparationSelection == nil,
+              deletion.phase == .loading || deletion.phase == .review || deletion.phase == .confirm,
+              let index = deletion.plan?.worktrees?.firstIndex(where: { $0.path == path && ($0.retryable || !$0.isChecked) }) else { return }
+        sessionDeletion?.plan?.worktrees?[index].checked = false
+        sessionDeletion?.plan?.worktrees?[index].error = nil
+        sessionDeletion?.phase = .loading
+        let context = contextGeneration
+        deletionPreviewTask?.cancel()
+        deletionPreviewTask = Task { [weak self] in await self?.checkDeletionWorktrees(context: context, id: deletion.id, firstPath: path) }
+    }
+
+    func refreshDeletionReview() {
+        guard !closed, !busy, sessionDeletion != nil else { return }
+        cancelDeleteSession()
+        if let process = backend as? ProcessBackend, process.isClosed {
+            themeTask?.cancel()
+            backend = ProcessBackend(options: options)
+            renewSubscription()
+        }
+        beginDeleteSession()
+    }
+
     func cancelDeleteSession() {
         guard !busy else { return }
         deletionPreviewTask?.cancel(); deletionPreviewTask = nil
         sessionDeletion = nil
     }
 
+    var canConfirmSessionDeletion: Bool {
+        guard contextReady, !backendIsClosed, !busy, let deletion = sessionDeletion,
+              deletion.phase == .confirm || deletion.phase == .forceConfirm,
+              deletion.plan?.deleteToken != nil, deletion.closeSessionConfirmed,
+              deletion.checkingPath == nil, deletion.plan?.worktrees?.allSatisfy(\.isChecked) == true,
+              !deletion.selectedPaths.isEmpty,
+              deletion.preparationSelection == nil || deletion.preparationSelection == deletion.selectedPaths else { return false }
+        let deletable = Set((deletion.plan?.worktrees ?? []).filter { $0.deletable && $0.isPrepared }.map(\.path))
+        return deletion.selectedPaths.isSubset(of: deletable)
+            && deletion.selectedPaths.isDisjoint(with: deletion.deletedPaths)
+    }
+
+    func selectDeletionWorktree(_ path: String, selected: Bool) {
+        guard !busy, let deletion = sessionDeletion, deletion.preparationSelection == nil,
+              deletion.phase == .confirm || deletion.phase == .loading || deletion.phase == .review,
+              deletion.plan?.worktrees?.contains(where: { $0.path == path && $0.deletable }) == true else { return }
+        if selected { sessionDeletion?.selectedPaths.insert(path) }
+        else { sessionDeletion?.selectedPaths.remove(path) }
+    }
+
+    func confirmDeletionSessionClose(_ confirmed: Bool) {
+        guard !busy, let deletion = sessionDeletion, deletion.plan != nil,
+              deletion.phase == .confirm || deletion.phase == .loading || deletion.phase == .review else { return }
+        sessionDeletion?.closeSessionConfirmed = confirmed
+    }
+
     func offerForceDeleteSession() {
-        guard !busy, sessionDeletion?.phase == .forceOffered else { return }
+        guard !busy, sessionDeletion?.phase == .forceOffered,
+              sessionDeletion?.closeSessionConfirmed == true else { return }
         sessionDeletion?.phase = .forceConfirm
     }
 
     func confirmDeleteSession() {
-        guard contextReady, !busy, let deletion = sessionDeletion,
-              deletion.phase == .confirm || deletion.phase == .forceConfirm,
+        guard canConfirmSessionDeletion, let deletion = sessionDeletion,
               let token = deletion.plan?.deleteToken else { return }
         let context = contextGeneration
         sessionDeletion?.phase = .deleting
+        sessionDeletion?.checkStartedAt = Date()
         sessionDeletion?.error = nil
         perform {
             do {
@@ -1417,28 +1615,37 @@ final class PickerModel: ObservableObject {
                     "session_id": .text(deletion.candidate.sessionID ?? deletion.candidate.path),
                     "host": .text(deletion.candidate.host ?? ""), "delete_token": .text(token),
                     "force": .flag(deletion.phase == .forceConfirm),
+                    "review_worktrees": .flag(true), "close_session": .flag(deletion.closeSessionConfirmed),
+                    "selected_paths": .texts(deletion.selectedPaths.sorted()),
                 ])
-                guard self.sessionDeletion?.id == deletion.id else { return }
-                if result.worktreeRemoved == true, let path = deletion.plan?.path {
+                guard context == self.contextGeneration, self.sessionDeletion?.id == deletion.id else { return }
+                let deletedPaths = Set(result.deletedPaths ?? [])
+                guard deletedPaths.isSubset(of: deletion.selectedPaths) else {
+                    throw APIError.message("Backend returned unexpected deleted paths. Check resources before retrying.")
+                }
+                self.sessionDeletion?.deletedPaths.formUnion(deletedPaths)
+                if !deletedPaths.isEmpty {
                     self.items.removeAll { item in
                         item.host == deletion.candidate.host && item.kind == "dir"
-                            && (item.path == path || item.path.hasPrefix(path + "/"))
+                            && deletedPaths.contains(where: { item.path == $0 || item.path.hasPrefix($0 + "/") })
                     }
+                    self.invalidateLists()
                     self.cacheSessionSnapshot()
                 }
                 if let error = result.error, !error.isEmpty, result.sessionClosed != true {
                     self.sessionDeletion?.error = error
                     self.sessionDeletion?.phase = result.forceAvailable == true ? .forceOffered : .failed
-                    if result.deleteToken != nil { self.sessionDeletion?.plan = result }
+                    if result.deleteToken != nil, result.worktrees != nil { self.sessionDeletion?.plan = result }
                     return
                 }
-                guard result.sessionClosed == true, result.worktreeRemoved == true, result.branchRemoved == true else {
+                guard result.sessionClosed == true, result.worktreeRemoved == true, result.branchRemoved == true,
+                      deletedPaths == deletion.selectedPaths else {
                     self.sessionDeletion?.error = "Backend did not confirm complete deletion. Check resources before retrying."
                     self.sessionDeletion?.phase = .failed
                     return
                 }
                 self.sessionDeletion = nil
-                self.removeSessionRow(deletion.candidate, worktreePath: deletion.plan?.path)
+                self.removeSessionRow(deletion.candidate)
                 if let warning = result.error, !warning.isEmpty { self.notice = warning }
             } catch {
                 guard context == self.contextGeneration, !self.closed,

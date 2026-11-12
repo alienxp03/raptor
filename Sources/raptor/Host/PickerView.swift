@@ -19,11 +19,13 @@ struct PickerView: View {
                 status
                 footer
             }
-            .opacity(model.shortcutsPresented ? 0 : 1)
-            .allowsHitTesting(!model.shortcutsPresented)
-            .disabled(model.shortcutsPresented)
-            .accessibilityHidden(model.shortcutsPresented)
-            if model.shortcutsPresented { shortcutsPage }
+            .opacity(model.shortcutsPresented || model.sessionDeletion != nil ? 0 : 1)
+            .allowsHitTesting(!model.shortcutsPresented && model.sessionDeletion == nil)
+            .disabled(model.shortcutsPresented || model.sessionDeletion != nil)
+            .accessibilityHidden(model.shortcutsPresented || model.sessionDeletion != nil)
+            if let deletion = model.sessionDeletion {
+                DeleteSessionPage(model: model, deletion: deletion)
+            } else if model.shortcutsPresented { shortcutsPage }
         }
         .font(.system(size: PickerStyle.bodyFontSize))
         .foregroundStyle(PickerStyle.foreground)
@@ -44,6 +46,9 @@ struct PickerView: View {
             } else {
                 field = shortcutsReturnFocus
             }
+        }
+        .onChange(of: model.sessionDeletion?.id) { _, id in
+            field = id == nil ? .search : nil
         }
         .onChange(of: model.basePickerPresented) { _, shown in
             if !shown && model.page == .create { field = baseReturnFocus }
@@ -76,7 +81,6 @@ struct PickerView: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("shortcuts-back")
                 Spacer()
-                Text("Esc to return").foregroundStyle(PickerStyle.secondaryText)
             }
             .padding(.horizontal, PickerStyle.horizontalInset)
             .frame(height: PickerStyle.searchHeight)
@@ -122,7 +126,7 @@ struct PickerView: View {
                 }
             }
             Divider().overlay(PickerPalette.stroke)
-            Text("↑↓ move · Esc back")
+            Text("↑↓ move")
                 .font(.system(size: 11))
                 .foregroundStyle(PickerStyle.secondaryText)
                 .frame(height: PickerStyle.footerHeight)
@@ -337,7 +341,7 @@ struct PickerView: View {
                         .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 5))
                         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(PickerStyle.editingAccent, lineWidth: 1))
                         .layoutPriority(1)
-                    Text("↵ Save · Esc Cancel")
+                    Text("↵ Save")
                         .font(.system(size: 10))
                         .foregroundStyle(PickerStyle.secondaryText)
                         .fixedSize()
@@ -347,7 +351,7 @@ struct PickerView: View {
                         .lineLimit(1).truncationMode(.tail).layoutPriority(1)
                     if model.sessionCloseCandidate?.id == item.id {
                         Spacer(minLength: 8)
-                        Text("Close?  ↵ Confirm · Esc Cancel")
+                        Text("Close?  ↵ Confirm")
                             .font(.system(size: 10))
                             .foregroundStyle(PickerStyle.selectionText.opacity(0.8))
                             .fixedSize()
@@ -381,7 +385,6 @@ struct PickerView: View {
 
     private func rowHeight(_ item: PickerItem, isAgent: Bool, selected: Bool) -> CGFloat {
         if isAgent { return PickerStyle.agentRowHeight }
-        if model.sessionDeletion?.candidate.id == item.id { return PickerStyle.rowHeight + model.sessionDeletionDetailHeight }
         if model.page == .worktrees {
             return PickerStyle.worktreeRowHeight * CGFloat(selected ? PickerStyle.branchLines(for: item) : 1)
         }
@@ -417,18 +420,7 @@ struct PickerView: View {
         let isSessionRow = model.view == .sessions && item.isSessionEntry
         let isLauncherDir = model.view == .sessions && item.kind == "dir"
         return HoverRow(selected: selected, enabled: true) {
-            if let deletion = model.sessionDeletion, deletion.candidate.id == item.id {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 10) {
-                        rowContent(item, position: position, selected: selected, isAgent: isAgent, isSessionRow: isSessionRow, isLauncherDir: isLauncherDir)
-                    }
-                    deletionDetails(deletion)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 8)
-            } else {
-                rowContent(item, position: position, selected: selected, isAgent: isAgent, isSessionRow: isSessionRow, isLauncherDir: isLauncherDir)
-            }
+            rowContent(item, position: position, selected: selected, isAgent: isAgent, isSessionRow: isSessionRow, isLauncherDir: isLauncherDir)
         }
         .font(.system(size: PickerStyle.rowFontSize, weight: selected ? .medium : .regular))
         .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
@@ -451,7 +443,7 @@ struct PickerView: View {
             model.selectedID = item.id
         }
         .help(rowHelp(item, isAgent: isAgent))
-        .accessibilityElement(children: model.renameCandidate?.id == item.id || model.sessionDeletion?.candidate.id == item.id ? .contain : .ignore)
+        .accessibilityElement(children: model.renameCandidate?.id == item.id ? .contain : .ignore)
         .accessibilityLabel(rowAccessibility(item, isAgent: isAgent, isSessionRow: isSessionRow))
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityAddTraits(.isButton)
@@ -465,60 +457,7 @@ struct PickerView: View {
                 Button("Confirm close session") { model.confirmCloseSession(item) }
                 Button("Cancel close session") { model.escape() }
             }
-            if let deletion = model.sessionDeletion, deletion.candidate.id == item.id {
-                if deletion.phase == .confirm || deletion.phase == .forceConfirm {
-                    Button(deletion.phase == .forceConfirm ? "Confirm force delete" : "Confirm delete session") {
-                        model.confirmDeleteSession()
-                    }
-                }
-                Button(model.busy ? "Hide deletion progress" : "Cancel delete session") { model.escape() }
-            }
         }
-    }
-
-    private func deletionDetails(_ deletion: PickerModel.SessionDeletion) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if let plan = deletion.plan {
-                Text("Close session · delete worktree + local branch · \(plan.branch ?? "")")
-                    .font(.system(size: 11, weight: .medium))
-                Text("\(deletion.candidate.host ?? "This Mac") · \(displayPath(plan.path ?? ""))")
-                    .font(.system(size: 10))
-                    .lineLimit(1).truncationMode(.middle)
-                    .help(plan.path ?? "")
-            }
-            if let error = deletion.error {
-                Text(error).font(.system(size: 11)).lineLimit(2)
-                    .help(error)
-                    .accessibilityIdentifier("delete-session-error")
-            }
-            HStack(spacing: 12) {
-                switch deletion.phase {
-                case .loading:
-                    Text("Checking worktree…")
-                case .confirm:
-                    Text("↵ Delete · Esc Cancel")
-                    Spacer()
-                    Text("Remote branches kept")
-                case .deleting:
-                    Text("Deleting…")
-                case .failed:
-                    Text("Esc Cancel")
-                case .forceOffered:
-                    Button("⌃⇧X Force delete…") { model.offerForceDeleteSession() }
-                        .accessibilityIdentifier("offer-force-delete-session")
-                    Text("Esc Cancel")
-                case .forceConfirm:
-                    Text("Discard uncommitted files and unmerged commits?")
-                        .fontWeight(.semibold)
-                    Text("↵ Force delete · Esc Cancel")
-                }
-            }
-            .font(.system(size: 10))
-            .buttonStyle(.plain)
-        }
-        .foregroundStyle(PickerStyle.selectionText.opacity(0.85))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier("delete-session-details")
     }
 
     private var selectedWorktreePath: some View {
@@ -873,7 +812,7 @@ struct PickerView: View {
                 Button("⌃X Close") { model.askCloseSession() }
                     .disabled(!model.canOpen)
                     .accessibilityIdentifier("remove-session")
-                Button("⌃⇧X Delete") { model.beginDeleteSession() }
+                Button("⇧⌘X Delete") { model.beginDeleteSession() }
                     .disabled(!model.canOpen)
                     .accessibilityIdentifier("delete-session")
             }

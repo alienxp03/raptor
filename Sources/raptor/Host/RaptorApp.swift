@@ -372,11 +372,16 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if model.sessionDeletion != nil {
             if event.keyCode == 53 { model.escape(); return true }
-            if event.keyCode == 36 || event.keyCode == 76 { model.confirmDeleteSession(); return true }
+            if event.keyCode == 36 || event.keyCode == 76 {
+                if model.sessionDeletion?.phase == .review { model.prepareSessionDeletion() }
+                else { model.confirmDeleteSession() }
+                return true
+            }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if flags.intersection([.control, .shift, .command, .option]) == [.control, .shift],
-               event.charactersIgnoringModifiers?.lowercased() == "x" { model.offerForceDeleteSession() }
-            return true
+            if flags.intersection([.control, .shift, .command, .option]) == [.command, .shift],
+               event.charactersIgnoringModifiers?.lowercased() == "x" { model.offerForceDeleteSession(); return true }
+            // The review page owns Tab/Space and checkbox focus. The list beneath is disabled.
+            return false
         }
         if model.removalCandidate != nil {
             // The sheet owns its keys. Explicitly cancel Escape without letting
@@ -472,9 +477,12 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if model.canSubmitForm { model.create() }
             return true
         }
-        if control && !command && !option && key == "x" {
-            // askCloseSession only acts on a selected session row of the launcher.
-            if shift { model.beginDeleteSession() } else { model.askCloseSession() }
+        if command && shift && !option && !control && key == "x" {
+            model.beginDeleteSession()
+            return true
+        }
+        if control && !command && !option && !shift && key == "x" {
+            model.askCloseSession()
             return true
         }
         if control && !command && !option {

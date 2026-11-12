@@ -9,6 +9,8 @@ actor DemoBackend: BackendClient {
     ]
     private var pinned: Set<String> = ["/Users/demo/Workspace/Projects/raptor"]
     private var contextUpdates = 0
+    private var deletionReview: [DeletionWorktree] = []
+    private var deletionPreparation: Set<String>?
     private var calls: [String] = []
     private var lastParams: [String: [String: APIValue]] = [:]
     private let agents = [
@@ -94,20 +96,6 @@ actor DemoBackend: BackendClient {
         case "sessions.close":
             sessionEntries.removeAll { $0.path == text("session_id") }
             return APIResult()
-        case "sessions.delete.preview", "sessions.delete":
-            let session = text("session_id")
-            let token = "demo-delete:" + session
-            let plan = APIResult(repo: repo, path: repo + "-worktrees/native-picker", branch: "feat/native-picker", deleteToken: token)
-            if method == "sessions.delete.preview" { return plan }
-            guard text("delete_token") == token else { throw APIError.message("Deletion plan changed. Start again.") }
-            if session == "session:demo-2", case .flag(false) = params["force"] {
-                var result = plan
-                result.error = "Worktree has uncommitted changes. Normal deletion stopped."
-                result.forceAvailable = true
-                return result
-            }
-            sessionEntries.removeAll { $0.path == session }
-            return APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true)
         case "pins.toggle":
             if pinned.contains(text("path")) { pinned.remove(text("path")) } else { pinned.insert(text("path")) }
             return APIResult()
@@ -122,6 +110,50 @@ actor DemoBackend: BackendClient {
             branches: branches, baseBranch: "main", suggestedBranch: "amber-falcon")
         case "worktrees.branches":
             return APIResult(branches: branches.filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) })
+        case "sessions.delete.preview":
+            deletionPreparation = nil
+            deletionReview = deletionRows(repo: repo, session: text("session_id"))
+            if case .flag(true) = params["discover_only"] {
+                deletionReview = deletionReview.map { DeletionWorktree(path: $0.path, checked: false, prepared: false) }
+            }
+            return APIResult(deleteToken: "demo-review", worktrees: deletionReview)
+        case "sessions.delete.check":
+            guard text("delete_token") == "demo-review",
+                  let index = deletionReview.firstIndex(where: { $0.path == text("path") }),
+                  var row = deletionRows(repo: repo, session: text("session_id")).first(where: { $0.path == text("path") }) else {
+                throw APIError.message("Worktree review changed. Refresh the review.")
+            }
+            if case .flag(true) = params["metadata_only"] { row.prepared = false; row.needsForce = nil }
+            deletionReview[index] = row
+            return APIResult(deleteToken: "demo-review", worktrees: deletionReview)
+        case "sessions.delete.prepare":
+            guard text("delete_token") == "demo-review", deletionReview.allSatisfy(\.isChecked),
+                  case .texts(let paths) = params["selected_paths"], !paths.isEmpty,
+                  deletionPreparation == nil || deletionPreparation == Set(paths), paths.contains(text("path")),
+                  paths.allSatisfy({ path in deletionReview.contains { $0.path == path && $0.deletable } }),
+                  let index = deletionReview.firstIndex(where: { $0.path == text("path") }),
+                  let row = deletionRows(repo: repo, session: text("session_id")).first(where: { $0.path == text("path") }) else {
+                throw APIError.message("Refresh the worktree review.")
+            }
+            deletionPreparation = Set(paths)
+            deletionReview[index] = row
+            return APIResult(deleteToken: "demo-review", worktrees: deletionReview)
+        case "sessions.delete":
+            guard case .flag(true) = params["review_worktrees"], case .flag(true) = params["close_session"],
+                  case .texts(let paths) = params["selected_paths"], !paths.isEmpty,
+                  text("delete_token") == "demo-review", deletionReview.allSatisfy(\.isChecked),
+                  deletionPreparation == nil || deletionPreparation == Set(paths),
+                  paths.allSatisfy({ path in deletionReview.contains { $0.path == path && $0.deletable && $0.isPrepared } }) else {
+                throw APIError.message("Select worktrees and confirm closing the session.")
+            }
+            if case .flag(false) = params["force"], deletionRows(repo: repo, session: text("session_id"))
+                .contains(where: { paths.contains($0.path) && $0.needsForce == true }) {
+                return APIResult(error: "Worktree has uncommitted changes. Normal deletion stopped.", deleteToken: "demo-review", forceAvailable: true,
+                                 worktrees: deletionReview)
+            }
+            worktrees.removeAll { paths.contains($0.path) }
+            sessionEntries.removeAll { $0.sessionID == text("session_id") }
+            return APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true, deletedPaths: paths)
         case "worktrees.preview":
             let branch = text("branch")
             return APIResult(path: "/Users/demo/Projects/example-kit-worktrees/" + branch.replacingOccurrences(of: "/", with: "-"),
@@ -146,6 +178,15 @@ actor DemoBackend: BackendClient {
         case "dispatch":
             return APIResult() // No Rex call; the UI shows the synthetic result.
         default: throw APIError.message("Unknown demo method: \(method)")
+        }
+    }
+
+    private func deletionRows(repo: String, session: String) -> [DeletionWorktree] {
+        worktrees.map { item in
+            DeletionWorktree(repo: repo, path: item.path, branch: item.branch ?? "",
+                             error: item.isMain == true ? "Cannot delete branch `\(item.branch ?? "")`." : nil,
+                             isPrimary: item.isMain,
+                             needsForce: session == "session:demo-2" && item.branch == "feat/native-picker", checked: true, prepared: true)
         }
     }
 }

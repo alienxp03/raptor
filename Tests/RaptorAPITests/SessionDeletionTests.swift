@@ -26,7 +26,8 @@ private final class DeleteFixture {
         calls.append((dir, name, args))
         if transportError { throw MessageError("transport unavailable") }
         if name == "test" { return ExecResult(code: removed ? 1 : 0) }
-        if name == "/bin/sh" { return ExecResult(stdout: "fixture-file-digest") }
+        if name == "find" { return ExecResult() }
+        if name == "/bin/bash" { return ExecResult(stdout: "fixture-file-digest") }
         if name == "wt" {
             if args.first == "remove" {
                 if removalFails { return ExecResult(stderr: "arbitrary Worktrunk failure", code: 1) }

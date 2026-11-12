@@ -215,6 +215,10 @@ struct NativeChecks {
     }
 
     @MainActor private static func sessionDeletionChecks() async throws {
+        for method in ["sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare"] {
+            require(ProcessBackend.timeoutSeconds(for: method) == 180,
+                    "Worktree review must allow time to fingerprint large dependency trees")
+        }
         let backend = CachedListBackend()
         await backend.hold("sessions.delete.preview")
         await backend.hold("sessions.delete")
@@ -222,7 +226,8 @@ struct NativeChecks {
         let model = PickerModel(options: options, backend: backend)
         let candidate = PickerItem(path: "session:delete", label: "feature", kind: "session", sessionID: "session:delete", host: "Remote Host")
         let payload = APIResult(items: [candidate, PickerItem(path: "/repo/feature", kind: "dir", host: "Remote Host")], targets: ["session"], target: "session")
-        let plan = APIResult(repo: "/repo/main", path: "/repo/feature", branch: "feat/example", deleteToken: "checked-plan")
+        let plan = APIResult(repo: "/repo/main", path: "/repo/feature", branch: "feat/example", deleteToken: "checked-plan",
+                             worktrees: [DeletionWorktree(repo: "/repo/main", path: "/repo/feature", branch: "feat/example")])
         model.start()
         try await pending("sessions", backend)
         await backend.reply("sessions", payload)
@@ -237,23 +242,31 @@ struct NativeChecks {
         model.escape()
         await backend.reply("sessions.delete.preview", plan)
         try await Task.sleep(for: .milliseconds(20))
-        require(model.sessionDeletion == nil, "Canceled preview replies must not reopen Delete")
+        require(model.sessionDeletion == nil && PickerStyle.height(for: model) == listHeight && model.selectedID == candidate.id,
+                "Cancel must restore the original list size and selection; stale previews must not reopen Delete")
 
         for attempt in 0..<3 {
             model.beginDeleteSession()
             try await pending("sessions.delete.preview", backend)
             await backend.reply("sessions.delete.preview", plan)
             try await wait { model.sessionDeletion?.phase == .confirm }
-            require(PickerStyle.height(for: model) > listHeight && !model.canOpen,
-                    "Inline Delete must reserve themed detail space and block navigation")
+            let available = max((NSScreen.main?.visibleFrame.height ?? 800) - PickerStyle.topInset - 24, 180)
+            require(PickerStyle.height(for: model) == min(380, available) && !model.canOpen,
+                    "Delete must show a screen-fitted confirmation page and block list navigation")
             model.move(1); model.askCloseSession(); model.beginRenameSession()
             require(model.selectedID == candidate.id && model.removalCandidate == nil && model.renameCandidate == nil)
+            let beforeConsent = await backend.count("sessions.delete")
+            model.confirmDeleteSession()
+            require(await backend.count("sessions.delete") == beforeConsent, "Enter before close consent must not delete")
+            model.confirmDeletionSessionClose(true)
             model.confirmDeleteSession()
             model.confirmDeleteSession()
             try await pending("sessions.delete", backend)
             let params = await backend.parameters("sessions.delete")
             if case .text("Remote Host") = params["host"], case .text("checked-plan") = params["delete_token"],
-               case .text("session:delete") = params["session_id"], case .flag(false) = params["force"] {} else {
+               case .text("session:delete") = params["session_id"], case .flag(false) = params["force"],
+               case .flag(true) = params["review_worktrees"], case .flag(true) = params["close_session"],
+               case .texts(["/repo/feature"]) = params["selected_paths"] {} else {
                 testFailure("Normal Delete must send exact host/session, preview token, and force=false")
             }
             require(model.items.contains { $0.id == candidate.id }, "Failed deletion must remain recoverable in its row")
@@ -271,6 +284,10 @@ struct NativeChecks {
             await backend.reply("sessions.delete", refusal)
             try await wait { !model.busy }
             require(model.sessionDeletion?.phase == .forceOffered)
+            model.selectDeletionWorktree("/repo/feature", selected: false)
+            model.confirmDeletionSessionClose(false)
+            require(model.sessionDeletion?.selectedPaths == ["/repo/feature"] && model.sessionDeletion?.closeSessionConfirmed == true,
+                    "Force offer must retain the original selection and close consent")
             let calls = await backend.count("sessions.delete")
             model.confirmDeleteSession()
             let afterEnter = await backend.count("sessions.delete")
@@ -291,15 +308,15 @@ struct NativeChecks {
             require(model.sessionDeletion?.phase == .deleting && model.busy,
                     "Reopen must preserve an issued deletion and its original context")
             await model.completeReconfigure(token)
-            await backend.reply("sessions.delete", APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true))
+            await backend.reply("sessions.delete", APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true, deletedPaths: ["/repo/feature"]))
             try await wait { !model.busy }
             require(model.sessionDeletion == nil && model.items.isEmpty && !model.loading && !model.refreshing,
                     "Successful Delete must remove session and worktree directory without reloading")
         }
         model.close()
         for outcome in [
-            APIResult(error: "Resources removed, but close failed", worktreeRemoved: true, branchRemoved: true, sessionClosed: false),
-            APIResult(error: "Cleanup warning", worktreeRemoved: true, branchRemoved: true, sessionClosed: true),
+            APIResult(error: "Resources removed, but close failed", worktreeRemoved: true, branchRemoved: true, sessionClosed: false, deletedPaths: ["/repo/feature"]),
+            APIResult(error: "Cleanup warning", worktreeRemoved: true, branchRemoved: true, sessionClosed: true, deletedPaths: ["/repo/feature"]),
             APIResult(),
         ] {
             let partialBackend = CachedListBackend()
@@ -314,6 +331,7 @@ struct NativeChecks {
             try await pending("sessions.delete.preview", partialBackend)
             await partialBackend.reply("sessions.delete.preview", plan)
             try await wait { partial.sessionDeletion?.phase == .confirm }
+            partial.confirmDeletionSessionClose(true)
             partial.confirmDeleteSession()
             try await pending("sessions.delete", partialBackend)
             await partialBackend.reply("sessions.delete", outcome)
@@ -329,7 +347,232 @@ struct NativeChecks {
             }
             partial.close()
         }
-        print("PASS: inline Close/Delete separation, safe preview cancellation, exact remote target, two-step Force, transport/partial errors, busy reopen, and row-only completion")
+        try await multiWorktreeDeletionChecks()
+        try await progressiveWorktreeReviewChecks()
+        try await fastPreparationChecks()
+        print("PASS: worktree review, explicit session-close consent, protected rows, selected-only deletion, two-step Force, partial outcomes, and busy reopen")
+    }
+
+    @MainActor private static func multiWorktreeDeletionChecks() async throws {
+        let encoded = try JSONEncoder().encode(APIValue.texts(["/one/feature", "/two/fix"]))
+        let decodedPaths = try JSONSerialization.jsonObject(with: encoded) as? [String]
+        require(decodedPaths == ["/one/feature", "/two/fix"], "Selected paths must encode as a JSON array")
+        let review = try JSONDecoder().decode(APIResult.self, from: Data(#"{"delete_token":"review","worktrees":[{"repo":"/one","path":"/one/feature","branch":"feat/one"},{"repo":"/two","path":"/two/fix","branch":"fix/two"},{"repo":"/primary","path":"/primary","branch":"master","is_primary":true,"error":"Cannot delete branch `master`."}]}"#.utf8))
+        for success in [false, true] {
+            let backend = CachedListBackend()
+            await backend.hold("sessions.delete.preview")
+            await backend.hold("sessions.delete")
+            let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+            let session = PickerItem(path: "session:multi", label: "multi-repo", kind: "session", sessionID: "session:multi", host: "Mac")
+            let rows = [session] + ["/one/feature", "/one/feature/subdir", "/two/fix", "/primary"].map {
+                PickerItem(path: $0, kind: "dir", host: "Mac")
+            }
+            model.start()
+            try await pending("sessions", backend)
+            await backend.reply("sessions", APIResult(items: rows, targets: ["session"], target: "session"))
+            try await wait { !model.refreshing }
+            model.beginDeleteSession()
+            try await pending("sessions.delete.preview", backend)
+            let previewParams = await backend.parameters("sessions.delete.preview")
+            guard case .flag(true) = previewParams["review_worktrees"] else { testFailure("Preview must request multi-worktree review") }
+            await backend.reply("sessions.delete.preview", review)
+            try await wait { model.sessionDeletion?.phase == .confirm }
+            require(model.sessionDeletion?.selectedPaths == ["/one/feature", "/two/fix"], "All deletable worktrees must be preselected; primary stays locked")
+            model.selectDeletionWorktree("/primary", selected: true)
+            require(model.sessionDeletion?.selectedPaths.contains("/primary") == false, "Protected worktrees cannot be selected")
+            require(!model.canConfirmSessionDeletion, "Worktree selection is not consent to close the session")
+            model.confirmDeletionSessionClose(true)
+            model.selectDeletionWorktree("/one/feature", selected: false)
+            model.selectDeletionWorktree("/two/fix", selected: false)
+            require(!model.canConfirmSessionDeletion, "Empty selection must not delete or close the session")
+            model.confirmDeleteSession()
+            require(await backend.count("sessions.delete") == 0, "Empty selection must send no mutation")
+            model.selectDeletionWorktree("/one/feature", selected: true)
+            require(model.canConfirmSessionDeletion)
+            model.confirmDeleteSession()
+            try await pending("sessions.delete", backend)
+            let params = await backend.parameters("sessions.delete")
+            guard case .texts(["/one/feature"]) = params["selected_paths"], case .flag(true) = params["close_session"] else {
+                testFailure("Only the selected worktree and explicit close consent may be sent")
+            }
+            model.selectDeletionWorktree("/two/fix", selected: true)
+            model.confirmDeletionSessionClose(false)
+            require(model.sessionDeletion?.selectedPaths == ["/one/feature"] && model.sessionDeletion?.closeSessionConfirmed == true,
+                    "An issued operation must retain its frozen selection and consent")
+            await backend.reply("sessions.delete", APIResult(error: success ? nil : "Branch removal failed; session kept open", worktreeRemoved: success,
+                branchRemoved: success, sessionClosed: success, deletedPaths: ["/one/feature"]))
+            try await wait { !model.busy }
+            require(!model.items.contains { $0.path.hasPrefix("/one/feature") }, "Only confirmed deleted paths and their subdirectories leave the list")
+            require(model.items.contains { $0.path == "/two/fix" } && model.items.contains { $0.path == "/primary" },
+                    "Unselected and protected worktrees must remain")
+            if success {
+                require(model.sessionDeletion == nil && !model.items.contains { $0.id == session.id })
+            } else {
+                require(model.sessionDeletion?.phase == .failed && model.items.contains { $0.id == session.id }, "Partial deletion must keep the session open")
+                require(model.sessionDeletion?.deletedPaths == ["/one/feature"])
+                model.confirmDeleteSession()
+                model.offerForceDeleteSession()
+                require(await backend.count("sessions.delete") == 1 && model.sessionDeletion?.phase == .failed,
+                        "Partial failure must never replay or offer Force")
+                model.escape()
+                require(model.sessionDeletion == nil && model.selectedID == session.id)
+            }
+            model.close()
+        }
+    }
+
+    @MainActor private static func progressiveWorktreeReviewChecks() async throws {
+        let backend = CachedListBackend()
+        for method in ["sessions.delete.preview", "sessions.delete.check", "sessions.delete"] { await backend.hold(method) }
+        let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        let candidate = PickerItem(path: "session:progress", label: "two repos", kind: "session", sessionID: "session:progress", host: "Mac")
+        model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: [candidate], targets: ["session"], target: "session"))
+        try await wait { !model.refreshing }
+        let one = DeletionWorktree(repo: "/one", path: "/one/feature", branch: "feature", checked: true)
+        let two = DeletionWorktree(repo: "/two", path: "/two/fix", branch: "fix", checked: true)
+        model.beginDeleteSession()
+        try await pending("sessions.delete.preview", backend)
+        guard case .flag(true) = await backend.parameters("sessions.delete.preview")["discover_only"] else {
+            testFailure("Opening Delete must request only Rex directory discovery")
+        }
+        let discovered = [DeletionWorktree(path: "/one/feature/subdir", checked: false),
+                          DeletionWorktree(path: "/one/feature", checked: false), DeletionWorktree(path: "/two/fix", checked: false)]
+        await backend.reply("sessions.delete.preview", APIResult(deleteToken: "progress", worktrees: discovered))
+        try await pending("sessions.delete.check", backend)
+        require(model.sessionDeletion?.plan?.worktrees?.count == 3 && model.sessionDeletion?.phase == .loading,
+                "Discovered paths must be visible before the first heavy check finishes")
+        require(model.sessionDeletion?.checkingPath == "/one/feature/subdir")
+        model.confirmDeletionSessionClose(true)
+        model.confirmDeleteSession()
+        require(await backend.count("sessions.delete") == 0, "Pending checks must block deletion even with close consent")
+        await backend.reply("sessions.delete.check", APIResult(deleteToken: "progress", worktrees: [one, discovered[2]]))
+        try await pending("sessions.delete.check", backend)
+        require(model.sessionDeletion?.plan?.worktrees?.count == 2 && model.sessionDeletion?.selectedPaths == [one.path],
+                "Canonical worktrees must deduplicate as their checks complete")
+        require(model.sessionDeletion?.checkingPath == two.path && !model.canConfirmSessionDeletion)
+        model.selectDeletionWorktree(one.path, selected: false)
+        let failed = DeletionWorktree(path: two.path, error: "Git root unavailable", checked: true)
+        await backend.reply("sessions.delete.check", APIResult(deleteToken: "progress", worktrees: [one, failed]))
+        try await wait { model.sessionDeletion?.checkingPath == nil }
+        require(model.sessionDeletion?.phase == .confirm && model.sessionDeletion?.selectedPaths.isEmpty == true,
+                "Completed rows and user deselections must survive another row's failure")
+        require(model.sessionDeletion?.plan?.worktrees?.last?.retryable == true,
+                "Failed root resolution must offer Retry even before repo metadata exists")
+        model.retryDeletionWorktree(two.path)
+        try await pending("sessions.delete.check", backend)
+        guard case .text(let retryPath) = await backend.parameters("sessions.delete.check")["path"], retryPath == two.path else {
+            testFailure("Retry must check only its own row")
+        }
+        await backend.reply("sessions.delete.check", APIResult(deleteToken: "progress", worktrees: [one, two]))
+        try await wait { model.sessionDeletion?.checkingPath == nil }
+        require(model.sessionDeletion?.selectedPaths == [two.path] && model.canConfirmSessionDeletion,
+                "Retry must select newly ready worktrees without resetting prior deselections")
+        model.escape()
+
+        model.beginDeleteSession()
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", APIResult(deleteToken: "transport", worktrees: [discovered[1], discovered[2]]))
+        try await pending("sessions.delete.check", backend)
+        await backend.fail("sessions.delete.check")
+        try await wait { model.sessionDeletion?.checkingPath == nil }
+        require(model.sessionDeletion?.plan?.worktrees?.count == 2 && model.sessionDeletion?.plan?.worktrees?.first?.retryable == true,
+                "Transport failure must keep discovered paths visible and offer row retry")
+        require(!model.canConfirmSessionDeletion)
+        model.retryDeletionWorktree(one.path)
+        try await pending("sessions.delete.check", backend)
+        model.escape()
+        await backend.reply("sessions.delete.check", APIResult(deleteToken: "transport", worktrees: [one, two]))
+        try await Task.sleep(for: .milliseconds(20))
+        require(model.sessionDeletion == nil && model.selectedID == candidate.id,
+                "Cancel must suppress late per-row replies and keep the original selection")
+
+        model.beginDeleteSession()
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", APIResult(deleteToken: "stale", worktrees: [discovered[1]]))
+        try await pending("sessions.delete.check", backend)
+        await backend.reply("sessions.delete.check", APIResult(error: "Review expired", deleteToken: "stale", worktrees: [discovered[1]]))
+        try await wait { model.sessionDeletion?.phase == .failed }
+        require(model.sessionDeletion?.plan?.worktrees?.count == 1 && !model.canConfirmSessionDeletion)
+        model.refreshDeletionReview()
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", APIResult(deleteToken: "fresh", worktrees: [one]))
+        try await wait { model.sessionDeletion?.phase == .confirm }
+        require(model.sessionDeletion?.closeSessionConfirmed == false, "Refreshing stale checks must require new close consent")
+        require(await backend.count("sessions.delete") == 0, "Discovery, checks, Retry, and Refresh must never mutate resources")
+        model.close()
+    }
+
+    @MainActor private static func fastPreparationChecks() async throws {
+        let backend = CachedListBackend()
+        for method in ["sessions.delete.preview", "sessions.delete.prepare", "sessions.delete"] { await backend.hold(method) }
+        let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        let candidate = PickerItem(path: "session:fast", label: "fast review", kind: "session", sessionID: "session:fast", host: "Mac")
+        model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: [candidate, PickerItem(path: "/two/fix", kind: "dir", host: "Mac")], targets: ["session"], target: "session"))
+        try await wait { !model.refreshing }
+        let one = DeletionWorktree(repo: "/one", path: "/one/feature", branch: "feature", checked: true, prepared: false)
+        let two = DeletionWorktree(repo: "/two", path: "/two/fix", branch: "fix", checked: true, prepared: false)
+        let preview = APIResult(deleteToken: "fast", worktrees: [one, two])
+        model.beginDeleteSession()
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", preview)
+        try await wait { model.sessionDeletion?.phase == .review }
+        require(model.canPrepareSessionDeletion && !model.canConfirmSessionDeletion, "Metadata readiness must not imply destructive readiness")
+        model.confirmDeletionSessionClose(true)
+        model.confirmDeleteSession()
+        require(await backend.count("sessions.delete") == 0, "Close consent must not bypass file preparation")
+        model.confirmDeletionSessionClose(false)
+        model.selectDeletionWorktree(two.path, selected: false)
+        model.prepareSessionDeletion()
+        try await pending("sessions.delete.prepare", backend)
+        require(model.sessionDeletion?.phase == .preparing && model.sessionDeletion?.checkingPath == one.path)
+        let parameters = await backend.parameters("sessions.delete.prepare")
+        guard case .texts(["/one/feature"]) = parameters["selected_paths"], parameters["close_session"] == nil else {
+            testFailure("Preparation must scan only frozen selected paths and must not close sessions")
+        }
+        model.escape()
+        var ready = one
+        ready.prepared = true
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "fast", worktrees: [ready, two]))
+        try await Task.sleep(for: .milliseconds(20))
+        require(model.sessionDeletion == nil, "Cancel must suppress late preparation replies")
+
+        model.beginDeleteSession()
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", preview)
+        try await wait { model.sessionDeletion?.phase == .review }
+        model.selectDeletionWorktree(two.path, selected: false)
+        model.prepareSessionDeletion()
+        try await pending("sessions.delete.prepare", backend)
+        model.selectDeletionWorktree(two.path, selected: true)
+        require(model.sessionDeletion?.selectedPaths == [one.path], "Preparation must freeze the user's exact selection")
+        var failed = one
+        failed.error = "File verification failed"
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "fast", worktrees: [failed, two]))
+        try await wait { model.sessionDeletion?.checkingPath == nil }
+        require(model.sessionDeletion?.phase == .preparing && !model.canConfirmSessionDeletion)
+        model.retryDeletionWorktree(one.path)
+        try await pending("sessions.delete.prepare", backend)
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "fast", worktrees: [ready, two]))
+        try await wait { model.sessionDeletion?.phase == .confirm }
+        require(await backend.count("sessions.delete.prepare") == 3, "Preparation must not scan unselected worktrees or replay completed rows")
+        require(model.sessionDeletion?.selectedPaths == [one.path] && !model.canConfirmSessionDeletion)
+        model.selectDeletionWorktree(two.path, selected: true)
+        require(model.sessionDeletion?.selectedPaths == [one.path], "Prepared selection must stay immutable until final confirmation")
+        model.confirmDeletionSessionClose(true)
+        require(model.canConfirmSessionDeletion)
+        model.confirmDeleteSession()
+        try await pending("sessions.delete", backend)
+        guard case .texts(["/one/feature"]) = await backend.parameters("sessions.delete")["selected_paths"] else {
+            testFailure("Final Delete must use only prepared selected worktrees")
+        }
+        await backend.reply("sessions.delete", APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true, deletedPaths: [one.path]))
+        try await wait { !model.busy }
+        require(model.sessionDeletion == nil && model.items.map(\.path) == [two.path], "Unselected files must remain after final deletion")
+        model.close()
     }
 
     @MainActor private static func textEditingChecks() {
@@ -523,6 +766,8 @@ struct NativeChecks {
         require(compactList.shortcutsPresented && PickerStyle.height(for: compactList) == min(594, availableListHeight),
                      "Shortcuts must use a screen-fitted in-picker page")
         require(compactList.selectedShortcutID == compactList.shortcuts.first?.id, "Help must select its first row")
+        require(compactList.shortcuts.first { $0.title == "Review worktrees for deletion" }?.keys == "⇧⌘X",
+                     "Delete help must show Cmd+Shift+X")
         require(compactList.shortcuts.first { $0.title == "Move down" }?.keys == "⌃J" &&
                      compactList.shortcuts.first { $0.title == "Move up" }?.keys == "⌃K",
                      "Movement actions must show control shortcuts without extra arrow symbols")
@@ -2703,8 +2948,9 @@ struct NativeChecks {
         }
         require(FileManager.default.fileExists(atPath: gate + ".ready"), "Fixture must hold an issued read")
         inFlight.cancel() // It must still drain its own response ID.
+        let readMethods = ["pullrequests.resolve", "sessions", "agents", "sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare"]
         let obsolete = (0..<20).map { index in
-            let task = Task { try await backend.request(index % 3 == 0 ? "pullrequests.resolve" : (index % 2 == 0 ? "sessions" : "agents"), params: ["query": .text("old-\(index)")]) }
+            let task = Task { try await backend.request(readMethods[index % readMethods.count], params: ["query": .text("old-\(index)")]) }
             task.cancel()
             return task
         }
@@ -2715,7 +2961,7 @@ struct NativeChecks {
         FileManager.default.createFile(atPath: gate + ".release", contents: Data())
         require(try await inFlight.value.items?.first?.path == "in-flight")
         for task in obsolete {
-            do { _ = try await task.value; testFailure("Canceled queued search reached the wire") }
+            do { _ = try await task.value; testFailure("Canceled queued read reached the wire") }
             catch is CancellationError {} // No connection teardown or ID allocation.
         }
         require(try await latest.value.items?.first?.path == "latest")
@@ -2728,7 +2974,7 @@ struct NativeChecks {
         for (index, entry) in audit.enumerated() {
             require(entry.hasPrefix("\(index + 1):"), "Skipped reads must not consume protocol IDs")
         }
-        print("PASS: blocked transport: 20 canceled queued searches=0 wire requests; in-flight drained, latest=1, canceled mutation=1, contiguous IDs; release-to-latest=\(elapsed)")
+        print("PASS: blocked transport: 20 canceled queued searches/review checks=0 wire requests; in-flight drained, latest=1, canceled mutation=1, contiguous IDs; release-to-latest=\(elapsed)")
     }
 
     @MainActor private static func pullRequestReconnectChecks() async throws {

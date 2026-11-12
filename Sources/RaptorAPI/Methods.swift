@@ -240,7 +240,7 @@ extension Handler {
             }
             addLauncherItems(to: &fields)
             return (.creation(fields: fields.sorted { $0.0 < $1.0 }), nil)
-        case "sessions.delete.preview", "sessions.delete":
+        case "sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare", "sessions.delete":
             return sessionDeletion(method, params)
         case "sessions.close":
             return runSessionAction(params) { p, entry in
