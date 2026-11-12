@@ -37,13 +37,16 @@ rex config reload
 
 | Key | Action |
 | --- | --- |
-| `⇧⌘O` | Open the launcher |
+| `⇧⌘O` | Open Raptor |
+| `⇧⌘C` | Checkout pull request |
 | `⇧⌘N` | Create a worktree (form) |
 | `⌃⇧N` | Instant agent worktree (pi, no form) |
 
 ## Usage
 
-Sessions come first (the current one marked), then directories by frequency. `Enter` switches to a session or opens a directory; the target row shows where it will open.
+Session activity: working `...`, highlighted unread result `✓`, seen result no completion indicator. Working and unread can show together. Rex owns seen receipts; Raptor does not mark results seen. The local Mac preference adapter is client-specific; unavailable receipt data hides the checkmark.
+
+Pinned rows come first, ahead of the current session, then other sessions and directories by frequency. Session pins persist with their host identity; local directory pins persist too. Opening selects the current session, even below pinned rows. `Enter` switches to a session or opens a directory; the target row shows where it will open.
 
 | Key | Action |
 | --- | --- |
@@ -56,14 +59,15 @@ Sessions come first (the current one marked), then directories by frequency. `En
 | `Ctrl+Shift+X` | Delete the selected session, its worktree, and its local branch |
 | `Enter` | Switch or open |
 | `Ctrl+P`, then `H J K L` | Open in a pane split |
-| `⇧⌘P` | Open a pull request (or paste a PR URL) |
+| `⇧⌘P` | Pin/unpin the selected session or local directory |
+| `⇧⌘C` | Checkout pull request (or paste a PR URL) |
 | `Esc` | Clear filter, then dismiss |
 
 The **Shortcuts** footer button opens the same help page. Search action names or keys, such as `rename`, `ctrl r`, or `split`. Use `↑`/`↓` or `Ctrl+J`/`Ctrl+K` to move through shortcuts. The selected row uses the picker theme and stays visible. Help lists Raptor actions only, with action names and keys. Split directions and form keys appear only in their active context. Help never runs an action, and returning preserves the picker search and selection. `?` also opens help when no text field is active; in a text field it stays normal text.
 
 Close and Delete use inline confirmation: `Enter` confirms, `Esc` cancels. Delete shows the host, worktree path, and local branch before removal. Dirty worktrees or unmerged commits require a separate Force confirmation (`Ctrl+Shift+X`, then `Enter`); Force can discard files and commits. Primary worktrees and the picker’s origin session are protected. Remote Git branches are never changed.
 
-Optional bindings for your managed block: `cmd+p` → `raptor_session_last`, `shift+cmd+p` → `raptor_pr_open`.
+Optional Rex binding: `cmd+p` → `raptor_session_last`. Rerun `raptor init` to add the direct `shift+cmd+c` → `raptor_pr_open` binding. This replaces the old optional PR binding inside the managed block only; bindings outside that block stay unchanged.
 
 ### Worktrees
 
@@ -82,7 +86,7 @@ If the project has setup hooks, they run visibly in the destination terminal. `w
 
 ### Pull requests
 
-`⇧⌘P`, or paste a PR URL into search, then confirm. Raptor reuses a matching local clone or clones the repo, creates the worktree, and opens it in a session or tab. Requires `gh auth login`.
+`Cmd+Shift+C` opens **Checkout pull request** directly from Rex or inside the picker. You can also paste a PR URL into search, then confirm. Raptor reuses a matching local clone or clones the repo, creates the worktree, and opens it in a session or tab. Requires `gh auth login`.
 
 ## Configuration
 
@@ -99,6 +103,7 @@ The generated Rex setup looks like this (the plugin path is discovered by `rapto
 ```lua
 dofile("/path/to/raptor/init.lua").setup{}
 rex.bind("shift+cmd+o", "raptor")
+rex.bind("shift+cmd+c", "raptor_pr_open")
 ```
 
 Direct loading also picks up plugin upgrades when you run `rex config reload`.

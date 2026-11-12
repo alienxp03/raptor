@@ -20,11 +20,14 @@ public struct LauncherItem: Equatable, Encodable {
     public var pinned: Bool
     public var state: String
     public var working: Bool
+    public var unreadDone: Bool
+    public var completionSources: [CompletionSource]
 
     public init(
         kind: String = "", id: String = "", path: String = "", sessionID: String = "",
         label: String = "", sessionLabel: String = "", host: String = "", active: Bool = false,
-        local: Bool = false, pinned: Bool = false, state: String = "", working: Bool = false
+        local: Bool = false, pinned: Bool = false, state: String = "", working: Bool = false,
+        unreadDone: Bool = false, completionSources: [CompletionSource] = []
     ) {
         self.kind = kind
         self.id = id
@@ -38,6 +41,8 @@ public struct LauncherItem: Equatable, Encodable {
         self.pinned = pinned
         self.state = state
         self.working = working
+        self.unreadDone = unreadDone
+        self.completionSources = completionSources
     }
 
     enum CodingKeys: String, CodingKey {
@@ -49,6 +54,8 @@ public struct LauncherItem: Equatable, Encodable {
         case local = "is_local"
         case pinned = "is_pinned"
         case state, working
+        case unreadDone = "unread_done"
+        case completionSources = "_completion_sources"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -76,6 +83,8 @@ public struct LauncherItem: Equatable, Encodable {
         if !state.isEmpty {
             try c.encode(state, forKey: .state)
         }
+        if unreadDone { try c.encode(true, forKey: .unreadDone) }
+        if !completionSources.isEmpty { try c.encode(completionSources, forKey: .completionSources) }
         if working {
             try c.encode(working, forKey: .working)
         }
@@ -83,15 +92,15 @@ public struct LauncherItem: Equatable, Encodable {
 }
 
 public extension Catalog {
-    /// LauncherItems composes the flat launcher: live sessions first — the origin
-    /// session pinned to the top — then each host's directories by frecency with
-    /// pinned local directories floating first. Directories whose label already
+    /// LauncherItems composes the flat launcher: pinned rows, the origin session,
+    /// then other sessions and each host's directories in their existing order. Directories whose label already
     /// has a live session on the same host are skipped: selecting the session is
     /// the same action. A query fuzzy-ranks the composed rows over label, path,
     /// and host.
     static func launcherItems(
         _ groups: [HostGroup], _ hostOrder: [String], _ hostDirs: [String: [Directory]],
-        _ query: String, _ agents: [AgentEntry], _ localDisplay: String
+        _ query: String, _ agents: [AgentEntry], _ localDisplay: String,
+        prioritizePins: Bool = true
     ) -> [LauncherItem] {
         var rows: [LauncherItem] = []
         rows.reserveCapacity(16)
@@ -101,6 +110,7 @@ public extension Catalog {
         if localDisplay.isEmpty {
             localDisplay = Rex.localHostLabel
         }
+        let sessionPins = Set(RaptorConfig.loadSessionPins())
         func session(_ entry: SessionEntry, _ local: Bool) -> LauncherItem {
             var host = entry.host
             if host.isEmpty || host == Rex.localHostLabel {
@@ -109,7 +119,10 @@ public extension Catalog {
             return LauncherItem(
                 kind: "session", id: entry.id, path: entry.id,
                 sessionID: entry.sessionID, label: entry.label, sessionLabel: entry.sessionLabel,
-                host: host, active: entry.active, local: local, state: entry.state, working: entry.working
+                host: host, active: entry.active, local: local,
+                pinned: sessionPins.contains(SessionPin(sessionID: entry.sessionID, host: host)),
+                state: entry.state, working: entry.working,
+                unreadDone: entry.unreadDone, completionSources: entry.completionSources
             )
         }
         func dir(_ host: String, _ identityLocal: Bool, _ item: Directory, _ pinned: Bool) -> LauncherItem {
@@ -119,7 +132,8 @@ public extension Catalog {
             }
             return LauncherItem(
                 kind: "dir", id: item.path, path: item.path, label: item.label,
-                host: host, local: identityLocal, pinned: pinned, state: item.state, working: item.working
+                host: host, local: identityLocal, pinned: pinned, state: item.state, working: item.working,
+                unreadDone: item.unreadDone, completionSources: item.completionSources
             )
         }
         var origin = -1
@@ -156,27 +170,16 @@ public extension Catalog {
                 continue
             }
             let local = host == Rex.localHostLabel
-            var pinnedRows: [Directory] = []
-            pinnedRows.reserveCapacity(2)
-            var rest: [Directory] = []
-            rest.reserveCapacity(items.count)
             for item in items {
                 if taken.contains(host + "\u{0}" + item.label) {
                     continue
                 }
-                if local && item.pinned {
-                    pinnedRows.append(item)
-                } else {
-                    rest.append(item)
-                }
-            }
-            for item in pinnedRows + rest {
                 rows.append(dir(host, local, item, local && item.pinned))
             }
         }
 
         if query.isEmpty {
-            return rows
+            return prioritizePins ? pinnedLauncherFirst(rows) : rows
         }
         let scored = rankLauncherItems(rows, query)
         return scored.map { rows[$0.index] }
@@ -213,16 +216,36 @@ public extension Catalog {
         )
     }
 
-    /// Default to the first displayed row, including the current session.
-    /// Items must already be MRU ordered (empty query) or search ranked.
+    /// Select the current session on open, independent of pin position.
+    /// A search or a list without the current session uses its first ranked row.
     static func preferredLauncherID(_ items: [LauncherItem], _ query: String) -> String {
-        items.first?.id ?? ""
+        if query.isEmpty, let current = items.first(where: { $0.kind == "session" && $0.active }) {
+            return current.id
+        }
+        return items.first?.id ?? ""
     }
 
     /// PinLauncherOrigin moves the origin session to the front of already-composed
     /// items (used by callers that compose without a query).
     static func pinLauncherOrigin(_ items: [LauncherItem], _ originSession: String) -> [LauncherItem] {
-        pinOriginFirst(items, originSession)
+        pinnedLauncherFirst(pinOriginFirst(items, originSession))
+    }
+
+    /// Update flags without changing source order. Cached flags are not authoritative.
+    static func applyLauncherPins(_ items: inout [LauncherItem]) {
+        let sessions = Set(RaptorConfig.loadSessionPins())
+        let paths = Set(RaptorConfig.loadPins().map { canonicalPath($0) })
+        for i in items.indices {
+            let item = items[i]
+            items[i].pinned = item.kind == "session"
+                ? sessions.contains(SessionPin(sessionID: item.sessionID, host: item.host))
+                : item.kind == "dir" && item.local && paths.contains(canonicalPath(item.path))
+        }
+    }
+
+    /// Stable partition for empty-query presentation only; search retains relevance.
+    static func pinnedLauncherFirst(_ items: [LauncherItem]) -> [LauncherItem] {
+        items.filter { $0.pinned } + items.filter { !$0.pinned }
     }
 
     /// Local port of Catalog.sameSession (internal in RaptorRex): compares a local

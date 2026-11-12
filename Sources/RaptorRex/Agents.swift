@@ -17,12 +17,14 @@ public struct AgentEntry: Equatable {
     public var active: Bool
     public var updatedAt: Date?
     public var cwd: String
+    public var completionSource: CompletionSource?
+    public var unreadDone: Bool = false
 
     public init(
         path: String = "", kind: String = "", label: String = "", app: String = "", state: String = "",
         agentID: String = "", sessionID: String = "", sessionLabel: String = "", windowID: String = "",
         windowLabel: String = "", blockID: String = "", active: Bool = false, updatedAt: Date? = nil,
-        cwd: String = ""
+        cwd: String = "", completionSource: CompletionSource? = nil
     ) {
         self.path = path
         self.kind = kind
@@ -38,6 +40,7 @@ public struct AgentEntry: Equatable {
         self.active = active
         self.updatedAt = updatedAt
         self.cwd = cwd
+        self.completionSource = completionSource
     }
 }
 
@@ -300,7 +303,10 @@ public extension Rex {
                             agentID: r.id, sessionID: s.sessionID, sessionLabel: s.label, windowID: w.windowID,
                             windowLabel: windowLabel, blockID: b.blockID,
                             active: s.sessionID == origin && w.windowID == s.activeWindowID && b.blockID == w.focusedBlockID,
-                            updatedAt: agentUpdatedAt(r.updatedAt), cwd: cwd))
+                            updatedAt: agentUpdatedAt(r.updatedAt), cwd: cwd,
+                            completionSource: r.updatedAt.map {
+                                CompletionSource(block: b.blockID, record: r.id, state: r.state, updatedAt: $0)
+                            }))
                     }
                 }
             }

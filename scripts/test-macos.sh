@@ -47,6 +47,15 @@ cached_swiftc() {
     cp "$output" "$work/$name"
   fi
 }
+cached_swiftc RexReceiptChecks \
+  "$SCRIPT_ROOT/Sources/raptor/Host/FocusFileWatcher.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/RexReceiptMonitor.swift" \
+  "$SCRIPT_ROOT/macos/Tests/RexReceiptChecks.swift"
+"$work/RexReceiptChecks"
+# Allow this independent check to run while other host contracts are in flight.
+if [[ ${1:-} == --receipts-only ]]; then
+  exit 0
+fi
 host_sources=("$SCRIPT_ROOT"/Sources/raptor/Host/*.swift)
 [[ -f ${host_sources[0]} ]] || fail 'Host sources are not ready: Sources/raptor/Host/*.swift'
 # Native checks run against the bare host sources; the resh model has no app

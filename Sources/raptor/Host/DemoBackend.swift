@@ -8,18 +8,19 @@ actor DemoBackend: BackendClient {
         PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/fix-focus", branch: "fix/focus", isMain: false, state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()))
     ]
     private var pinned: Set<String> = ["/Users/demo/Workspace/Projects/raptor"]
+    private var pinnedSessions: Set<String> = []
     private var contextUpdates = 0
     private var calls: [String] = []
     private var lastParams: [String: [String: APIValue]] = [:]
     private let agents = [
         PickerItem(path: "agent:demo-1", label: "Native Agents view", kind: "agent", sessionID: "session:demo-1", sessionLabel: "dotfiles", app: "Pi", state: "working", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-120)), agentID: "pi-1", windowID: "window:demo-1a", windowLabel: "picker", blockID: "block:demo-left", active: true),
         PickerItem(path: "agent:demo-2", label: "Backend API", kind: "agent", sessionID: "session:demo-1", sessionLabel: "dotfiles", app: "Codex", state: "blocked", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-20)), windowID: "window:demo-1a", windowLabel: "picker", blockID: "block:demo-right"),
-        PickerItem(path: "agent:demo-3", label: "Review tests", kind: "agent", sessionID: "session:demo-2", sessionLabel: "castty", app: "Claude", state: "idle", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)), windowID: "window:demo-2a", windowLabel: "research", blockID: "block:demo-review")
+        PickerItem(path: "agent:demo-3", label: "Review tests", kind: "agent", sessionID: "session:demo-2", sessionLabel: "castty", app: "Claude", state: "idle", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)), windowID: "window:demo-2a", windowLabel: "research", blockID: "block:demo-review", unreadDone: true)
     ]
     private var sessionEntries: [PickerItem] = [
-        PickerItem(path: "session:demo-1", label: "dotfiles", kind: "session", sessionID: "session:demo-1", sessionLabel: "dotfiles", state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), active: true, host: "This Mac"),
-        PickerItem(path: "session:demo-2", label: "castty", kind: "session", sessionID: "session:demo-2", sessionLabel: "castty", state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), host: "This Mac"),
-        PickerItem(path: "session:demo-3", label: "demo-app", kind: "session", sessionID: "session:demo-3", sessionLabel: "demo-app", state: "blocked", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), host: "Demo Host")
+        PickerItem(path: "session:demo-1", label: "dotfiles", kind: "session", sessionID: "session:demo-1", sessionLabel: "dotfiles", state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), active: true, isLocal: true, host: "This Mac"),
+        PickerItem(path: "session:demo-2", label: "castty", kind: "session", sessionID: "session:demo-2", sessionLabel: "castty", state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), isLocal: true, host: "This Mac", unreadDone: true),
+        PickerItem(path: "session:demo-3", label: "demo-app", kind: "session", sessionID: "session:demo-3", sessionLabel: "demo-app", state: "blocked", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), isLocal: false, host: "Demo Host")
     ]
     private let sessionHosts: [HostHeader] = [
         HostHeader(label: "This Mac", local: true, reachable: true, error: nil),
@@ -53,26 +54,32 @@ actor DemoBackend: BackendClient {
             let sorted = items.sorted { ($0.isPinned ?? false) && !($1.isPinned ?? false) }
             return APIResult(items: sorted, targets: targets, target: "session")
         case "sessions":
-            // The flat unified launcher, mirroring catalog.LauncherItems: live
-            // sessions first (origin session on top), then directories per host
+            // The flat unified launcher: pinned rows first, then the origin,
+            // other sessions, and directories per host
             // ("This Mac" first). Unreachable hosts contribute no rows but stay
             // in hosts so their error remains visible.
             let query = text("query")
             let localDirs: [PickerItem] = [
                 PickerItem(path: "/Users/demo/.dotfiles", label: ".dotfiles", kind: "dir",
-                           isPinned: pinned.contains("/Users/demo/.dotfiles"), host: "This Mac"),
+                           isLocal: true, isPinned: pinned.contains("/Users/demo/.dotfiles"), host: "This Mac"),
                 PickerItem(path: "/Users/demo/Workspace/Projects/raptor", label: "raptor", kind: "dir", state: "working", working: true,
-                           isPinned: pinned.contains("/Users/demo/Workspace/Projects/raptor"), host: "This Mac"),
+                           isLocal: true, isPinned: pinned.contains("/Users/demo/Workspace/Projects/raptor"), host: "This Mac"),
             ]
             let remoteDirs: [PickerItem] = [
-                PickerItem(path: "/Volumes/Demo/Projects/demo-app", label: "demo-app", kind: "dir", host: "Demo Host"),
+                PickerItem(path: "/Volumes/Demo/Projects/demo-app", label: "demo-app", kind: "dir", isLocal: false, host: "Demo Host"),
             ]
-            let rows = sessionEntries + localDirs + remoteDirs
+            let sessions = sessionEntries.map { item in
+                var item = item
+                item.isPinned = pinnedSessions.contains((item.host ?? "") + "\u{0}" + (item.sessionID ?? ""))
+                return item
+            }
+            let rows = sessions + localDirs + remoteDirs
             let filtered = rows.filter {
                 query.isEmpty || [$0.label ?? "", $0.sessionLabel ?? "", $0.path, $0.host ?? ""]
                     .contains { $0.localizedCaseInsensitiveContains(query) }
             }
-            return APIResult(items: filtered, hosts: sessionHosts, targets: targets, target: "session")
+            let ordered = filtered.filter { $0.isPinned == true } + filtered.filter { $0.isPinned != true }
+            return APIResult(items: ordered, hosts: sessionHosts, targets: targets, target: "session")
         case "agents":
             let query = text("query")
             let ordered = agents.sorted { lhs, rhs in
@@ -109,8 +116,14 @@ actor DemoBackend: BackendClient {
             sessionEntries.removeAll { $0.path == session }
             return APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true)
         case "pins.toggle":
-            if pinned.contains(text("path")) { pinned.remove(text("path")) } else { pinned.insert(text("path")) }
-            return APIResult()
+            if !text("session_id").isEmpty {
+                let key = text("host") + "\u{0}" + text("session_id")
+                if pinnedSessions.contains(key) { pinnedSessions.remove(key) } else { pinnedSessions.insert(key) }
+                return APIResult(pinned: pinnedSessions.contains(key))
+            } else {
+                if pinned.contains(text("path")) { pinned.remove(text("path")) } else { pinned.insert(text("path")) }
+                return APIResult(pinned: pinned.contains(text("path")))
+            }
         case "context":
             contextUpdates += 1
             return APIResult()

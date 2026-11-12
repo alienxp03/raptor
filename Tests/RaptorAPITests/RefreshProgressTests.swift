@@ -92,7 +92,7 @@ final class RefreshProgressTests: APITestCase {
         }
     }
 
-    func testPinMutationPatchesWarmSnapshotBeforeBackgroundRefresh() throws {
+    func testPinMutationPatchesWarmSnapshotWithoutBackgroundRefresh() throws {
         env.set("HOME", makeTempDir())
         env.set("XDG_CACHE_HOME", makeTempDir())
         let h = warmHandler()
@@ -102,26 +102,10 @@ final class RefreshProgressTests: APITestCase {
             LauncherItem(kind: "dir", id: a, path: a, local: true),
             LauncherItem(kind: "dir", id: b, path: b, local: true),
         ]
-        let started = SignalQueue()
-        final class Release: @unchecked Sendable {
-            private let semaphore = DispatchSemaphore(value: 0)
-            func release() { semaphore.signal() }
-            func wait() { semaphore.wait() }
-        }
-        let release = Release()
         let scans = Counter()
         h.loadSnapshot = { _, _ in
-            let n = scans.add()
-            started.send(n)
-            release.wait()
-            return ([], [
-                LauncherItem(kind: "dir", id: a, path: a, local: true),
-                LauncherItem(kind: "dir", id: b, path: b, local: true, pinned: n == 1),
-            ], nil, nil)
-        }
-        addTeardown {
-            release.release()
-            waitSnapshot(h)
+            _ = scans.add()
+            return ([], [], nil, nil)
         }
         let params = JS.object([("path", .string(b))])
         let (toggleResult, toggleError) = h.callJSON("pins.toggle", params)
@@ -130,10 +114,8 @@ final class RefreshProgressTests: APITestCase {
             return
         }
         _ = toggleResult
-        if started.waitOne(1) == nil {
-            XCTFail("pin refresh did not start")
-            return
-        }
+        XCTAssertFalse(h.revalidating)
+        XCTAssertEqual(scans.load(), 0)
         let (result, error) = h.call("sessions", "{}")
         if let error {
             XCTFail("\(error)")
@@ -150,15 +132,10 @@ final class RefreshProgressTests: APITestCase {
         if let unpinError {
             XCTFail("\(unpinError)")
         }
-        release.release()
-        if started.waitOne(1) == nil {
-            XCTFail("unpin follow-up did not start")
-        }
         let (cached, _) = h.readLauncherCache()
-        for row in cached.items ?? [] where row.pinned {
-            XCTFail("an older scan undid the unpin mutation")
-        }
-        release.release()
-        waitSnapshot(h)
+        XCTAssertEqual(cached.items?.map(\.path), [a, b])
+        XCTAssertFalse((cached.items ?? []).contains { $0.pinned })
+        XCTAssertFalse(h.revalidating)
+        XCTAssertEqual(scans.load(), 0)
     }
 }

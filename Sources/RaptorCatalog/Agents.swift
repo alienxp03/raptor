@@ -24,6 +24,8 @@ public extension Catalog {
         let normalize = (host.isEmpty || host == Rex.localHostLabel) ? canonical : clean
         let cwds = agents.map { normalize($0.cwd) }
         for i in items.indices {
+            items[i].unreadDone = false
+            items[i].completionSources = []
             items[i].state = ""
             items[i].working = false
             let dir = normalize(items[i].path)
@@ -34,6 +36,8 @@ public extension Catalog {
                 if cwds[j] != dir {
                     continue
                 }
+                items[i].unreadDone = items[i].unreadDone || agent.unreadDone
+                if let source = agent.completionSource { items[i].completionSources.append(source) }
                 var state = agent.state
                 if state != "blocked" && state != "working" {
                     state = "idle"

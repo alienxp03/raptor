@@ -170,6 +170,7 @@ func agentEntryJS(_ entry: AgentEntry) -> JS {
         ("app", .string(entry.app)),
         ("state", .string(entry.state)),
     ]
+    if entry.unreadDone { fields.append(("unread_done", .bool(true))) }
     if !entry.agentID.isEmpty {
         fields.append(("agent_id", .string(entry.agentID)))
     }
@@ -279,10 +280,27 @@ func decodeLauncherItem(_ value: JSONValue) -> LauncherItem? {
         if let node = fields.first(where: { $0.0 == key })?.1, case .bool(let b) = node.value { return b }
         return false
     }
+    var sources: [CompletionSource] = []
+    if let node = fields.first(where: { $0.0 == "_completion_sources" })?.1,
+       case .array(let rows) = node.value {
+        for row in rows {
+            guard case .object(let metadata) = row.value else { continue }
+            func field(_ key: String) -> String? {
+                guard let node = metadata.first(where: { $0.0 == key })?.1,
+                      case .string(let value) = node.value else { return nil }
+                return value
+            }
+            if let block = field("block"), let record = field("record"),
+               let state = field("state"), let updatedAt = field("updatedAt") {
+                sources.append(CompletionSource(block: block, record: record, state: state, updatedAt: updatedAt))
+            }
+        }
+    }
     return LauncherItem(
         kind: str("kind"), id: str("id"), path: str("path"), sessionID: str("session_id"),
         label: str("label"), sessionLabel: str("session_label"), host: str("host"), active: bool("active"),
-        local: bool("is_local"), pinned: bool("is_pinned"), state: str("state"), working: bool("working"))
+        local: bool("is_local"), pinned: bool("is_pinned"), state: str("state"), working: bool("working"),
+        completionSources: sources)
 }
 
 /// Go's filepath.EvalSymlinks + filepath.Abs with a Clean fallback.

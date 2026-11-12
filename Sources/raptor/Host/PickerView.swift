@@ -1,5 +1,40 @@
 import SwiftUI
 import AppKit
+import QuartzCore
+
+/// AppKit glyph pulse matches resh; the surrounding row keeps its stable SwiftUI identity.
+private struct PinGlyph: NSViewRepresentable {
+    let color: NSColor
+    let revision: Int
+
+    final class Coordinator {
+        var revision = 0
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSImageView {
+        let view = NSImageView()
+        view.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned")?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+        view.imageScaling = .scaleProportionallyUpOrDown
+        view.wantsLayer = true
+        return view
+    }
+
+    func updateNSView(_ view: NSImageView, context: Context) {
+        view.contentTintColor = color
+        if revision > 0, revision != context.coordinator.revision,
+           context.transaction[PinChangeTransactionKey.self],
+           !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let pulse = CAKeyframeAnimation(keyPath: "transform.scale")
+            pulse.values = [0.85, 1.12, 1]
+            pulse.duration = PickerStyle.pinGlyphDuration
+            view.layer?.add(pulse, forKey: "pin")
+        }
+        context.coordinator.revision = revision
+    }
+}
 
 struct PickerView: View {
     @ObservedObject var model: PickerModel
@@ -155,7 +190,7 @@ struct PickerView: View {
         Group {
             if model.isForm {
                 HStack(spacing: 8) {
-                    Text(model.page == .pr ? "Open pull request" : "New worktree")
+                    Text(model.page == .pr ? "Checkout pull request" : "New worktree")
                         .font(.system(size: PickerStyle.rowFontSize, weight: .semibold))
                     if model.options.demo { demoBadge }
                     Spacer()
@@ -236,6 +271,10 @@ struct PickerView: View {
                 // No anchor: keep visible rows still; reveal only clipped rows.
                 if let id { proxy.scrollTo(id) }
             }
+            .onChange(of: model.pinChangeRevision) { _, _ in
+                // Pinning changes position, not identity. Reveal the moved selection.
+                if let id = model.selectedID { proxy.scrollTo(id) }
+            }
         }
         .id(model.listPresentation)
     }
@@ -251,11 +290,15 @@ struct PickerView: View {
             .accessibilityHidden(true)
     }
 
-    private func pinnedIcon(selected: Bool) -> some View {
+    private func pinnedIcon(selected: Bool, id: String) -> some View {
         let color = selected ? PickerStyle.selectionText.opacity(0.85) : PickerStyle.selection
-        return Image(systemName: "pin.fill")
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(color)
+        return PinGlyph(color: NSColor(color), revision: model.pinAnimationID == id ? model.pinAnimationRevision : 0)
+            .frame(width: 10, height: 12)
+            .transition(.opacity.combined(with: .scale(scale: 0.85)))
+            .transaction { transaction in
+                transaction.animation = transaction[PinChangeTransactionKey.self]
+                    ? .easeOut(duration: PickerStyle.pinGlyphDuration) : nil
+            }
             .accessibilityLabel("Pinned")
     }
 
@@ -303,7 +346,7 @@ struct PickerView: View {
                 cmdBadge(position, selected: selected)
             }
             if !isAgent && item.isPinned == true {
-                pinnedIcon(selected: selected)
+                pinnedIcon(selected: selected, id: item.id)
             }
             if item.kind == "pr" {
                 Text(item.label ?? item.path).lineLimit(1).truncationMode(.middle)
@@ -312,7 +355,9 @@ struct PickerView: View {
                     .frame(width: 16, height: 16).accessibilityHidden(true)
                 Text(item.label ?? item.agentID ?? "Agent")
                     .lineLimit(1).truncationMode(.tail).layoutPriority(1)
-                ActivityIndicator(activity: item.activity, workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground)
+                ActivityIndicator(activity: item.activity,
+                                  workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground,
+                                  unreadColor: selected ? PickerStyle.selectionText : PickerStyle.selection)
                 Spacer(minLength: 8)
                 if !item.agentContext.isEmpty {
                     agentContextLabel(item.agentContext, selected: selected)
@@ -372,7 +417,9 @@ struct PickerView: View {
                     .lineLimit(1).truncationMode(.middle)
             }
             if !isAgent {
-                ActivityIndicator(activity: item.activity, workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground)
+                ActivityIndicator(activity: item.activity,
+                                  workingColor: selected ? PickerStyle.selectionText : PickerStyle.foreground,
+                                  unreadColor: selected ? PickerStyle.selectionText : PickerStyle.selection)
             }
             if !isAgent, item.isLocal == false, let host = item.host, !host.isEmpty {
                 hostLabel(host, selected: selected)
@@ -405,10 +452,11 @@ struct PickerView: View {
             primary = displayPath(item.path) + (item.branch.map { ", branch \($0)" } ?? "")
         }
         let active = item.active == true && !isAgent ? ", Active" : ""
+        let pinned = item.isPinned == true && !isAgent ? ", Pinned" : ""
         let activity = item.activityAccessibility.isEmpty ? "" : ", " + item.activityAccessibility
         let close = model.sessionCloseCandidate?.id == item.id
             ? ", Close session? Return confirms. Escape cancels. Worktree and branch kept." : ""
-        return primary + active + activity + close
+        return primary + active + pinned + activity + close
     }
 
     private func row(_ item: PickerItem, position: Int = 0) -> some View {
@@ -461,6 +509,9 @@ struct PickerView: View {
             model.selectedID = item.id; model.choose()
         }
         .accessibilityActions {
+            if model.canPin && selected {
+                Button(item.isPinned == true ? "Unpin row" : "Pin row") { model.togglePin() }
+            }
             if model.sessionCloseCandidate?.id == item.id {
                 Button("Confirm close session") { model.confirmCloseSession(item) }
                 Button("Cancel close session") { model.escape() }
@@ -829,11 +880,18 @@ struct PickerView: View {
                         .accessibilityIdentifier("show-shortcuts")
                 }
                 if !model.isForm && !model.splitMode {
-                    Button("⇧⌘P PR") { model.beginPullRequest() }
+                    if model.view == .sessions && model.page == .directories {
+                        Button(model.selected?.isPinned == true ? "⇧⌘P Unpin" : "⇧⌘P Pin") { model.togglePin() }
+                            .font(.system(size: 10))
+                            .disabled(!model.canPin)
+                            .help("Pin or unpin selected row (⇧⌘P)")
+                            .accessibilityIdentifier("toggle-pin")
+                    }
+                    Button("⇧⌘C PR") { model.beginPullRequest() }
                         .font(.system(size: 10))
                         .disabled(model.busy || !model.contextReady || model.createdPath != nil)
-                        .help("Open pull request (⇧⌘P)")
-                        .accessibilityLabel("Open pull request")
+                        .help("Checkout pull request (⇧⌘C)")
+                        .accessibilityLabel("Checkout pull request")
                         .accessibilityIdentifier("open-pull-request")
                 }
                 if model.view == .agents {

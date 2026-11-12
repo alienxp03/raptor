@@ -214,6 +214,196 @@ struct NativeChecks {
         print("PASS: outside-click hit regions include popovers/sheets; dismissal clears transient UI and preserves input/recovery")
     }
 
+    @MainActor private static func sessionPinChecks() async throws {
+        let backend = CachedListBackend()
+        await backend.hold("pins.toggle")
+        let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        let session = PickerItem(path: "row:remote", kind: "session", sessionID: "session:remote", host: "Remote Host")
+        let directory = PickerItem(path: "/demo/local", kind: "dir", isLocal: true, host: "This Mac")
+        let remote = PickerItem(path: "/demo/remote", kind: "dir", isLocal: false, host: "Remote Host")
+        let agent = PickerItem(path: "agent:one", kind: "agent", sessionID: "session:remote", host: "Remote Host")
+        let rows = [directory, session, remote, agent]
+        func result(_ items: [PickerItem]) -> APIResult {
+            APIResult(items: items, targets: ["tab", "session"], target: "tab")
+        }
+        model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", result(rows))
+        try await wait { !model.loading && !model.refreshing }
+        require(model.pinAnimationRevision == 0, "Initial rows must not animate as a manual pin")
+        model.setPresented(true)
+        model.target = "session"
+        model.selectedID = session.id
+        require(model.canPin, "Remote sessions with an ID and host must support pinning")
+        for row in [remote, agent] {
+            model.selectedID = row.id
+            require(!model.canPin, "Remote directories and agents must not support pinning")
+        }
+        model.selectedID = "missing-row"
+        require(!model.canPin, "A stale selected ID must not support pinning")
+        model.selectedID = session.id
+        for page in [PickerModel.Page.create, .pr] {
+            model.page = page
+            require(!model.canPin, "Forms must not support pinning")
+        }
+        model.page = .directories
+        model.renameCandidate = session
+        require(!model.canPin, "Rename confirmation must block pinning")
+        model.renameCandidate = nil
+        model.removalCandidate = session
+        require(!model.canPin, "Close confirmation must block pinning")
+        model.removalCandidate = nil
+        model.prCommitConfirmationPresented = true
+        require(!model.canPin, "Checkout confirmation must block pinning")
+        model.prCommitConfirmationPresented = false
+        await backend.hold("sessions.delete.preview")
+        model.beginDeleteSession()
+        try await pending("sessions.delete.preview", backend)
+        require(!model.canPin, "Delete confirmation must block pinning")
+        model.cancelDeleteSession()
+        await backend.reply("sessions.delete.preview", APIResult())
+        model.splitMode = true
+        require(!model.canPin, "Split mode must block pinning")
+        model.splitMode = false
+        let incompleteSessions = [
+            PickerItem(path: "missing-host", kind: "session", sessionID: "session:no-host"),
+            PickerItem(path: "missing-session", kind: "session", host: "This Mac"),
+            PickerItem(path: "empty-session", kind: "session", sessionID: "", host: "This Mac")
+        ]
+        model.items += incompleteSessions
+        for row in incompleteSessions {
+            model.selectedID = row.id
+            require(!model.canPin, "Session pins need a nonempty session ID and host")
+        }
+        model.items = rows
+        model.selectedID = session.id
+
+        model.togglePin()
+        try await pending("pins.toggle", backend)
+        let sessionParams = await backend.parameters("pins.toggle")
+        require(sessionParams.count == 2, "Session pins must not send a directory path")
+        guard case .text("session:remote") = sessionParams["session_id"],
+              case .text("Remote Host") = sessionParams["host"] else {
+            testFailure("Session pins must send the selected session ID and host")
+        }
+        require(model.busy && !model.loading && model.items.map(\.id) == rows.map(\.id),
+                "Pin mutation must keep the mounted rows without a loading state")
+        model.togglePin()
+        await backend.reply("pins.toggle", APIResult())
+        try await pending("sessions", backend)
+        require(model.busy && model.refreshing && !model.loading && model.items.map(\.id) == rows.map(\.id),
+                "Pin refresh must keep the old rows until the new order arrives")
+        var pinnedSession = session
+        pinnedSession.isPinned = true
+        let reordered = [pinnedSession, directory, remote, agent]
+        await backend.reply("sessions", result(reordered))
+        try await wait { !model.busy && !model.refreshing }
+        require(model.items.map(\.id) == reordered.map(\.id) && model.items.first?.isPinned == true,
+                "Successful pin must use backend order and pin state")
+        require(model.selectedID == session.id && model.target == "session",
+                "Pin reorder must retain the selected ID and target")
+        let manualRevision = model.pinAnimationRevision
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        require(manualRevision == (reduceMotion ? 0 : 1), "Only a visible manual pin may advance the animation revision")
+        require(model.pinAnimationID == (reduceMotion ? nil : session.id), "Pin animation must identify the selected row")
+        let toggles = await backend.count("pins.toggle")
+        require(toggles == 1, "A pending pin must not issue a second toggle")
+
+        model.selectedID = directory.id
+        require(model.canPin, "Local directories must support pinning")
+        model.togglePin()
+        try await pending("pins.toggle", backend)
+        let directoryParams = await backend.parameters("pins.toggle")
+        require(directoryParams.count == 1, "Directory pins must send only a path")
+        guard case .text("/demo/local") = directoryParams["path"] else {
+            testFailure("Directory pins must send the selected path")
+        }
+        let listCalls = await backend.count("sessions")
+        await backend.fail("pins.toggle")
+        try await wait { !model.busy }
+        require(model.items.map(\.id) == reordered.map(\.id) && model.items.first?.isPinned == true &&
+                    model.selectedID == directory.id && model.target == "session" && model.error?.contains("Refresh failed") == true,
+                "Failed toggle must retain rows, selection and target, and report the error")
+        let failedListCalls = await backend.count("sessions")
+        require(failedListCalls == listCalls && model.pinAnimationRevision == manualRevision,
+                "Failed toggle must not refresh or animate")
+
+        // A query refresh with the same membership is not a manual pin.
+        model.query = "same-members"
+        require(!model.canPin, "Rows from the previous query must not support pinning")
+        try await pending("sessions", backend)
+        await backend.reply("sessions", result(rows))
+        try await wait { !model.loading && !model.refreshing }
+        require(model.pinAnimationRevision == manualRevision, "Ordinary refresh must not animate pin changes")
+        model.selectedID = session.id
+        model.togglePin()
+        try await pending("pins.toggle", backend)
+        await backend.reply("pins.toggle", APIResult())
+        try await pending("sessions", backend)
+        let added = PickerItem(path: "/demo/new", kind: "dir")
+        await backend.reply("sessions", result(reordered + [added]))
+        try await wait { !model.busy && !model.refreshing }
+        require(model.pinAnimationRevision == manualRevision && model.pinAnimationID == nil,
+                "Manual pin with changed membership must not animate")
+
+        // Hiding must not cancel or replay an issued session pin.
+        model.togglePin()
+        try await pending("pins.toggle", backend)
+        let hiddenCalls = await backend.count("pins.toggle")
+        model.dismissForOutsideClick()
+        model.escape(); model.togglePin()
+        require(model.busy && !model.loading && !model.items.isEmpty && !model.backendIsClosed,
+                "Hidden pending pin must keep its rows and backend")
+        await backend.reply("pins.toggle", APIResult())
+        try await pending("sessions", backend)
+        require(!model.loading && !model.items.isEmpty, "Hidden pin refresh must not blank the list")
+        await backend.reply("sessions", result(rows))
+        try await wait { !model.busy && !model.refreshing }
+        let completedCalls = await backend.count("pins.toggle")
+        require(completedCalls == hiddenCalls && model.items.map(\.id) == rows.map(\.id) && model.error == nil &&
+                    model.pinAnimationRevision == manualRevision && model.pinAnimationID == nil,
+                "Hidden pin must finish once without replay or animation")
+        model.close()
+
+        // A successful toggle must not be replayed when only its list read fails.
+        let recoveryBackend = CachedListBackend()
+        await recoveryBackend.hold("pins.toggle")
+        let recovery = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: recoveryBackend)
+        recovery.setPresented(true)
+        recovery.start()
+        try await pending("sessions", recoveryBackend)
+        await recoveryBackend.reply("sessions", result(rows))
+        try await wait { !recovery.loading && !recovery.refreshing }
+        recovery.selectedID = session.id
+        recovery.togglePin()
+        try await pending("pins.toggle", recoveryBackend)
+        await recoveryBackend.reply("pins.toggle", APIResult(pinned: true))
+        try await pending("sessions", recoveryBackend)
+        await recoveryBackend.fail("sessions")
+        try await wait { !recovery.busy && !recovery.refreshing }
+        require(recovery.selected?.isPinned == true && recovery.error?.contains("Pin saved") == true,
+                "Confirmed pin state must survive a failed list refresh")
+        try await pending("sessions", recoveryBackend)
+        await recoveryBackend.reply("sessions", result(reordered))
+        try await wait { recovery.items.first?.id == session.id }
+        let recoveryToggles = await recoveryBackend.count("pins.toggle")
+        require(recoveryToggles == 1 && recovery.selectedID == session.id && recovery.selected?.isPinned == true,
+                "Failed pin refresh must reconcile by reading, never toggling again")
+        recovery.close()
+
+        require(PickerStyle.animatesPinChanges(reduceMotion: false, previous: rows, updated: reordered),
+                "Same-membership manual reorder must allow animation without Reduce Motion")
+        require(!PickerStyle.animatesPinChanges(reduceMotion: true, previous: rows, updated: reordered),
+                "Reduce Motion must disable pin animation")
+        for updated in [[], Array(reordered.dropLast()), reordered + [added], [added] + Array(reordered.dropFirst())] {
+            require(!PickerStyle.animatesPinChanges(reduceMotion: false, previous: rows, updated: updated),
+                    "Empty or changed membership must not animate")
+        }
+        require(!PickerStyle.animatesPinChanges(reduceMotion: false, previous: [], updated: []),
+                "Initial empty rows must not animate")
+        print("PASS: session/directory pin payloads, eligibility, mounted rows, selection/target, failures, hidden completion and manual-only Reduce Motion animation")
+    }
+
     @MainActor private static func sessionDeletionChecks() async throws {
         let backend = CachedListBackend()
         await backend.hold("sessions.delete.preview")
@@ -383,12 +573,17 @@ struct NativeChecks {
     }
 
     @MainActor private static func run() async throws {
+        if CommandLine.arguments.contains("--unread-only") {
+            try await unreadCompletionChecks()
+            return
+        }
         if CommandLine.arguments.contains("--theme-integration") {
             try await themeIntegrationChecks()
             return
         }
         textEditingChecks()
         try await sessionDeletionChecks()
+        try await sessionPinChecks()
         outsideClickChecks()
         try await pullRequestClipboardChecks()
         try await pullRequestChecks()
@@ -526,6 +721,9 @@ struct NativeChecks {
         require(compactList.shortcuts.first { $0.title == "Move down" }?.keys == "⌃J" &&
                      compactList.shortcuts.first { $0.title == "Move up" }?.keys == "⌃K",
                      "Movement actions must show control shortcuts without extra arrow symbols")
+        require(compactList.shortcuts.first { $0.title == "Checkout pull request" }?.keys == "⇧⌘C" &&
+                     compactList.shortcuts.first { $0.title == "Pin or unpin row" }?.keys == "⇧⌘P",
+                     "Help must show separate checkout and row pin shortcuts")
         compactList.moveShortcut(1)
         require(compactList.selectedShortcutID == compactList.shortcuts[1].id, "Down must select the next help row")
         compactList.moveShortcut(-1)
@@ -676,6 +874,7 @@ struct NativeChecks {
         retry.close()
 
         try await liveEventChecks()
+        try await unreadCompletionChecks()
 
         // Optional transport fixture exists only inside an aux test .app bundle.
         if CommandLine.arguments.contains("--transport-fixture") {
@@ -712,15 +911,22 @@ struct NativeChecks {
         require(PickerModel.preferredSelection(in: APIResult(items: [current, directory])) == current.id,
                 "The first row stays selected even when it is the current session")
         require(PickerModel.preferredSelection(in: APIResult(items: [current])) == current.id)
+        let pinnedDirectory = PickerItem(path: "/pinned", kind: "dir", isPinned: true)
+        let pinnedSession = PickerItem(path: "pinned-session", kind: "session", isPinned: true)
+        let pinnedRows = APIResult(items: [pinnedDirectory, pinnedSession, current])
+        require(PickerModel.preferredSelection(in: pinnedRows) == current.id,
+                "Open must select the current session below pinned rows")
+        require(PickerModel.preferredSelection(in: pinnedRows, query: "ranked") == pinnedDirectory.id,
+                "Search must keep the top ranked match instead of forcing the current session")
         require(PickerModel.preferredSelection(in: APIResult()) == nil)
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data(#"{"selected_id":"previous"}"#.utf8))
         require(decoded.selectedID == "previous")
         let backend = CachedListBackend(events: true)
         let options = try LaunchOptions(arguments: ["--mode", "sessions"])
         let model = PickerModel(options: options, backend: backend)
-        var result = APIResult(items: [current, previous, older, directory], selectedID: older.id, targets: ["session"], target: "session")
-        require(PickerModel.preferredSelection(in: result) == current.id, "Displayed order wins over backend preference")
-        require(PickerModel.preferredSelection(in: result, query: "ranked") == current.id)
+        var result = APIResult(items: [directory, current, previous, older], selectedID: older.id, targets: ["session"], target: "session")
+        require(PickerModel.preferredSelection(in: result) == current.id, "Current session wins over row position and stale backend preference")
+        require(PickerModel.preferredSelection(in: result, query: "ranked") == directory.id)
         model.setPresented(true); model.start()
         try await pending("sessions", backend)
         await backend.reply("sessions", result)
@@ -729,9 +935,9 @@ struct NativeChecks {
         model.selectedID = directory.id
         await backend.emit()
         try await pending("sessions", backend)
-        result.items?[0].label = "Refreshed current"
+        result.items?[1].label = "Refreshed current"
         await backend.reply("sessions", result)
-        try await wait { model.items.first?.label == "Refreshed current" }
+        try await wait { model.items.first(where: { $0.id == current.id })?.label == "Refreshed current" }
         require(model.selectedID == directory.id, "Live refresh preserves manual selection despite selected_id")
         model.dismiss()
         let token = model.prepareReconfigure(options)
@@ -741,18 +947,18 @@ struct NativeChecks {
         try await pending("sessions", backend)
         await backend.reply("sessions", result)
         try await wait { !model.refreshing }
-        require(model.selectedID == current.id, "Search uses ranked first row, not empty-query preference")
+        require(model.selectedID == directory.id, "Search uses ranked first row, not empty-query preference")
         model.query = ""
         require(model.selectedID == current.id, "Clearing query immediately restores cached preference")
         try await pending("sessions", backend)
         result.selectedID = nil
         await backend.reply("sessions", result)
         try await wait { !model.refreshing }
-        require(model.selectedID == current.id, "Missing selected_id still selects the first row")
+        require(model.selectedID == current.id, "Missing selected_id still selects the current session below other rows")
         model.selectedID = current.id
         model.dismiss()
         _ = model.prepareReconfigure(options)
-        require(model.selectedID == current.id, "Legacy cached reopen selects the first row")
+        require(model.selectedID == current.id, "Legacy cached reopen selects the current session below other rows")
         model.close()
         let source = CachedListBackend()
         let noHistory = PickerModel(options: options, backend: source)
@@ -1175,6 +1381,99 @@ struct NativeChecks {
         require(worktreeModel.page == .create && worktreeModel.branch == "feat/keep" && worktreeModel.base == "main")
         worktreeModel.close()
         print("PASS: idle live subscriptions, subscribe-before-snapshot, burst/in-flight coalescing, row-only refresh, stable order/groups/selection/scroll/target/query/popover/split, hidden/context/close isolation, busy worktree/Create preservation")
+    }
+
+    @MainActor private static func unreadCompletionChecks() async throws {
+        require(!ActivityProjection(blocked: false, working: false).unreadDone,
+                "Unread completion must default to false")
+        for flag in [nil, false, true] as [Bool?] {
+            for state in ["done", "idle", "working", "blocked"] {
+                let field = flag.map { ",\"unread_done\":\($0)" } ?? ""
+                let json = "{\"path\":\"completion\",\"kind\":\"session\",\"state\":\"\(state)\"\(field)}"
+                let item = try JSONDecoder().decode(PickerItem.self, from: Data(json.utf8))
+                require(item.unreadDone == flag, "Decode missing, true and false unread_done without inference")
+                let unread = flag == true
+                let working = state == "working"
+                let blocked = state == "blocked"
+                require(item.activity == ActivityProjection(blocked: blocked, working: working, unreadDone: unread),
+                        "Working, blocked and unread completion must stay independent")
+                let expected = [blocked ? "Blocked" : nil, working ? "Working" : nil,
+                                unread ? "Finished, unread" : nil].compactMap { $0 }.joined(separator: ", ")
+                require(item.activityAccessibility == expected, "Accessibility must name only explicit activity")
+                require(item.activity.shouldPulse(reduceMotion: false, visible: true) == working,
+                        "Unread-only completion must not start animation")
+                require(!item.activity.shouldPulse(reduceMotion: true, visible: true))
+                require(!item.activity.shouldPulse(reduceMotion: false, visible: false))
+            }
+        }
+        let combined = PickerItem(path: "combined", kind: "session", state: "blocked", working: true, unreadDone: true)
+        require(combined.activity == ActivityProjection(blocked: true, working: true, unreadDone: true))
+        require(combined.activityAccessibility == "Blocked, Working, Finished, unread")
+
+        // No status events: only Rex's seen preference changes. All row fields
+        // except unread_done stay the same, including the status timestamp.
+        let options = try LaunchOptions(arguments: ["--demo"])
+        let backend = CachedListBackend()
+        let model = PickerModel(options: options, backend: backend)
+        let unread = PickerItem(path: "result", kind: "session", state: "done",
+                                updatedAt: "2026-01-02T03:04:05Z", unreadDone: true)
+        var seen = unread
+        seen.unreadDone = false
+        let other = PickerItem(path: "other", kind: "session", working: true)
+        func result(_ row: PickerItem) -> APIResult {
+            APIResult(items: [row, other], targets: ["tab", "session"], target: "tab")
+        }
+        model.setPresented(true); model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", result(unread))
+        try await wait { !model.loading && !model.refreshing }
+        model.query = "result"
+        try await pending("sessions", backend)
+        await backend.reply("sessions", result(unread))
+        try await wait { !model.refreshing }
+        model.selectedID = unread.id; model.scrollID = unread.id; model.target = "session"
+        model.splitMode = true; model.targetPickerPresented = true
+        let before = await backend.count("sessions")
+        for _ in 0..<10 { model.readReceiptsChanged() }
+        try await pending("sessions", backend)
+        require(await backend.count("sessions") == before + 1, "Receipt bursts must coalesce")
+        require(!model.loading && !model.refreshing, "Receipt refresh must update rows only")
+        let params = await backend.parameters("sessions")
+        guard case .text("result") = params["query"] else { testFailure("Receipt refresh lost query") }
+        await backend.reply("sessions", result(seen))
+        try await wait { model.items.first?.activity.unreadDone == false }
+        require(model.items == [seen, other], "Same status snapshot must still remove the seen indicator")
+        require(model.selectedID == unread.id && model.scrollID == unread.id && model.target == "session" && model.query == "result",
+                "Receipt refresh must preserve selection, scroll, target and query")
+        require(model.splitMode && model.targetPickerPresented, "Receipt refresh must preserve transient controls")
+        require(model.items.first?.activityAccessibility == "", "Seen result must have no completion announcement")
+        let methods = await backend.methods()
+        require(methods.allSatisfy { ["sessions", "theme"].contains($0) },
+                "Receipt refresh must not scan directories, write receipts or dispatch actions")
+
+        // Cache an unread unfiltered row, then change its receipt while hidden.
+        model.targetPickerPresented = false; model.splitMode = false; model.query = ""
+        try await pending("sessions", backend)
+        await backend.reply("sessions", result(unread))
+        try await wait { !model.refreshing && model.items.first?.activity.unreadDone == true }
+        model.setPresented(false)
+        let hiddenCount = await backend.count("sessions")
+        model.readReceiptsChanged()
+        try await Task.sleep(for: .milliseconds(100))
+        require(await backend.count("sessions") == hiddenCount, "Hidden receipt changes must not request rows")
+        let token = model.prepareReconfigure(options)
+        await model.completeReconfigure(token)
+        model.setPresented(true)
+        require(model.items.first?.activity.unreadDone == true, "Reopen must keep cached rows available")
+        try await pending("sessions", backend)
+        await backend.reply("sessions", result(seen))
+        try await wait { model.items.first?.activity.unreadDone == false }
+        model.close()
+        let closedCount = await backend.count("sessions")
+        model.readReceiptsChanged()
+        try await Task.sleep(for: .milliseconds(100))
+        require(await backend.count("sessions") == closedCount, "Closed receipt changes must not request rows")
+        print("PASS: explicit unread completion decoding/projection/accessibility, independent activity, no unread pulse, row-only seen refresh, hidden/closed isolation and cached reopen reconciliation")
     }
 
     @MainActor private static func groupedActivityChecks() async throws {
@@ -1700,7 +1999,10 @@ struct NativeChecks {
         require(agents.view == .sessions && agents.page == .directories && !agents.showsPills)
         require(agents.items.contains { $0.kind == "session" } && agents.items.contains { $0.kind == "dir" },
                      "The launcher must mix session and directory rows in one flat list")
-        require(agents.items.first?.active == true, "The origin session must float to the top")
+        require(agents.items.first?.kind == "dir" && agents.items.first?.isPinned == true,
+                     "Pinned directories must appear above the active session")
+        require(agents.items.firstIndex { $0.active == true } == 1,
+                     "The active session must follow the pinned directory")
         agents.switchView()
         try await wait { !agents.loading }
         require(agents.view == .agents && agents.items.count == 3 && agents.items.allSatisfy { $0.kind == "agent" })
@@ -1720,13 +2022,24 @@ struct NativeChecks {
         let pinned = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: pinsBackend)
         pinned.start()
         try await wait { !pinned.loading }
-        pinned.selectedID = pinned.items.first { $0.kind == "dir" }?.id
+        pinned.selectedID = pinned.items.first { $0.path == "/Users/demo/.dotfiles" }?.id
         pinned.togglePin()
         try await wait { !pinned.busy && !pinned.refreshing }
         require(pinned.items.first { $0.path == "/Users/demo/.dotfiles" }?.isPinned == true,
                      "Toggled pins must come back from the backend")
         let pinCount = await pinsBackend.count("pins.toggle")
         require(pinCount == 1, "Pinning must ask the backend once")
+        pinned.selectedID = pinned.items.first { $0.kind == "session" && $0.host == "Demo Host" }?.id
+        let sessionID = pinned.selectedID
+        require(sessionID != nil && pinned.canPin, "Demo remote sessions must support pinning")
+        pinned.togglePin()
+        try await wait { !pinned.busy && !pinned.refreshing }
+        require(pinned.items.first { $0.id == sessionID }?.isPinned == true && pinned.selectedID == sessionID,
+                     "Demo session pins must round-trip and keep selection")
+        pinned.togglePin()
+        try await wait { !pinned.busy && !pinned.refreshing }
+        require(pinned.items.first { $0.id == sessionID }?.isPinned != true,
+                     "Demo session pins must unpin on a second toggle")
         pinned.close()
 
         // Resident reconfigure: one model serves repeated opens.

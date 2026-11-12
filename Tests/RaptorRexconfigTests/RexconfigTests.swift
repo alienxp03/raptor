@@ -37,6 +37,32 @@ final class RexconfigTests: XCTestCase {
         XCTAssertTrue(text.contains("cmd+k") && text.contains("cmd+b") && text.contains("/new/plugin.lua"), "surrounding config damaged: \(text)")
     }
 
+    func testApplyMigratesManagedPRBindingAndPreservesUserKeys() throws {
+        let path = tempDir() + "/init.lua"
+        let before = "rex.bind(\"shift+cmd+p\", \"session.switch\")\n"
+        let after = "rex.bind(\"cmd+b\", \"client.sidebar.toggle\")\n"
+        let oldBlock = Rexconfig.block(plugin: "/old/plugin.lua", options: Options(bindings: [
+            ["shift+cmd+o", "raptor"],
+            ["shift+cmd+p", "raptor_pr_open"],
+        ]))
+        try write(path, before + oldBlock + after)
+        try Rexconfig.apply(configPath: path, plugin: "/new/plugin.lua", options: Rexconfig.defaultOptions(), force: false)
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        XCTAssertEqual(text, before + Rexconfig.block(plugin: "/new/plugin.lua", options: Rexconfig.defaultOptions()) + after)
+        XCTAssertTrue(text.contains("rex.bind(\"shift+cmd+c\", \"raptor_pr_open\")"))
+        XCTAssertTrue(text.contains("rex.bind(\"shift+cmd+o\", \"raptor\")"))
+        XCTAssertFalse(text.contains("rex.bind(\"shift+cmd+p\", \"raptor_pr_open\")"))
+    }
+
+    func testApplyPreservesUnmanagedPRBinding() throws {
+        let path = tempDir() + "/init.lua"
+        let userBinding = "rex.bind(\"shift+cmd+p\", \"raptor_pr_open\")\n"
+        try write(path, userBinding + Rexconfig.block(plugin: "/old/plugin.lua", options: Options()))
+        try Rexconfig.apply(configPath: path, plugin: "/new/plugin.lua", options: Rexconfig.defaultOptions(), force: false)
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        XCTAssertEqual(text, userBinding + Rexconfig.block(plugin: "/new/plugin.lua", options: Rexconfig.defaultOptions()))
+    }
+
     func testApplyRefusesForeignRaptorConfig() throws {
         let path = tempDir() + "/init.lua"
         try write(path, "rex.bind(\"shift+cmd+o\", function() rex.invoke(\"raptor\") end)\n")
@@ -106,6 +132,7 @@ final class RexconfigTests: XCTestCase {
         -- >>> raptor >>>
         dofile("/opt/r/share/raptor/init.lua").setup{}
         rex.bind("shift+cmd+o", "raptor")
+        rex.bind("shift+cmd+c", "raptor_pr_open")
         rex.bind("shift+cmd+n", "raptor_worktree_new")
         rex.bind("ctrl+shift+n", "raptor_worktree_agent")
         -- <<< raptor <<<

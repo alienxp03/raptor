@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 @MainActor
 final class PickerModel: ObservableObject {
@@ -40,7 +41,8 @@ final class PickerModel: ObservableObject {
             .init(title: "Rename session", keys: "⌃R", group: "Sessions", keywords: "ctrl control r name"),
             .init(title: "Close session", keys: "⌃X", group: "Sessions", keywords: "ctrl control x stop"),
             .init(title: "Delete session and worktree", keys: "⌃⇧X", group: "Sessions", keywords: "ctrl control shift x remove"),
-            .init(title: "Open pull request", keys: "⇧⌘P", group: "Actions", keywords: "shift command cmd p pr github"),
+            .init(title: "Pin or unpin row", keys: "⇧⌘P", group: "Actions", keywords: "shift command cmd p session directory favourite"),
+            .init(title: "Checkout pull request", keys: "⇧⌘C", group: "Actions", keywords: "shift command cmd c pr github clone checkout"),
             .init(title: "Next open target", keys: "⌃O", group: "Actions", keywords: "ctrl control o tab window destination"),
             .init(title: "Previous open target", keys: "⌃⇧O", group: "Actions", keywords: "ctrl control shift o tab window destination"),
             .init(title: "Toggle split mode", keys: "⌃P", group: "Actions", keywords: "ctrl control p pane cancel")
@@ -192,6 +194,11 @@ final class PickerModel: ObservableObject {
     private var queryTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
     private var operationTask: Task<Void, Never>?
+    private var pinning = false
+    // Only a confirmed manual pin change may animate the list or its glyph.
+    @Published private(set) var pinAnimationID: String?
+    @Published private(set) var pinAnimationRevision = 0
+    @Published private(set) var pinChangeRevision = 0
     private var themeTask: Task<Void, Never>?
     private var generation = 0
     private var previewGeneration = 0
@@ -274,6 +281,13 @@ final class PickerModel: ObservableObject {
     func setPresented(_ visible: Bool) {
         guard visible != presented, !closed else { return }
         presented = visible
+        if !visible {
+            // Rex can acknowledge a result while this resident picker is hidden.
+            // Keep rows for instant reopen, but revalidate their unread flags.
+            for key in cache.keys where cache[key]?.result.items?.contains(where: { $0.unreadDone == true }) == true {
+                cache[key]?.refreshedAt = .distantPast
+            }
+        }
         renewSubscription()
     }
 
@@ -310,8 +324,17 @@ final class PickerModel: ObservableObject {
         }
     }
 
+    /// Receipt writes are local client changes, not Rex server status events.
+    /// Re-read the backend's cached rows; never scan or mark a result as seen here.
+    func readReceiptsChanged() {
+        guard !closed else { return }
+        for key in cache.keys { cache[key]?.refreshedAt = .distantPast }
+        guard presented, contextReady else { return }
+        activityChanged()
+    }
+
     private func activityChanged() {
-        guard presented, contextReady, !closed, !isForm, renameCandidate == nil,
+        guard presented, contextReady, !closed, !isForm, !pinning, renameCandidate == nil,
               pendingRename?.context != contextGeneration, pendingSessionRemoval?.context != contextGeneration,
               !hasSessionAction, Self.pullRequestLink(query) == nil else { return }
         activityDirty = true
@@ -484,7 +507,7 @@ final class PickerModel: ObservableObject {
             case .directories: return "Sessions"
             case .worktrees: return "Worktrees"
             case .create: return "Create worktree"
-            case .pr: return "Open pull request"
+            case .pr: return "Checkout pull request"
             }
         }
     }
@@ -528,9 +551,13 @@ final class PickerModel: ObservableObject {
     }
     var showsPills: Bool { false }
 
-    /// Always start at the first displayed row, including the current session.
+    /// Current-session selection also applies to cached and legacy replies.
+    /// Search results retain their backend rank.
     static func preferredSelection(in result: APIResult, query: String = "") -> String? {
-        result.items?.first?.id
+        if query.isEmpty, let current = result.items?.first(where: { $0.kind == "session" && $0.active == true }) {
+            return current.id
+        }
+        return result.items?.first?.id
     }
 
 
@@ -579,7 +606,7 @@ final class PickerModel: ObservableObject {
             changingContext = true
             self.options = options
             view = Self.initialView(for: options); page = .directories; repo = options.repo
-            // Every reopen clears filters and selects the first displayed row.
+            // Every reopen clears filters and selects the current session.
             viewQueries.removeAll()
             query = ""
             selectedID = nil
@@ -737,14 +764,72 @@ final class PickerModel: ObservableObject {
         choose()
     }
 
+    var canPin: Bool {
+        guard canOpen, view == .sessions, page == .directories, !splitMode,
+              !basePickerPresented, !targetPickerPresented, !prCommitConfirmationPresented,
+              removalCandidate == nil, let selected else { return false }
+        if selected.kind == "session" { return selected.sessionID?.isEmpty == false && selected.host?.isEmpty == false }
+        return selected.kind == "dir" && selected.isLocal != false
+    }
+
     func togglePin() {
-        guard contextReady else { return }
-        guard canOpen, view == .sessions, page == .directories, let selected, selected.kind == "dir" else { return }
-        let path = selected.path
+        guard canPin, let selected else { return }
+        let params: [String: APIValue]
+        if selected.kind == "session", let sessionID = selected.sessionID, let host = selected.host {
+            params = ["session_id": .text(sessionID), "host": .text(host)]
+        } else {
+            params = ["path": .text(selected.path)]
+        }
+        let key = cacheKey
         perform {
-            _ = try await self.request("pins.toggle", params: ["path": .text(path)])
+            self.pinning = true
             self.invalidateLists()
-            self.scheduleQuery(immediate: true)
+            self.cacheSessionSnapshot()
+            let token = self.generation
+            defer { self.pinning = false }
+            // Keep the old rows mounted until the backend supplies the new order.
+            let pin = try await self.request("pins.toggle", params: params)
+            guard key == self.cacheKey, token == self.generation else { return }
+            self.cache[key]?.refreshedAt = .distantPast
+            self.refreshing = true
+            defer { if token == self.generation { self.refreshing = false } }
+            let result: APIResult
+            do {
+                result = try await self.request("sessions", params: ["query": .text(key.query)])
+            } catch {
+                guard key == self.cacheKey, token == self.generation else { throw error }
+                // The mutation is durable even if its subsequent list read fails.
+                // Publish its confirmed flag, but leave ordering to the backend.
+                if let pinned = pin.pinned, let index = self.items.firstIndex(where: { $0.id == selected.id }) {
+                    self.items[index].isPinned = pinned
+                    self.cacheSessionSnapshot()
+                    self.cache[key]?.refreshedAt = .distantPast
+                }
+                // Reconcile with one read-only refresh; never replay the toggle.
+                self.pinning = false
+                self.activityChanged()
+                throw APIError.message("Pin saved, but refreshing failed. \(error.localizedDescription)")
+            }
+            guard key == self.cacheKey, token == self.generation else { return }
+            let rows = result.items ?? []
+            let animate = self.presented && PickerStyle.animatesPinChanges(
+                reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+                previous: self.items, updated: rows)
+            var transaction = Transaction(animation: animate ? .easeInOut(duration: PickerStyle.pinReorderDuration) : nil)
+            transaction[PinChangeTransactionKey.self] = animate
+            withTransaction(transaction) {
+                self.pinAnimationID = animate ? selected.id : nil
+                if animate { self.pinAnimationRevision += 1 }
+                self.pinChangeRevision += 1
+                self.items = rows
+            }
+            // Follow the same row, never the row now occupying its old index.
+            self.selectedID = rows.contains { $0.id == selected.id } ? selected.id
+                : Self.preferredSelection(in: result, query: key.query)
+            if !rows.contains(where: { $0.id == self.scrollID }) { self.scrollID = nil }
+            self.sessionHosts = result.hosts ?? []
+            self.displayedKey = key
+            self.cacheSessionSnapshot()
         }
     }
 

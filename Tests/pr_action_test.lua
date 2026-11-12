@@ -12,7 +12,12 @@ for _, case in ipairs({
 }) do
  local actions, commands = {}, {}
  rex = {
-  action = function(action) actions[action.name] = action.run end,
+  action = function(action)
+   if action.name == "raptor_pr_open" then
+    assert(action.title == "Checkout pull request")
+   end
+   actions[action.name] = action.run
+  end,
   call = function(method)
    assert(method == "client.list")
    return { clients = {{ client_id = "client", info = { platform = case.platform, kind = case.kind or "app" }, principal = { transport = case.transport } }} }

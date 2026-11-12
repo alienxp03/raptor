@@ -4,6 +4,7 @@ import SwiftUI
 struct ActivityIndicator: View {
     let activity: ActivityProjection
     var workingColor: Color = .primary
+    var unreadColor: Color = .accentColor
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var visible = false
     @State private var panelVisible = false
@@ -11,6 +12,12 @@ struct ActivityIndicator: View {
     var body: some View {
         HStack(spacing: 4) {
             if activity.blocked { dot(.orange) }
+            if activity.unreadDone {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(unreadColor)
+                    .help("Finished, unread")
+            }
             if activity.working {
                 if activity.shouldPulse(reduceMotion: reduceMotion, visible: visible && panelVisible) {
                     TimelineView(.animation(minimumInterval: 1 / 24)) { context in

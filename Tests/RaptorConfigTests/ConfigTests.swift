@@ -65,6 +65,32 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(RaptorConfig.loadPins(), ["/new/one", "/new/two"])
     }
 
+    func testSessionPinsPersistWithHostIdentityAndPreserveDirectoryConfig() throws {
+        let h = home()
+        let originalHome = String(cString: getenv("HOME"))
+        setenv("HOME", h, 1)
+        defer {
+            setenv("HOME", originalHome, 1)
+            try? FileManager.default.removeItem(atPath: h)
+        }
+        let config = "enter = \"tab\"\npins = [\"/project\"]\n"
+        try writeConfig(config, home: h)
+        XCTAssertTrue(RaptorConfig.loadSessionPins().isEmpty)
+        let host = "host,with\"quotes\\and-unicode-猫"
+        XCTAssertTrue(try RaptorConfig.toggleSessionPin(sessionID: "session:1", host: host))
+        XCTAssertTrue(try RaptorConfig.toggleSessionPin(sessionID: "session:1", host: "other"))
+        XCTAssertEqual(RaptorConfig.loadSessionPins(), [
+            SessionPin(sessionID: "session:1", host: host),
+            SessionPin(sessionID: "session:1", host: "other"),
+        ])
+        XCTAssertFalse(try RaptorConfig.toggleSessionPin(sessionID: "session:1", host: host))
+        XCTAssertEqual(RaptorConfig.loadSessionPins(), [SessionPin(sessionID: "session:1", host: "other")])
+        XCTAssertEqual(RaptorConfig.loadPins(), ["/project"])
+        XCTAssertEqual(try String(contentsOfFile: RaptorConfig.configPath(), encoding: .utf8), config)
+        try RaptorConfig.savePins(["/new"])
+        XCTAssertEqual(RaptorConfig.loadSessionPins(), [SessionPin(sessionID: "session:1", host: "other")])
+    }
+
     func testTogglePinAddsAndRemoves() throws {
         let h = home()
         setenv("HOME", h, 1)

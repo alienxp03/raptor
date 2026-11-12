@@ -14,6 +14,8 @@ public struct Directory: Equatable, Encodable {
     public var pinned: Bool
     public var state: String
     public var working: Bool
+    public var unreadDone: Bool = false
+    public var completionSources: [CompletionSource] = []
 
     public init(path: String = "", label: String = "", pinned: Bool = false, state: String = "", working: Bool = false) {
         self.path = path
@@ -27,6 +29,8 @@ public struct Directory: Equatable, Encodable {
         case path, label
         case pinned = "is_pinned"
         case state, working
+        case unreadDone = "unread_done"
+        case completionSources = "_completion_sources"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -39,6 +43,8 @@ public struct Directory: Equatable, Encodable {
         if !state.isEmpty {
             try c.encode(state, forKey: .state)
         }
+        if unreadDone { try c.encode(true, forKey: .unreadDone) }
+        if !completionSources.isEmpty { try c.encode(completionSources, forKey: .completionSources) }
         if working {
             try c.encode(working, forKey: .working)
         }
