@@ -91,6 +91,9 @@ for _, prefix in ipairs({ "/opt/homebrew", "/usr/local", "/custom/homebrew" }) d
 end
 check { name = "missing module package cannot select another install", source = "/custom/opt/raptor/share/raptor/init.lua", files = { ["/opt/homebrew/opt/raptor/bin/raptor"] = true }, commands = 1, panel_bin = "/custom/opt/raptor/bin/raptor", error = "could not be opened" }
 local standalone = home .. "/.local/bin/raptor"
+local competing_installs = { [standalone] = true, ["/opt/homebrew/opt/raptor/bin/raptor"] = true }
+check { name = "standalone plugin prefers local install over Homebrew", files = competing_installs, commands = 1, panel_bin = standalone, ipc = true }
+check { name = "Homebrew plugin stays paired despite local install", source = "/opt/homebrew/opt/raptor/share/raptor/init.lua", files = competing_installs, commands = 1, panel_bin = "/opt/homebrew/opt/raptor/bin/raptor", ipc = true }
 check { name = "standalone CLI IPC spawns the host on demand", commands = 1, panel_bin = standalone, ipc = true }
 check { name = "standalone CLI host failure errors clearly", commands = 1, panel_bin = standalone, ipc = false, error = "could not be opened" }
 check { name = "app option removed", unknown_option = { app = "/somewhere/Raptor.app" } }

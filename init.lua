@@ -2,7 +2,7 @@
 -- spawned under Rex (the resh model); keep key bindings in the user's
 -- init.lua.
 --
---   require("raptor").setup{}
+--   dofile("/path/to/raptor/init.lua").setup{}  -- written by raptor init
 --   rex.bind("shift+cmd+o", "raptor")
 --   rex.bind("shift+cmd+n", "raptor_worktree_new")
 
@@ -34,7 +34,10 @@ end
 
 function M.setup(options)
 	options = options or {}
-	-- Prefer this plugin's package over another Homebrew installation.
+	-- Packaged plugins stay paired with their package. A standalone plugin
+	-- prefers the local installer location over an unrelated Homebrew copy.
+	local standalone_bin = os.getenv("HOME") .. "/.local/bin/raptor"
+	local local_bin = not module_root and exists(standalone_bin) and standalone_bin
 	local brew_bin
 	local roots = module_root and { module_root } or {}
 	if not module_root then
@@ -51,7 +54,7 @@ function M.setup(options)
 	end
 	local cfg = {
 		bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
-		bin = brew_bin or (os.getenv("HOME") .. "/.local/bin/raptor"),
+		bin = local_bin or brew_bin or standalone_bin,
 		-- Legacy options from the app era: accepted so existing configs keep
 		-- loading, and ignored — the bare host positions its own panel.
 		mobile_bounds = { x = 0.08, y = 0.15, w = 0.84, h = 0.60 },
@@ -256,17 +259,6 @@ function M.setup(options)
 		end,
 	})
 
-	-- Direct keybinding entry points. Unlike actions, these never touch the
-	-- server's action registry, so they keep working on servers that have not
-	-- restarted since the module gained an action.
-	function M.open(mode)
-		return function(ctx)
-			if ctx.session_id == nil then
-				error("raptor: no session context; run from a key or inside a session", 0)
-			end
-			return show_picker(resolve_context(ctx), mode)
-		end
-	end
 
 	return M
 end

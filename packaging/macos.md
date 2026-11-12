@@ -135,7 +135,7 @@ It does not run the local installer, replace checkout symlinks, write user confi
 or overwrite `~/Applications/Raptor.app`. Rex's Lua search path must include the
 packaged plugin for a fresh install; see the README or `brew info` caveats.
 An updated plugin automatically selects the Homebrew app and CLI through stable
-`opt` paths. Normal user config is `require("raptor").setup{}`: no per-user `bin` or `app` paths. Explicit `bin`/`app` overrides remain supported for intentional development/custom installs. Standalone GUI discovery also uses Launch Services bundle ID `com.alienxp03.raptor`, so a registered app need not live in `~/Applications` or `/Applications`.
+`opt` paths. Run `raptor init` to generate a direct `dofile("/installed/plugin/init.lua").setup{}` load and named key bindings. No Lua search-path edits or cache resets are needed: `rex config reload` reads the plugin again. A standalone plugin prefers the local CLI installation; a Homebrew plugin stays paired with its package. Explicit `bin` overrides remain supported for intentional development/custom installs.
 
 This formula layout is the distribution contract: one app bundle owns the backend, `bin/raptor` links to that same backend, and the Lua module resolves the package as a pair. Do not independently discover arbitrary CLI and app copies by filename, or store versioned Cellar paths in user config. Homebrew's `opt` symlink follows upgrades. A cask can be considered later for a standalone drag-and-drop app, but is not required for the CLI-first tap.
 

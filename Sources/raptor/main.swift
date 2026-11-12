@@ -186,13 +186,10 @@ case "init":
     let (values, bools, _) = Flags.parse(sub, valueFlags: ["config"], boolFlags: ["force"])
     let target = values["config"].flatMap { $0.isEmpty ? nil : $0 } ?? Rexconfig.configPath()
     let plugin = Rexconfig.locatePlugin()
+    guard !plugin.isEmpty else { fail("Rex plugin not found; reinstall Raptor before running raptor init") }
     do {
         let created = try Rexconfig.apply(configPath: target, plugin: plugin, options: Rexconfig.defaultOptions(), force: bools.contains("force"))
-        if plugin.isEmpty {
-            out("Wired plugin: require(\"raptor\") from the Rex plugin directory")
-        } else {
-            out("Wired plugin: \(plugin)")
-        }
+        out("Wired plugin: \(plugin)")
         out("Rex config: \(target)\(created ? " (created)" : " (managed block updated)")")
         out("Bindings: shift+cmd+o opens Raptor; shift+cmd+n opens the worktree form;")
         out("ctrl+shift+n starts an instant agent worktree (pi).")

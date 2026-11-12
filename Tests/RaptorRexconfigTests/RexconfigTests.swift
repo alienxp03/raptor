@@ -40,10 +40,10 @@ final class RexconfigTests: XCTestCase {
     func testApplyRefusesForeignRaptorConfig() throws {
         let path = tempDir() + "/init.lua"
         try write(path, "rex.bind(\"shift+cmd+o\", function() rex.invoke(\"raptor\") end)\n")
-        XCTAssertThrowsError(try Rexconfig.apply(configPath: path, plugin: "", options: Rexconfig.defaultOptions(), force: false), "foreign raptor wiring must be refused")
+        XCTAssertThrowsError(try Rexconfig.apply(configPath: path, plugin: "/installed/raptor/init.lua", options: Rexconfig.defaultOptions(), force: false), "foreign raptor wiring must be refused")
         var text = try String(contentsOfFile: path, encoding: .utf8)
         XCTAssertFalse(text.contains(beginMarker), "refused run must not modify the file")
-        _ = try Rexconfig.apply(configPath: path, plugin: "", options: Rexconfig.defaultOptions(), force: true)
+        _ = try Rexconfig.apply(configPath: path, plugin: "/installed/raptor/init.lua", options: Rexconfig.defaultOptions(), force: true)
         text = try String(contentsOfFile: path, encoding: .utf8)
         XCTAssertTrue(text.components(separatedBy: "invoke(\"raptor\")").count - 1 == 1 && text.contains(beginMarker), "force merge damaged the config: \(text)")
     }
@@ -51,15 +51,15 @@ final class RexconfigTests: XCTestCase {
     func testApplyTruncatedMarkersFailClosed() throws {
         let path = tempDir() + "/init.lua"
         try write(path, beginMarker + "\nbroken\n")
-        XCTAssertThrowsError(try Rexconfig.apply(configPath: path, plugin: "", options: Rexconfig.defaultOptions(), force: true), "truncated markers must fail closed")
+        XCTAssertThrowsError(try Rexconfig.apply(configPath: path, plugin: "/installed/raptor/init.lua", options: Rexconfig.defaultOptions(), force: true), "truncated markers must fail closed")
     }
 
-    func testApplyRequireFallbackAndCommentsIgnored() throws {
+    func testApplyDirectLoadAndCommentsIgnored() throws {
         let path = tempDir() + "/init.lua"
         try write(path, "-- raptor bindings live in the managed block below\n")
-        _ = try Rexconfig.apply(configPath: path, plugin: "", options: Rexconfig.defaultOptions(), force: false)
+        _ = try Rexconfig.apply(configPath: path, plugin: "/installed/raptor/init.lua", options: Rexconfig.defaultOptions(), force: false)
         let text = try String(contentsOfFile: path, encoding: .utf8)
-        XCTAssertTrue(text.contains("require(\"raptor\")"), "missing plugin fallback: \(text)")
+        XCTAssertTrue(text.contains("dofile(\"/installed/raptor/init.lua\").setup{}"), "missing direct load: \(text)")
     }
 
     func testConfigPathEnv() {
@@ -88,13 +88,23 @@ final class RexconfigTests: XCTestCase {
         XCTAssertEqual(Rexconfig.locatePlugin(), app + "/Contents/Resources/rex/init.lua")
     }
 
-    /// Byte-identical managed block output, matching Go's Block() for the
-    /// same input.
+    func testLocatePluginPrefersInstalledCopyOverLegacyApp() throws {
+        let root = tempDir()
+        setenv("HOME", root, 1)
+        setenv("XDG_CONFIG_HOME", root + "/config", 1)
+        defer { unsetenv("HOME"); unsetenv("XDG_CONFIG_HOME") }
+        let plugin = root + "/config/rex/raptor/init.lua"
+        try write(plugin, "-- installed plugin")
+        try write(root + "/Applications/Raptor.app/Contents/MacOS/Raptor", "legacy")
+        try write(root + "/Applications/Raptor.app/Contents/Resources/rex/init.lua", "-- legacy")
+        XCTAssertEqual(Rexconfig.locatePlugin(), plugin)
+    }
+
+    /// Setup is one direct load followed by ordinary named bindings.
     func testBlockOutputIsByteIdentical() {
         let want = """
         -- >>> raptor >>>
-        local raptor = dofile("/opt/r/share/raptor/init.lua")
-        raptor.setup{}
+        dofile("/opt/r/share/raptor/init.lua").setup{}
         rex.bind("shift+cmd+o", "raptor")
         rex.bind("shift+cmd+n", "raptor_worktree_new")
         rex.bind("ctrl+shift+n", "raptor_worktree_agent")
@@ -102,10 +112,8 @@ final class RexconfigTests: XCTestCase {
 
         """
         XCTAssertEqual(Rexconfig.block(plugin: "/opt/r/share/raptor/init.lua", options: Rexconfig.defaultOptions()), want)
-        XCTAssertEqual(
-            Rexconfig.block(plugin: "", options: Rexconfig.defaultOptions()),
-            "-- >>> raptor >>>\nlocal raptor = require(\"raptor\")\nraptor.setup{}\nrex.bind(\"shift+cmd+o\", \"raptor\")\nrex.bind(\"shift+cmd+n\", \"raptor_worktree_new\")\nrex.bind(\"ctrl+shift+n\", \"raptor_worktree_agent\")\n-- <<< raptor <<<\n"
-        )
+        XCTAssertFalse(want.contains("package.path"))
+        XCTAssertFalse(want.contains("package.loaded"))
     }
 }
 

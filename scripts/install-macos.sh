@@ -62,5 +62,5 @@ else
   printf 'Installed plugin: %s\n' "$REX_PLUGIN_DIR/init.lua"
 fi
 printf 'Installed host/CLI: %s\n' "$PREFIX_BIN/raptor"
-printf '%s\n' 'Rex configuration unchanged. Add require("raptor").setup{} and bindings manually if needed.'
+printf '%s\n' 'Rex configuration unchanged. Run raptor init, then rex config reload.'
 printf 'For a custom PREFIX, set the plugin setup bin option to: %s\n' "$PREFIX_BIN/raptor"

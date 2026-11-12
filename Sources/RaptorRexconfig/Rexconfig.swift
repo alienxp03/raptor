@@ -35,7 +35,7 @@ public enum Rexconfig {
 
     /// Locates the packaged init.lua for the running executable: Homebrew opt
     /// layouts, an app bundle's bundled plugin, or an installer-owned copy under
-    /// the Rex config directory. Empty means "use plain require".
+    /// the Rex config directory. Empty means the plugin is not installed.
     /// Rewrites …/Cellar/<name>/<version>/rest to …/opt/<name>/rest so wired
     /// configs track Homebrew upgrades through the stable opt symlink.
     static func stabilizeOpt(_ path: String) -> String {
@@ -64,6 +64,9 @@ public enum Rexconfig {
             }
         }
         let home = homeDir()
+        let configHome = RaptorPaths.env("XDG_CONFIG_HOME").flatMap { $0.isEmpty ? nil : $0 } ?? join(home, ".config")
+        let installedPlugin = join(configHome, "rex", "raptor", "init.lua")
+        if isFile(installedPlugin) { return installedPlugin }
         let app = discoverApp(home: home)
         if !app.isEmpty {
             let path = join(app, "Contents", "Resources", "rex", "init.lua")
@@ -120,12 +123,7 @@ public enum Rexconfig {
     public static func block(plugin: String, options: Options) -> String {
         var b = ""
         b += beginMarker + "\n"
-        if !plugin.isEmpty {
-            b += "local raptor = dofile(\(quote(plugin)))\n"
-        } else {
-            b += "local raptor = require(\"raptor\")\n"
-        }
-        b += "raptor.setup{}\n"
+        b += "dofile(\(quote(plugin))).setup{}\n"
         for binding in options.bindings {
             b += "rex.bind(\(quote(binding[0])), \(quote(binding[1])))\n"
         }
@@ -140,6 +138,9 @@ public enum Rexconfig {
     /// Returns whether the file was newly created.
     @discardableResult
     public static func apply(configPath: String, plugin: String, options: Options, force: Bool) throws -> Bool {
+        guard !plugin.isEmpty else {
+            throw RexconfigError(message: "Rex plugin not found; reinstall Raptor before running raptor init")
+        }
         var text = ""
         do {
             text = try String(contentsOfFile: configPath, encoding: .utf8)

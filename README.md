@@ -33,7 +33,7 @@ raptor init
 rex config reload
 ```
 
-`raptor init` adds a small managed block to your Rex config — plugin, setup, and these bindings. Rerun it any time; edit the block like any other Rex config.
+`raptor init` writes one plugin load and ordinary named key bindings into your Rex config. It finds the installed plugin automatically; no Lua search paths, cache resets, or callback wrappers. Rerun it after changing installation locations.
 
 | Key | Action |
 | --- | --- |
@@ -91,11 +91,14 @@ enter = "session"
 targets = ["session", "tab", "here", "pane_right", "pane_below"]
 ```
 
+The generated Rex setup looks like this (the plugin path is discovered by `raptor init`):
+
 ```lua
-require("raptor").setup{
-  bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
-}
+dofile("/path/to/raptor/init.lua").setup{}
+rex.bind("shift+cmd+o", "raptor")
 ```
+
+Direct loading also picks up plugin upgrades when you run `rex config reload`.
 
 Skip the picker entirely: `rex do raptor target=tab dir=/path/to/project`.
 
