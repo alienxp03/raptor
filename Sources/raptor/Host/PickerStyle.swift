@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+struct PinChangeTransactionKey: TransactionKey {
+    static let defaultValue = false
+}
+
 // Rex-native metrics and palette. Sampled from the Rex Beta picker window
 // (2x capture): compact 28pt rows, warm dark surface, amber selection.
 @MainActor
@@ -22,6 +26,13 @@ enum PickerStyle {
     static let footerHeight: CGFloat = 34
     static let maxVisibleRows = 16
     static let rowHeight: CGFloat = 32
+    static let pinReorderDuration = 0.24
+    static let pinGlyphDuration = 0.16
+
+    static func animatesPinChanges(reduceMotion: Bool, previous: [PickerItem], updated: [PickerItem]) -> Bool {
+        !reduceMotion && !previous.isEmpty && previous.count == updated.count
+            && Set(previous.map(\.id)) == Set(updated.map(\.id))
+    }
     static let agentRowHeight: CGFloat = 32
     static let agentGroupHeight: CGFloat = 22
     static let agentGroupSpacing: CGFloat = 8

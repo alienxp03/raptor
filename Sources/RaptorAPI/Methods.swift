@@ -29,6 +29,13 @@ extension Handler {
     func call(_ cancel: CancelToken, _ method: String, _ params: [UInt8]) -> (MethodResult?, Error?) {
         let ctx = ctxSnapshot()
         switch method {
+        case "activity.receiptsChanged":
+            // Client preference changes do not invalidate native status snapshots.
+            // Normal reads apply fresh receipts to their retained report identities.
+            cacheMu.lock()
+            notify?()
+            cacheMu.unlock()
+            return (.empty, nil)
         case "theme":
             return (.theme(raw: RaptorTheme.themeJSONData()), nil)
         case "sessions.visit":
@@ -74,22 +81,34 @@ extension Handler {
             } catch {
                 return (nil, error)
             }
-            let path: String
+            let path: String, sessionID: String, host: String
             do {
                 path = try Params.string(obj, "path")
+                sessionID = try Params.string(obj, "session_id")
+                host = try Params.string(obj, "host")
             } catch {
                 return (nil, error)
             }
-            if path.isEmpty {
-                return (nil, MessageError("path is required"))
+            if !path.isEmpty && !sessionID.isEmpty {
+                return (nil, MessageError("provide path or session_id, not both"))
+            }
+            if path.isEmpty && sessionID.isEmpty {
+                return (nil, MessageError("path or session_id is required"))
+            }
+            if !sessionID.isEmpty && host.isEmpty {
+                return (nil, MessageError("host is required for a session pin"))
             }
             let pinned: Bool
             do {
-                pinned = try RaptorConfig.togglePin(path)
+                if sessionID.isEmpty {
+                    pinned = try RaptorConfig.togglePin(path)
+                } else {
+                    pinned = try RaptorConfig.toggleSessionPin(sessionID: sessionID, host: host)
+                }
             } catch {
                 return (nil, error)
             }
-            patchLauncherPin(path, pinned)
+            patchLauncherPins()
             return (.pins(pinned: pinned), nil)
         case "agents":
             let obj: JSONValue
@@ -182,9 +201,11 @@ extension Handler {
                 items[i].active = items[i].local && items[i].sessionID == origin
             }
             Catalog.orderLauncherSessionsByRecency(&items, ranks)
-            // Full IDs were compared above. An empty origin prevents catalog's
-            // reference resolver from making native calls for each candidate.
-            items = Catalog.pinLauncherOrigin(items, "")
+            if query.isEmpty {
+                // Full IDs were compared above. An empty origin prevents catalog's
+                // reference resolver from making native calls for each candidate.
+                items = Catalog.pinLauncherOrigin(items, "")
+            }
             items = Catalog.filterLauncherItems(items, query, "")
             return (
                 .sessions(

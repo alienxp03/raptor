@@ -18,6 +18,8 @@ public struct SessionEntry: Equatable, Encodable {
     public var host: String
     public var state: String
     public var working: Bool
+    public var unreadDone: Bool = false
+    public var completionSources: [CompletionSource] = []
 
     public init(
         kind: String = "", id: String = "", path: String = "", sessionID: String = "",
@@ -42,6 +44,8 @@ public struct SessionEntry: Equatable, Encodable {
         case label
         case sessionLabel = "session_label"
         case active, host, state, working
+        case unreadDone = "unread_done"
+        case completionSources = "_completion_sources"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -57,6 +61,8 @@ public struct SessionEntry: Equatable, Encodable {
         if !state.isEmpty {
             try c.encode(state, forKey: .state)
         }
+        if unreadDone { try c.encode(true, forKey: .unreadDone) }
+        if !completionSources.isEmpty { try c.encode(completionSources, forKey: .completionSources) }
         if working {
             try c.encode(working, forKey: .working)
         }
@@ -201,6 +207,8 @@ public extension Rex {
     /// window rows also match the agent's WindowID against the row ID.
     static func applySessionActivity(_ entries: inout [SessionEntry], _ agents: [AgentEntry]) {
         for i in entries.indices {
+            entries[i].unreadDone = false
+            entries[i].completionSources = []
             entries[i].state = ""
             entries[i].working = false
             for agent in agents {
@@ -208,6 +216,8 @@ public extension Rex {
                     (entries[i].kind != "session" && (entries[i].kind != "window" || entries[i].id != agent.windowID)) {
                     continue
                 }
+                entries[i].unreadDone = entries[i].unreadDone || agent.unreadDone
+                if let source = agent.completionSource { entries[i].completionSources.append(source) }
                 var state = agent.state
                 if state != "blocked" && state != "working" {
                     state = "idle"

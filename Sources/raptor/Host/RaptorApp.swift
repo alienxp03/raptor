@@ -29,6 +29,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // scan inherits Rex's file-access grants instead of facing TCC alone.
     private var panelHost: PanelHost?
     private var focusTracker: RexFocusTracker?
+    private lazy var receiptMonitor = RexReceiptMonitor { [weak self] in
+        self?.model?.readReceiptsChanged()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installKeyboardMonitor()
@@ -151,6 +154,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
         model?.setPresented(true)
+        receiptMonitor.start()
         startOutsideClickDismissal(for: panel)
         startThemeRefresh()
     }
@@ -180,6 +184,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func dismissResidentPanel() {
+        receiptMonitor.stop()
         outsideClickMonitor.stop()
         model?.setPresented(false)
         stopThemeRefresh()
@@ -289,6 +294,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         picker.makeKeyAndOrderFront(nil)
         model?.setPresented(true)
+        receiptMonitor.start()
         startOutsideClickDismissal(for: picker)
         startThemeRefresh()
     }
@@ -329,6 +335,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        receiptMonitor.stop()
         focusTracker?.stop()
         model?.onClose = nil
         model?.close()
@@ -336,6 +343,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        receiptMonitor.stop()
         outsideClickMonitor.stop()
         focusTracker?.stop()
         stopThemeRefresh()
@@ -447,6 +455,10 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return true
         }
         if command && shift && !option && !control && key == "p" {
+            model.togglePin()
+            return true
+        }
+        if command && shift && !option && !control && key == "c" {
             model.beginPullRequest()
             return true
         }

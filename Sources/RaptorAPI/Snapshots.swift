@@ -70,6 +70,7 @@ extension Handler {
             }
             items = merged
         }
+        Catalog.applyLauncherPins(&items)
         launcher = filterDeleted(LauncherCacheEntry(timestamp: Date(), scanStarted: started, items: items, hosts: hosts))
         items = launcher.items ?? []
         launcherLoaded = true
@@ -264,7 +265,7 @@ extension Handler {
     func readLauncherCache() -> (LauncherCacheEntry, Bool) {
         cacheMu.lock()
         if launcherLoaded {
-            let entry = filterDeleted(overlayLauncher(launcher))
+            let entry = pinnedLauncherEntry(filterDeleted(overlayLauncher(launcher)))
             cacheMu.unlock()
             return (entry, true)
         }
@@ -278,9 +279,22 @@ extension Handler {
         cacheMu.lock()
         launcher = entry
         launcherLoaded = true
-        let filtered = filterDeleted(overlayLauncher(entry))
+        let filtered = pinnedLauncherEntry(filterDeleted(overlayLauncher(entry)))
         cacheMu.unlock()
         return (filtered, true)
+    }
+
+    private func pinnedLauncherEntry(_ entry: LauncherCacheEntry) -> LauncherCacheEntry {
+        var entry = entry
+        if var items = entry.items {
+            Catalog.applyLauncherPins(&items)
+            let receipts = CompletionReceipts(preferences: loadReceipts())
+            for i in items.indices {
+                items[i].unreadDone = receipts.unread(items[i].completionSources)
+            }
+            entry.items = items
+        }
+        return entry
     }
 
     /// writeLauncherCache replaces the cache atomically so a crashed write never
@@ -353,7 +367,8 @@ extension Handler {
         group.wait()
 
         let localDisplay = Rex.apiLocalHostname()
-        let items = Catalog.launcherItems(groups, hostOrder, hostDirs, "", localAgents, localDisplay)
+        let items = Catalog.launcherItems(
+            groups, hostOrder, hostDirs, "", localAgents, localDisplay, prioritizePins: false)
         var hosts: [HostHeader] = []
         hosts.reserveCapacity(groups.count)
         for group in groups {
@@ -385,14 +400,24 @@ extension Handler {
         if activityLoaded {
             let entries = activityAgents
             cacheMu.unlock()
-            return entries
+            return overlayReceipts(entries)
         }
         cacheMu.unlock()
         if let error = refreshColdContext(cancel, false) {
             throw error
         }
         cacheMu.lock()
-        defer { cacheMu.unlock() }
-        return activityAgents
+        let entries = activityAgents
+        cacheMu.unlock()
+        return overlayReceipts(entries)
+    }
+
+    private func overlayReceipts(_ entries: [AgentEntry]) -> [AgentEntry] {
+        let receipts = CompletionReceipts(preferences: loadReceipts())
+        var entries = entries
+        for i in entries.indices {
+            entries[i].unreadDone = entries[i].completionSource.map { receipts.unread($0) } ?? false
+        }
+        return entries
     }
 }

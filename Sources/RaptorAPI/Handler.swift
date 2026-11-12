@@ -41,6 +41,8 @@ public final class Handler {
     var presentation: UInt64 = 0
     var notify: (() -> Void)?
     var loadSnapshot: SnapshotLoader?
+    /// Set before serving. Tests never need the current user's Rex preferences.
+    var loadReceipts: () -> [String: Any]? = CompletionReceipts.loadLocalPreferences
     var ranks = SessionRecency()
     var loadRecency: (() -> SessionRecency)?
     var focus: FocusWorker?

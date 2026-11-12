@@ -191,7 +191,8 @@ case "init":
         let created = try Rexconfig.apply(configPath: target, plugin: plugin, options: Rexconfig.defaultOptions(), force: bools.contains("force"))
         out("Wired plugin: \(plugin)")
         out("Rex config: \(target)\(created ? " (created)" : " (managed block updated)")")
-        out("Bindings: shift+cmd+o opens Raptor; shift+cmd+n opens the worktree form;")
+        out("Bindings: shift+cmd+o opens Raptor; shift+cmd+c opens Checkout pull request;")
+        out("shift+cmd+n opens the worktree form;")
         out("ctrl+shift+n starts an instant agent worktree (pi).")
         out("Finish with: rex config reload")
     } catch {

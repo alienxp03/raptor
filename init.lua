@@ -4,6 +4,7 @@
 --
 --   dofile("/path/to/raptor/init.lua").setup{}  -- written by raptor init
 --   rex.bind("shift+cmd+o", "raptor")
+--   rex.bind("shift+cmd+c", "raptor_pr_open")
 --   rex.bind("shift+cmd+n", "raptor_worktree_new")
 
 local M = {}
@@ -205,7 +206,7 @@ function M.setup(options)
 
 	rex.action({
 		name = "raptor_pr_open",
-		title = "Raptor: Open Pull Request",
+		title = "Checkout pull request",
 		description = "Open a GitHub pull request in a Worktrunk worktree. Native picker only.",
 		category = "Navigate",
 		keywords = "github pull request pr worktree",

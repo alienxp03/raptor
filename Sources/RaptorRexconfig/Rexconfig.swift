@@ -28,6 +28,7 @@ public enum Rexconfig {
     public static func defaultOptions() -> Options {
         Options(bindings: [
             ["shift+cmd+o", "raptor"],
+            ["shift+cmd+c", "raptor_pr_open"],
             ["shift+cmd+n", "raptor_worktree_new"],
             ["ctrl+shift+n", "raptor_worktree_agent"],
         ])

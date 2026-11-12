@@ -2,25 +2,32 @@
 
 The Sessions view is the launcher: one flat list where you pick where to work, and Enter always gets you there — sesh-style select-or-create.
 
-There is one session/directory launcher. Ctrl+S selects Sessions from a nested terminal view; in the Mac picker, Cmd+Shift+S does the same. Escape dismisses the launcher.
+There is one native Mac session/directory launcher. Cmd+Shift+S selects Sessions. Escape dismisses the launcher.
 
 To open the launcher directly from Rex, bind the action:
 
 ```lua
-rex.bind("cmd+shift+o", function()
-  rex.invoke("raptor")
-end)
+rex.bind("shift+cmd+o", "raptor")
+rex.bind("shift+cmd+c", "raptor_pr_open")
 ```
 
 ## The list
 
 Two row types, one verb:
 
-- **Live sessions** on every connected host. The session you came from is pinned to the top. Other sessions use most-recently-used order; sessions without history keep Rex's source order. Remote rows carry an `@host` badge; activity (working/blocked) shows right-aligned. Enter switches to the session — through the host's own copy of the app, so it works across hosts and Tailscale.
+- **Live sessions** on every connected host. Pinned rows appear ahead of the current session. Other sessions use most-recently-used order; sessions without history keep Rex's source order. Remote rows carry an `@host` badge; activity (working/blocked) shows right-aligned. Enter switches to the session — through the host's own copy of the app, so it works across hosts and Tailscale.
 - **Frecency directories** (zoxide) from every host that do not already have a same-name live session, with a shallow fd scan (depth 2 from `$HOME`, Trash and Library pruned) appended below them. The scan surfaces projects zoxide has never seen — newly created folders, never-`cd`'d paths — capped at 100 entries so it stays a fallback, not a second index. Remote directories read the host's zoxide and run the same scan over SSH, preferring `fd` and falling back to POSIX `find`. Enter creates the session — named after the directory — and switches to it. An existing session with the same label is reused, never duplicated. Opening a directory that came from the scan runs `zoxide add` on it, so after first use it becomes a permanent zoxide entry (sesh's AddToZoxide behavior).
 - **Typed paths**: a query starting with `~/`, `/`, `./`, or `../` that resolves to an existing local directory adds one extra row below the matches — the sesh behavior of opening any path you hand it, not just listed ones. Remote typed paths are a follow-up.
 
-Pinned local directories float to the top of the directory block (Ctrl+G toggles). The origin pane context is kept when refreshing.
+Cmd+Shift+P pins or unpins the selected session or local directory. Pinned rows appear ahead of the current session. Session pins persist with their host identity, so equal session IDs on different hosts stay separate. Local directory pins also persist. Remote directories cannot be pinned. The origin pane context is kept when refreshing.
+
+## Activity
+
+Working shows `...`; a finished unread result shows a highlighted `✓`. A matching Rex seen receipt removes the checkmark. Working and unread are independent, so both can show. Blocked activity stays independent too. Unread-only rows do not animate. Accessibility announces “Finished, unread”. Raw `done` or `idle` state alone does not mean unread.
+
+The backend reads the local Mac client's `com.superlogical.rex` preference `Workspace.programActivitySeen`. Receipts match block ID, record ID, and update time in milliseconds. Idle completion needs an alerted receipt. Missing or unsupported receipt data hides the checkmark; local preferences cannot establish another client's seen state. Raptor keeps no receipt ledger and writes no seen receipts.
+
+Receipt changes refresh rows only while the picker is visible and its context is ready. Selection, query, target, and scroll stay unchanged. This needs no status event or full scan. Reopen reconciles cached rows with current receipts.
 
 ## Recent-use order
 
@@ -28,9 +35,9 @@ Raptor records acknowledged session switches and the session from which you open
 
 The backend validates the app PID and session/host membership before saving an observation. History persists on the same filesystem for the Mac app and CLI backend. Without the Mac observer, confirmed Raptor navigation still records visits.
 
-On an empty-query open or reopen, the default selection is the most-recent non-current live session. If none exists, select a directory before falling back to the current session. The current session remains marked and available; its top-of-list position does not make it the default destination. A nonempty search selects its top ranked match, and live refreshes preserve the user's selection.
+On an empty-query open or reopen, select the current session, even below pinned rows. If the current session is unavailable, select the first displayed row. A nonempty search selects its top ranked match, and live refreshes preserve the user's selection.
 
-The rank snapshot stays fixed while the picker is open. Agent reports, title changes, and background work do not change recency. Search prefers exact folder names and session labels, then fuzzy-match quality, with recent-use order for ties. A leading dot does not prevent an exact folder match: `pi` finds `.pi` before scattered path matches. A matching current session stays first.
+The rank snapshot stays fixed while the picker is open. Agent reports, title changes, and background work do not change recency. Search puts matching open sessions before directories. Within each group, exact names lead fuzzy matches, with recent-use order for ties. Each match stays within one name, path, or hostname. A leading dot does not prevent an exact folder match: `pi` finds `.pi` before scattered directory-path matches. Pins affect empty-query order only; search keeps relevance and recent-use tie order.
 
 History builds from observed visits, not inferred past activity. Up to 256 host/session timestamps persist in `$XDG_CACHE_HOME/raptor/session-recency.json`, or `~/Library/Caches/raptor/session-recency.json` by default. The file is private and atomically updated. Missing focus preferences do not clear history.
 
@@ -52,13 +59,17 @@ Local directory rows can skip session creation: Ctrl+O cycles the open target (s
 
 Invoke `raptor_worktree_new` from Rex or bind it to a key; Instant Pi worktrees and PR checkout provide additional ways to start work. Use Worktrunk directly for listing/removal.
 
+## Pull requests
+
+Cmd+Shift+C opens **Checkout pull request** from Rex or inside the picker. In Rex, `raptor init` binds it directly to `raptor_pr_open`; Cmd+Shift+O still opens Raptor. Pasting a GitHub PR URL into search remains available. Confirm the form before Raptor creates or opens resources.
+
 ## Close
 
 Ctrl+X closes the selected session. Raptor refuses to close the session the picker opened from.
 
 ## Preview
 
-With a terminal at least 100 columns wide, the right side shows a live capture of the selected session (polled while the selection stays put; remote hosts are captured over their connection with a short timeout). Directory rows preview the full path and the session name that Enter would create. Narrower terminals — including phones — render rows only.
+The native picker shows session labels, activity, and host badges. Directory rows show their paths.
 
 ## Hosts
 

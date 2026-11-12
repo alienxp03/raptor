@@ -111,6 +111,7 @@ enum AgentGroup: String, CaseIterable, Sendable {
 struct ActivityProjection: Equatable, Sendable {
     let blocked: Bool
     let working: Bool
+    var unreadDone: Bool = false
 
     func shouldPulse(reduceMotion: Bool, visible: Bool) -> Bool {
         working && !reduceMotion && visible
@@ -148,6 +149,7 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     var isLocal: Bool? = nil
     var isPinned: Bool? = nil
     var host: String? = nil
+    var unreadDone: Bool? = nil
     var id: String { path }
     var isSessionEntry: Bool { kind == "session" || kind == "window" }
 
@@ -171,7 +173,8 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
 
     var activity: ActivityProjection {
         ActivityProjection(blocked: agentActivity == "Blocked",
-                           working: kind == "agent" ? agentActivity == "Working" : (working == true || agentActivity == "Working"))
+                           working: kind == "agent" ? agentActivity == "Working" : (working == true || agentActivity == "Working"),
+                           unreadDone: unreadDone == true)
     }
 
     var agentGroup: AgentGroup {
@@ -197,16 +200,18 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     }
 
     var activityAccessibility: String {
-        [activity.blocked ? "Blocked" : nil, activity.working ? "Working" : nil].compactMap { $0 }.joined(separator: ", ")
+        [activity.blocked ? "Blocked" : nil, activity.working ? "Working" : nil,
+         activity.unreadDone ? "Finished, unread" : nil].compactMap { $0 }.joined(separator: ", ")
     }
 
     var agentAccessibility: String {
-        [label ?? agentID ?? "Agent", app, agentActivity, agentContext.isEmpty ? nil : agentContext]
+        [label ?? agentID ?? "Agent", app, activityAccessibility.isEmpty ? nil : activityAccessibility,
+         agentContext.isEmpty ? nil : agentContext]
             .compactMap { $0 }.joined(separator: ", ")
     }
 
     var agentHelp: String {
-        [app, agentActivity, active == true ? "Current pane" : nil]
+        [app, activityAccessibility.isEmpty ? nil : activityAccessibility, active == true ? "Current pane" : nil]
             .compactMap { $0 }.joined(separator: ", ")
     }
     enum CodingKeys: String, CodingKey {
@@ -220,6 +225,7 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
         case sessionID = "session_id"
         case sessionLabel = "session_label"
         case isPinned = "is_pinned"
+        case unreadDone = "unread_done"
         case host
     }
 }
@@ -289,9 +295,10 @@ struct APIResult: Codable, Sendable {
     var sessionClosed: Bool? = nil
     var worktrees: [DeletionWorktree]? = nil
     var deletedPaths: [String]? = nil
+    var pinned: Bool? = nil
     var theme: ThemePayload? = nil
     enum CodingKeys: String, CodingKey {
-        case items, hosts, targets, target, repo, branches, path, theme, worktrees
+        case items, hosts, targets, target, repo, branches, path, theme, worktrees, pinned
         case deletedPaths = "deleted_paths"
         case selectedID = "selected_id"
         case launcherItems = "launcher_items"
