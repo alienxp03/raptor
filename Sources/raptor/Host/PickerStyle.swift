@@ -30,8 +30,14 @@ enum PickerStyle {
     // Colors forward to PickerPalette, which the Go backend refreshes with
     // the active Rex theme while the panel is visible.
     static var selection: Color { PickerPalette.selection }
-    static var selectionBackground: Color { selection.opacity(PickerPalette.selectionOpacity) }
-    static var selectionText: Color { PickerPalette.selectionText }
+    // Composite explicitly so glass/wallpaper cannot change label contrast.
+    static var selectionBackground: Color { background.overlay(with: selection, fraction: PickerPalette.selectionOpacity) }
+    static var selectionText: Color {
+        let preferred = PickerPalette.selectionText
+        return preferred.contrastRatio(with: selectionBackground) >= 4.5
+            ? preferred : contrastText(for: selectionBackground)
+    }
+    static var editingAccent: Color { Color(nsColor: .controlAccentColor) }
     static var background: Color { PickerPalette.background }
     static var fieldBackground: Color { PickerPalette.fieldBackground }
     static var foreground: Color { PickerPalette.foreground }

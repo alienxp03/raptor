@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-// SwiftUI's plain TextField inherits the row's dark text color but AppKit's
-// dark text-selection highlight. Own both selection colors for this field.
+// Rename owns its editor colors and initial caret, independent of row selection.
 struct InlineSessionNameField: NSViewRepresentable {
     @Binding var text: String
     var onSubmit: () -> Void
@@ -26,7 +25,7 @@ struct InlineSessionNameField: NSViewRepresentable {
     func updateNSView(_ field: NameField, context: Context) {
         context.coordinator.parent = self
         if field.stringValue != text { field.stringValue = text }
-        field.textColor = NSColor(PickerStyle.selectionText)
+        field.textColor = NSColor(PickerStyle.foreground)
         if let editor = field.currentEditor() as? NSTextView { context.coordinator.configureEditor(editor) }
     }
 
@@ -35,12 +34,18 @@ struct InlineSessionNameField: NSViewRepresentable {
     }
 
     static func applyColors(to editor: NSTextView) {
-        editor.textColor = NSColor(PickerStyle.selectionText)
-        editor.insertionPointColor = NSColor(PickerStyle.selectionText)
-        editor.selectedTextAttributes = [
-            .foregroundColor: NSColor(PickerStyle.foreground),
-            .backgroundColor: NSColor(PickerStyle.background),
-        ]
+        editor.textColor = NSColor(PickerStyle.foreground)
+        editor.insertionPointColor = NSColor(PickerStyle.foreground)
+        NSAppearance(named: PickerPalette.isDark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+            editor.selectedTextAttributes = [
+                .foregroundColor: NSColor.selectedTextColor.usingColorSpace(.sRGB) ?? .white,
+                .backgroundColor: NSColor.selectedTextBackgroundColor.usingColorSpace(.sRGB) ?? .systemBlue,
+            ]
+        }
+    }
+
+    static func placeInitialCaret(in editor: NSTextView) {
+        editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
     }
 
     final class NameField: NSTextField {
@@ -50,9 +55,9 @@ struct InlineSessionNameField: NSViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 guard let self, let window = self.window else { return }
                 window.makeFirstResponder(self)
-                self.selectText(nil)
                 if let editor = self.currentEditor() as? NSTextView {
                     (self.delegate as? Coordinator)?.configureEditor(editor)
+                    InlineSessionNameField.placeInitialCaret(in: editor)
                 }
             }
         }

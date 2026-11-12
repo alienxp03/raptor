@@ -35,27 +35,27 @@ enum PickerPalette {
     static var isDark = true
     static var foreground = Color(red: 0.84, green: 0.79, blue: 0.72)
     static var selection = Color(red: 0.722, green: 0.510, blue: 0.259)
-    static var selectionText = Color(red: 0.153, green: 0.141, blue: 0.133)
+    static var selectionText = Color(red: 0.95, green: 0.95, blue: 0.95)
     static var background = Color(red: 0.153, green: 0.141, blue: 0.133)
     static var fieldBackground = Color(red: 0.243, green: 0.227, blue: 0.224)
     static var stroke = Color.white.opacity(0.07)
-    static var selectionOpacity = 1.0
+    static var selectionOpacity = 0.18
     static var usesThemeTint = true
 
     static func useFallback(dark: Bool) {
         isDark = dark
-        selectionOpacity = 1
+        selectionOpacity = dark ? 0.18 : 0.10
         usesThemeTint = true
         foreground = dark ? Color(red: 0.84, green: 0.79, blue: 0.72) : Color(red: 0.1, green: 0.1, blue: 0.1)
         if dark {
             selection = Color(red: 0.722, green: 0.510, blue: 0.259)
-            selectionText = Color(red: 0.153, green: 0.141, blue: 0.133)
+            selectionText = nativeLabelColor(dark: true)
             background = Color(red: 0.153, green: 0.141, blue: 0.133)
             fieldBackground = Color(red: 0.243, green: 0.227, blue: 0.224)
             stroke = Color.white.opacity(0.07)
         } else {
             selection = Color(red: 0.788, green: 0.635, blue: 0.353)
-            selectionText = Color(red: 0.145, green: 0.133, blue: 0.118)
+            selectionText = nativeLabelColor(dark: false)
             background = Color(red: 0.957, green: 0.953, blue: 0.945)
             fieldBackground = Color(red: 0.894, green: 0.886, blue: 0.871)
             stroke = Color.black.opacity(0.12)
@@ -71,9 +71,10 @@ enum PickerPalette {
             : (payload.ui?.foreground ?? payload.foreground).flatMap(hexColor)
                 ?? (isDark ? Color(red: 0.84, green: 0.79, blue: 0.72) : Color(red: 0.1, green: 0.1, blue: 0.1))
         selection = (payload.ui?.selection ?? payload.selection).flatMap(hexColor) ?? selectionFallback
-        selectionText = (payload.ui?.selectionForeground ?? payload.selectionForeground).flatMap(hexColor)
-            ?? contrastText(for: selection)
-        selectionOpacity = payload.ui == nil ? 1 : 0.75
+        // Theme selection foregrounds assume an opaque fill, not our muted tint.
+        // Keep labels stable and composite the tint onto the panel surface.
+        selectionText = nativeLabelColor(dark: isDark)
+        selectionOpacity = isDark ? 0.18 : 0.10
         usesThemeTint = payload.ui == nil || ["blendTheme", "useTheme"].contains(payload.interfaceStyle ?? "modern")
         fieldBackground = nativeChrome ? (isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.06))
             : (payload.ui?.surface ?? payload.surface).flatMap(hexColor) ?? fieldFallback(for: background)
@@ -117,6 +118,20 @@ extension Color {
                      blue: base.blueComponent + (top.blueComponent - base.blueComponent) * fraction)
     }
 
+    /// WCAG contrast uses linearized sRGB, not the display-space luma below.
+    func contrastRatio(with other: Color) -> Double {
+        func luminance(_ color: Color) -> Double {
+            let rgb = NSColor(color).usingColorSpace(.sRGB) ?? .black
+            func linear(_ value: Double) -> Double {
+                value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent)
+                + 0.0722 * linear(rgb.blueComponent)
+        }
+        let a = luminance(self), b = luminance(other)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
     // Rec. 709 luma in sRGB.
     var luma: Double {
         let color = NSColor(self).usingColorSpace(.sRGB) ?? .black
@@ -127,5 +142,7 @@ extension Color {
 func hexLuma(_ color: Color) -> Double { color.luma }
 
 func contrastText(for background: Color) -> Color {
-    background.luma < 0.5 ? Color(red: 0.95, green: 0.94, blue: 0.92) : Color(red: 0.15, green: 0.14, blue: 0.13)
+    let light = Color.white
+    let dark = Color(red: 0.1, green: 0.1, blue: 0.1)
+    return light.contrastRatio(with: background) >= dark.contrastRatio(with: background) ? light : dark
 }

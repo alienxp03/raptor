@@ -354,14 +354,24 @@ struct NativeChecks {
             let originalCaret = editor.insertionPointColor
             coordinator.configureEditor(editor)
             coordinator.configureEditor(editor) // Theme/view updates must not overwrite saved defaults.
-            require(editor.textColor == NSColor(PickerStyle.selectionText)
-                        && editor.insertionPointColor == NSColor(PickerStyle.selectionText),
-                    "Inline rename text and caret must use the row's text color")
-            require(editor.selectedTextAttributes[.foregroundColor] as? NSColor == NSColor(PickerStyle.foreground)
-                        && editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(PickerStyle.background),
-                    "Auto-selected rename text must use a matching foreground/background pair")
-            require(abs(hexLuma(PickerStyle.foreground) - hexLuma(PickerStyle.background)) > 0.5,
-                    "Selected rename text must remain readable in light and dark themes")
+            require(editor.textColor == NSColor(PickerStyle.foreground)
+                        && editor.insertionPointColor == NSColor(PickerStyle.foreground),
+                    "Inline rename text and caret must use normal field text colors")
+            let selectionBackground = (editor.selectedTextAttributes[.backgroundColor] as! NSColor).usingColorSpace(.sRGB)!
+            let selectionForeground = editor.selectedTextAttributes[.foregroundColor] as! NSColor
+            require(Color(nsColor: selectionForeground).contrastRatio(with: Color(nsColor: selectionBackground)) >= 4.5,
+                    "Native text selection must remain readable in light and dark themes")
+            require(selectionBackground != NSColor(PickerStyle.background),
+                    "Text selection must be distinct from the panel and row")
+            editor.string = "session-🌲"
+            editor.selectAll(nil)
+            InlineSessionNameField.placeInitialCaret(in: editor)
+            require(editor.selectedRange() == NSRange(location: (editor.string as NSString).length, length: 0),
+                    "Rename must start with a caret at the UTF-16 end, not select-all")
+            editor.setSelectedRange(NSRange(location: 0, length: 3))
+            coordinator.configureEditor(editor)
+            require(editor.selectedRange() == NSRange(location: 0, length: 3),
+                    "Theme/view updates must preserve the user's text selection")
             coordinator.restoreEditor()
             require(editor.selectedTextAttributes[.foregroundColor] as? NSColor == NSColor.black
                         && editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor.darkGray
@@ -2107,9 +2117,9 @@ struct NativeChecks {
                 require(PickerPalette.apply(payload))
                 require(NSColor(PickerStyle.background) == NSColor(hexColor("#303030")!) &&
                              NSColor(PickerStyle.selection) == NSColor(hexColor("#aaccaa")!) &&
-                             NSColor(PickerStyle.selectionText) == NSColor(hexColor("#102030")!) &&
-                             PickerPalette.selectionOpacity == 0.75,
-                             "Native roles must not reuse terminal canvas, selection or selected text")
+                             PickerStyle.selectionText.contrastRatio(with: PickerStyle.selectionBackground) >= 4.5 &&
+                             PickerPalette.selectionOpacity == (dark ? 0.18 : 0.10),
+                             "Row tint must use native UI roles with readable composited labels")
                 let label = NSColor(PickerStyle.foreground).usingColorSpace(.sRGB)!
                 if style == "useTheme" {
                     require(NSColor(PickerStyle.foreground) == NSColor(hexColor("#ddbbcc")!),
@@ -2160,8 +2170,9 @@ struct NativeChecks {
         await backend.reply("theme", APIResult(theme: dark))
         await first?.value
         require(model.themeLoaded && model.themeRevision == 1 && PickerPalette.isDark)
-        require(NSColor(PickerStyle.selectionText) == NSColor(hexColor("#203040")!),
-                     "Selected text must use Rex's selected-theme color, not hardcoded white")
+        require(hexLuma(PickerStyle.selectionText) > 0.8 &&
+                     PickerStyle.selectionText.contrastRatio(with: PickerStyle.selectionBackground) >= 4.5,
+                     "Dark-theme selected text must stay light and readable despite a black theme selection foreground")
         let material = NSView()
         material.wantsLayer = true
         PickerStyle.applyPanelTheme(to: material)
@@ -2610,9 +2621,10 @@ struct NativeChecks {
                      "The real backend must update the native model's palette")
         require(NSColor(PickerStyle.background) == NSColor(hexColor("#333333")!) &&
                      NSColor(PickerStyle.selection) == NSColor(hexColor("#bfbfbf")!) &&
-                     NSColor(PickerStyle.selectionText) == NSColor(hexColor("#1a191a")!) &&
-                     PickerPalette.selectionOpacity == 0.75,
-                     "Native selection must use UI tokens, not terminal selection colors")
+                     hexLuma(PickerStyle.selectionText) > 0.8 &&
+                     PickerStyle.selectionText.contrastRatio(with: PickerStyle.selectionBackground) >= 4.5 &&
+                     PickerPalette.selectionOpacity == 0.18,
+                     "Native selection must retain a muted UI tint with readable light text")
         let label = NSColor(PickerStyle.foreground).usingColorSpace(.sRGB)!
         require(abs(label.redComponent - label.greenComponent) < 0.01 &&
                      abs(label.greenComponent - label.blueComponent) < 0.01,

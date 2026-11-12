@@ -143,7 +143,7 @@ struct PickerView: View {
     /// toolchain times out on the monolithic ViewBuilder.
     private func cmdBadge(_ position: Int, selected: Bool) -> some View {
         let font = Font.system(size: 10, weight: .medium).monospacedDigit()
-        let color = selected ? PickerStyle.selectionText.opacity(0.55) : PickerStyle.foreground.opacity(0.45)
+        let color = selected ? PickerStyle.selectionText.opacity(0.8) : PickerStyle.foreground.opacity(0.45)
         return Text("⌘\(position)")
             .font(font)
             .foregroundStyle(color)
@@ -231,10 +231,14 @@ struct PickerView: View {
                     InlineSessionNameField(text: $model.renameLabel,
                         onSubmit: { model.confirmRenameSession() },
                         onCancel: { model.cancelRenameSession() })
+                        .padding(.horizontal, 7)
+                        .frame(height: 24)
+                        .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(PickerStyle.editingAccent, lineWidth: 1))
                         .layoutPriority(1)
                     Text("↵ Save · Esc Cancel")
                         .font(.system(size: 10))
-                        .foregroundStyle(PickerStyle.selectionText.opacity(0.7))
+                        .foregroundStyle(PickerStyle.secondaryText)
                         .fixedSize()
                 } else {
                     Text(item.label ?? item.path)
@@ -331,7 +335,9 @@ struct PickerView: View {
         .padding(.horizontal, PickerStyle.rowInset)
         .frame(height: rowHeight(item, isAgent: isAgent, selected: selected))
         .background {
-            if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground) }
+            if selected && model.renameCandidate?.id != item.id {
+                RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground)
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
