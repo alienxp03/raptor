@@ -7,15 +7,23 @@ struct PickerView: View {
     @State private var baseReturnFocus: Field = .base
     @State private var selectedInitialDefault = false
     @State private var errorDetailsPresented = false
-    private enum Field { case search, branch, base, target, submit, pullRequest }
+    @State private var shortcutsReturnFocus: Field?
+    private enum Field { case search, branch, base, target, submit, pullRequest, shortcuts }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if model.page == .pr { pullRequestForm }
-            else if model.page == .create { createForm } else { results }
-            status
-            footer
+        ZStack {
+            VStack(spacing: 0) {
+                header
+                if model.page == .pr { pullRequestForm }
+                else if model.page == .create { createForm } else { results }
+                status
+                footer
+            }
+            .opacity(model.shortcutsPresented ? 0 : 1)
+            .allowsHitTesting(!model.shortcutsPresented)
+            .disabled(model.shortcutsPresented)
+            .accessibilityHidden(model.shortcutsPresented)
+            if model.shortcutsPresented { shortcutsPage }
         }
         .font(.system(size: PickerStyle.bodyFontSize))
         .foregroundStyle(PickerStyle.foreground)
@@ -28,6 +36,14 @@ struct PickerView: View {
             guard !Task.isCancelled else { return }
             model.onFocusSearch = { field = .search }
             model.onAdvanceFormFocus = { advanceFormFocus(backward: $0) }
+        }
+        .onChange(of: model.shortcutsPresented) { _, shown in
+            if shown {
+                shortcutsReturnFocus = field
+                field = .shortcuts
+            } else {
+                field = shortcutsReturnFocus
+            }
         }
         .onChange(of: model.basePickerPresented) { _, shown in
             if !shown && model.page == .create { field = baseReturnFocus }
@@ -48,6 +64,91 @@ struct PickerView: View {
         } message: {
             Text(model.pullRequestCommitExplanation)
         }
+    }
+
+    private var shortcutsPage: some View {
+        let shortcuts = model.shortcuts
+        return VStack(spacing: 0) {
+            HStack {
+                Button { model.escape() } label: {
+                    Label("Shortcuts", systemImage: "arrow.left")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("shortcuts-back")
+                Spacer()
+                Text("Esc to return").foregroundStyle(PickerStyle.secondaryText)
+            }
+            .padding(.horizontal, PickerStyle.horizontalInset)
+            .frame(height: PickerStyle.searchHeight)
+            TextField("Search shortcuts…", text: $model.shortcutsQuery,
+                      prompt: Text("Search shortcuts…").foregroundColor(PickerStyle.foreground.opacity(0.45)))
+                .textFieldStyle(.plain)
+                .focused($field, equals: .shortcuts)
+                .task { await Task.yield(); field = .shortcuts }
+                .font(.system(size: PickerStyle.rowFontSize))
+                .padding(.horizontal, 9)
+                .frame(height: PickerStyle.searchFieldHeight)
+                .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, PickerStyle.listInset)
+                .accessibilityLabel("Search shortcuts")
+                .accessibilityIdentifier("shortcuts-search")
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(shortcuts.enumerated()), id: \.element.id) { index, shortcut in
+                            if index == 0 || shortcuts[index - 1].group != shortcut.group {
+                                Text(shortcut.group)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(PickerStyle.secondaryText)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, PickerStyle.rowInset)
+                                    .padding(.top, 12)
+                                    .padding(.bottom, 4)
+                                    .accessibilityAddTraits(.isHeader)
+                            }
+                            shortcutRow(shortcut).id(shortcut.id)
+                        }
+                    }
+                    .padding(.horizontal, PickerStyle.listInset)
+                    .padding(.bottom, 8)
+                }
+                .overlay {
+                    if shortcuts.isEmpty {
+                        Text("No shortcuts found").foregroundStyle(PickerStyle.secondaryText)
+                    }
+                }
+                .onChange(of: model.selectedShortcutID, initial: true) { _, id in
+                    if let id { proxy.scrollTo(id) }
+                }
+            }
+            Divider().overlay(PickerPalette.stroke)
+            Text("↑↓ move · Esc back")
+                .font(.system(size: 11))
+                .foregroundStyle(PickerStyle.secondaryText)
+                .frame(height: PickerStyle.footerHeight)
+        }
+        .accessibilityIdentifier("shortcuts-page")
+    }
+
+    private func shortcutRow(_ shortcut: PickerModel.Shortcut) -> some View {
+        let selected = model.selectedShortcutID == shortcut.id
+        return HStack(spacing: 8) {
+            Text(shortcut.title)
+            Spacer()
+            Text(shortcut.keys).monospaced()
+        }
+        .font(.system(size: PickerStyle.rowFontSize, weight: selected ? .medium : .regular))
+        .foregroundStyle(selected ? PickerStyle.selectionText : PickerStyle.foreground)
+        .padding(.horizontal, PickerStyle.rowInset)
+        .frame(height: PickerStyle.rowHeight)
+        .background {
+            if selected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground) }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { model.selectedShortcutID = shortcut.id }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(selected ? "Selected" : "")
+        .accessibilityIdentifier("shortcut-row:\(shortcut.id)")
     }
 
     private var header: some View {
@@ -529,9 +630,13 @@ struct PickerView: View {
                     .modifier(PickerFormField(focused: field == .base))
                 }
                 .buttonStyle(.plain).focusable().focused($field, equals: .base)
-                .onKeyPress(.return) { presentBasePicker(); return .handled }
+                .focusEffectDisabled()
+                .onKeyPress(keys: [.upArrow, .downArrow, .return], phases: [.down, .repeat]) { _ in
+                    presentBasePicker()
+                    return .handled
+                }
                 .disabled(model.createdPath != nil || model.loading)
-                .help("Search local branches. Enter selects a branch.")
+                .help("Open with Up, Down, or Return. Search local branches; Return selects.")
                 .accessibilityLabel("Base branch: \(model.base)")
                 .accessibilityIdentifier("create-base")
                 .popover(isPresented: $model.basePickerPresented, arrowEdge: .bottom) {
@@ -717,6 +822,12 @@ struct PickerView: View {
                     openTargetControl
                 }
                 Spacer(minLength: 0)
+                if model.page != .create {
+                    Button("Shortcuts ⌘/") { model.toggleShortcuts() }
+                        .disabled(model.busy)
+                        .help("Search keyboard shortcuts (⌘/)")
+                        .accessibilityIdentifier("show-shortcuts")
+                }
                 if !model.isForm && !model.splitMode {
                     Button("⇧⌘P PR") { model.beginPullRequest() }
                         .font(.system(size: 10))
@@ -796,7 +907,7 @@ struct PickerView: View {
             .focusable().focused($field, equals: .target)
             .focusEffectDisabled()
             .fixedSize().disabled(model.busy || model.targets.isEmpty)
-            .onKeyPress(.return) {
+            .onKeyPress(keys: [.upArrow, .downArrow, .return], phases: [.down, .repeat]) { _ in
                 model.targetPickerPresented = true
                 return .handled
             }

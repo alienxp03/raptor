@@ -438,12 +438,13 @@ struct NativeChecks {
                          "Folder rows must retain readable neutral text")
         }
         require(PickerModel.targetLabel("tab") == "New tab")
-        require(PickerModel.targetLabel("session") == "Session")
+        require(PickerModel.targetLabel("session") == "New session")
         require(PickerModel.targetLabel("here") == "cd here")
         let launcher = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: SlowDirectoryBackend())
         let initialListHeight = PickerStyle.height(for: launcher)
-        require(launcher.loading && initialListHeight == 338 && !launcher.showsPills,
-                     "Launcher must reserve eight compact rows without a pills row")
+        let availableListHeight = max((NSScreen.main?.visibleFrame.height ?? 800) - PickerStyle.topInset - 24, 180)
+        require(launcher.loading && initialListHeight == min(594, availableListHeight) && !launcher.showsPills,
+                     "Launcher must reserve sixteen compact rows within the screen without a pills row")
         launcher.start()
         require(PickerStyle.height(for: launcher) == initialListHeight && !launcher.canOpen)
         try await wait { !launcher.loading }
@@ -503,16 +504,63 @@ struct NativeChecks {
         compactList.page = .worktrees
         compactList.items = (0..<8).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
         let eightRowHeight = PickerStyle.height(for: compactList)
+        require(eightRowHeight == min(338, availableListHeight), "Small lists must remain content-fitted")
+        compactList.items = (0..<16).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
+        let sixteenRowHeight = PickerStyle.height(for: compactList)
         compactList.items = (0..<30).map { PickerItem(path: "/demo/\($0)", branch: "feat/\($0)") }
-        require(PickerStyle.height(for: compactList) == eightRowHeight && eightRowHeight == 338,
-                     "Lists must stop growing after eight compact rows")
+        require(PickerStyle.height(for: compactList) == sixteenRowHeight && sixteenRowHeight == min(562, availableListHeight),
+                     "Lists must stop growing after sixteen compact rows or at the screen limit")
         let longBranch = PickerItem(path: "/demo/long", branch: "feat/" + String(repeating: "long-name-", count: 15))
         require(PickerStyle.branchLines(for: longBranch) == 2,
                      "Selected long branch names must wrap instead of sharing width with paths")
         compactList.items[0] = longBranch
         compactList.selectedID = longBranch.id
-        require(PickerStyle.height(for: compactList) == eightRowHeight + PickerStyle.worktreeRowHeight,
+        require(PickerStyle.height(for: compactList) == min(sixteenRowHeight + PickerStyle.worktreeRowHeight, availableListHeight),
                      "A wrapped selected branch needs one extra row without hiding the path detail")
+        let savedSelection = compactList.selectedID
+        let savedQuery = compactList.query
+        compactList.toggleShortcuts()
+        require(compactList.shortcutsPresented && PickerStyle.height(for: compactList) == min(594, availableListHeight),
+                     "Shortcuts must use a screen-fitted in-picker page")
+        require(compactList.selectedShortcutID == compactList.shortcuts.first?.id, "Help must select its first row")
+        require(compactList.shortcuts.first { $0.title == "Move down" }?.keys == "⌃J" &&
+                     compactList.shortcuts.first { $0.title == "Move up" }?.keys == "⌃K",
+                     "Movement actions must show control shortcuts without extra arrow symbols")
+        compactList.moveShortcut(1)
+        require(compactList.selectedShortcutID == compactList.shortcuts[1].id, "Down must select the next help row")
+        compactList.moveShortcut(-1)
+        compactList.moveShortcut(-1)
+        require(compactList.selectedShortcutID == compactList.shortcuts.first?.id, "Up must stop at the first help row")
+        compactList.moveShortcut(1000)
+        require(compactList.selectedShortcutID == compactList.shortcuts.last?.id, "Down must stop at the last help row")
+        compactList.shortcutsQuery = "ctrl r"
+        require(compactList.selectedShortcutID == compactList.shortcuts.first?.id, "Filtering help must select the first match")
+        require(compactList.shortcuts.map(\.title) == ["Rename session"],
+                     "Shortcut search must match key names across terms")
+        compactList.shortcutsQuery = "pane"
+        require(compactList.shortcuts.contains { $0.title == "Toggle split mode" }, "Shortcut search must match Raptor action synonyms")
+        require(!compactList.shortcuts.contains { $0.title == "Split below" }, "Split direction keys must stay hidden outside split mode")
+        compactList.splitMode = true
+        compactList.shortcutsQuery = "pane"
+        require(compactList.shortcuts.contains { $0.title == "Split below" }, "Split mode must show its direction keys")
+        compactList.splitMode = false
+        compactList.shortcutsQuery = ""
+        require(!compactList.shortcuts.contains { $0.group == "Text editing" || $0.group == "Forms" },
+                     "List help must exclude generic editing and inactive form keys")
+        compactList.page = .create
+        require(compactList.shortcuts.contains { $0.title == "Submit form" }, "Form help must include Raptor submission keys")
+        compactList.page = .worktrees
+        compactList.shortcutsQuery = "no-such-shortcut"
+        require(compactList.shortcuts.isEmpty && compactList.selectedShortcutID == nil, "Unknown help search must clear help selection")
+        compactList.moveShortcut(1)
+        require(compactList.selectedShortcutID == nil, "Arrow keys must be safe with no help results")
+        compactList.escape()
+        require(!compactList.shortcutsPresented && compactList.selectedID == savedSelection && compactList.query == savedQuery,
+                     "Escape from help must retain picker query and selection")
+        compactList.toggleShortcuts()
+        require(compactList.shortcutsQuery.isEmpty, "Reopening help must reset only the help search")
+        compactList.dismiss()
+        require(!compactList.shortcutsPresented, "Dismiss must not leave help open for the next launch")
         compactList.close()
 
         try await directCreateChecks()
@@ -2417,7 +2465,7 @@ struct NativeChecks {
         direct.start()
         direct.submitBranch() // Loading Enter must not be queued.
         try await wait { direct.canCreate }
-        require(direct.branch == "amber-falcon" && direct.base == "main" && direct.target == "tab")
+        require(direct.branch == "amber-falcon" && direct.base == "main" && direct.target == "session")
         require(direct.destination == "/Users/demo/Projects/example-kit-worktrees/amber-falcon")
         let before = await demo.count("worktrees.create")
         require(before == 0 && !direct.basePickerPresented)
@@ -2430,7 +2478,7 @@ struct NativeChecks {
         if case .text("amber-falcon") = params["branch"], case .text("main") = params["base"],
            case .text("/Users/demo/Projects/example-kit") = params["repo"] {} else { testFailure("Wrong default create params") }
         let dispatch = await demo.parameters("dispatch")
-        if case .text("tab") = dispatch["target"], case .text("/Users/demo/Projects/example-kit-worktrees/amber-falcon") = dispatch["path"] {} else { testFailure("Wrong default dispatch") }
+        if case .text("session") = dispatch["target"], case .text("/Users/demo/Projects/example-kit-worktrees/amber-falcon") = dispatch["path"] {} else { testFailure("Wrong default dispatch") }
         direct.close()
 
         // Explicit metadata responses cover loading, early edits and authoritative collisions.
@@ -2548,7 +2596,7 @@ struct NativeChecks {
         direct.validationError = nil
         direct.error = nil
         let targets = ["tab", "session", "here", "pane_right", "pane_below"]
-        let labels = ["New tab", "Session", "cd here", "Split right", "Split below"]
+        let labels = ["New tab", "New session", "cd here", "Split right", "Split below"]
         require(direct.targets == targets)
         for (target, label) in zip(targets, labels) {
             require(direct.target == target && PickerModel.targetLabel(target) == label)

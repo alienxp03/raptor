@@ -391,6 +391,27 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // is key with no sheet or modal, its shortcuts own the keyboard.
         guard panel.isKeyWindow, panel.attachedSheet == nil, NSApp.modalWindow == nil,
               event.window == nil || event.window === panel else { return false }
+        let helpFlags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        let helpKey = event.charactersIgnoringModifiers ?? ""
+        let editingText = panel.firstResponder is NSTextView || panel.firstResponder is NSTextField
+        if (helpFlags == [.command] && helpKey == "/") ||
+            (!editingText && helpFlags.subtracting(.shift).isEmpty && event.characters == "?") {
+            model.toggleShortcuts()
+            return true
+        }
+        if model.shortcutsPresented {
+            if event.keyCode == 53 { model.escape(); return true }
+            if helpFlags.intersection([.command, .control, .option]).isEmpty {
+                if event.keyCode == 125 { model.moveShortcut(1); return true }
+                if event.keyCode == 126 { model.moveShortcut(-1); return true }
+            }
+            if helpFlags == [.control] {
+                if helpKey.lowercased() == "j" { model.moveShortcut(1); return true }
+                if helpKey.lowercased() == "k" { model.moveShortcut(-1); return true }
+            }
+            // Search keeps text-editing keys. No picker action runs behind help.
+            return false
+        }
         if model.renameCandidate != nil {
             // Inline editing owns keys; never jump, move rows, or change targets.
             switch event.keyCode {

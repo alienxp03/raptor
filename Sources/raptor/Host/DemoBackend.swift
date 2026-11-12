@@ -39,7 +39,7 @@ actor DemoBackend: BackendClient {
         lastParams[method] = params
         try await Task.sleep(for: .milliseconds(70))
         func text(_ key: String) -> String { if case let .text(value) = params[key] { return value }; return "" }
-        let targets = ["tab", "session", "here", "pane_right", "pane_below"]
+        let targets = ["session", "tab", "here", "pane_right", "pane_below"]
         let repo = "/Users/demo/Projects/example-kit"
         let branches = ["main", "develop", "feat/native-picker", "fix/focus"]
         switch method {
@@ -51,7 +51,7 @@ actor DemoBackend: BackendClient {
                                updatedAt: ISO8601DateFormatter().string(from: Date()), isPinned: pinned.contains(path))
                 }
             let sorted = items.sorted { ($0.isPinned ?? false) && !($1.isPinned ?? false) }
-            return APIResult(items: sorted, targets: targets, target: "tab")
+            return APIResult(items: sorted, targets: targets, target: "session")
         case "sessions":
             // The flat unified launcher, mirroring catalog.LauncherItems: live
             // sessions first (origin session on top), then directories per host
@@ -72,7 +72,7 @@ actor DemoBackend: BackendClient {
                 query.isEmpty || [$0.label ?? "", $0.sessionLabel ?? "", $0.path, $0.host ?? ""]
                     .contains { $0.localizedCaseInsensitiveContains(query) }
             }
-            return APIResult(items: filtered, hosts: sessionHosts, targets: targets, target: "tab")
+            return APIResult(items: filtered, hosts: sessionHosts, targets: targets, target: "session")
         case "agents":
             let query = text("query")
             let ordered = agents.sorted { lhs, rhs in
@@ -118,7 +118,7 @@ actor DemoBackend: BackendClient {
             if text("repo").isEmpty { return APIResult(needsRepo: true) }
             return APIResult(items: worktrees.filter {
                 text("query").isEmpty || $0.path.localizedCaseInsensitiveContains(text("query")) || ($0.branch ?? "").localizedCaseInsensitiveContains(text("query"))
-            }, targets: targets, target: "tab", repo: repo, destinationRoot: "/Users/demo/Projects/example-kit-worktrees", needsRepo: false,
+            }, targets: targets, target: "session", repo: repo, destinationRoot: "/Users/demo/Projects/example-kit-worktrees", needsRepo: false,
             branches: branches, baseBranch: "main", suggestedBranch: "amber-falcon")
         case "worktrees.branches":
             return APIResult(branches: branches.filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) })

@@ -56,9 +56,9 @@ struct TargetPickerPopover: View {
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 30)
+            .frame(height: PickerStyle.rowHeight)
             .background {
-                if isSelected { RoundedRectangle(cornerRadius: 8).fill(PickerStyle.selection) }
+                if isSelected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground) }
             }
             .contentShape(Rectangle())
         }

@@ -139,7 +139,7 @@ struct BranchPickerPopover: View {
                 .padding(.horizontal, PickerStyle.rowInset)
                 .frame(height: PickerStyle.rowHeight)
                 .background {
-                    if isSelected { RoundedRectangle(cornerRadius: 6).fill(PickerStyle.selection) }
+                    if isSelected { RoundedRectangle(cornerRadius: 9).fill(PickerStyle.selectionBackground) }
                 }
                 .contentShape(Rectangle())
         }

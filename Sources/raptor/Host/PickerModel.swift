@@ -4,6 +4,83 @@ import SwiftUI
 final class PickerModel: ObservableObject {
     enum Page: Hashable { case directories, worktrees, create, pr }
     var isForm: Bool { page == .create || page == .pr }
+    @Published var shortcutsPresented = false
+    @Published var shortcutsQuery = "" {
+        didSet {
+            if shortcutsQuery != oldValue { selectedShortcutID = shortcuts.first?.id }
+        }
+    }
+    @Published var selectedShortcutID: String?
+
+    func moveShortcut(_ delta: Int) {
+        let entries = shortcuts
+        guard !entries.isEmpty else { selectedShortcutID = nil; return }
+        let index = entries.firstIndex { $0.id == selectedShortcutID } ?? 0
+        selectedShortcutID = entries[min(max(index + delta, 0), entries.count - 1)].id
+    }
+
+    struct Shortcut: Identifiable {
+        let title: String
+        let keys: String
+        let group: String
+        let keywords: String
+        var id: String { title }
+    }
+
+    var shortcuts: [Shortcut] {
+        var entries: [Shortcut] = [
+            .init(title: "Show shortcuts", keys: "⌘/", group: "General", keywords: "help command cmd / question ? outside text fields"),
+            .init(title: "Go back or dismiss", keys: "Esc", group: "General", keywords: "escape cancel close"),
+            .init(title: "Hide picker", keys: "⌘Q", group: "General", keywords: "command cmd quit"),
+            .init(title: "Move down", keys: "⌃J", group: "Navigation", keywords: "arrow down ctrl control j next"),
+            .init(title: "Move up", keys: "⌃K", group: "Navigation", keywords: "arrow up ctrl control k previous"),
+            .init(title: "Open selected result", keys: "↵", group: "Navigation", keywords: "enter return choose"),
+            .init(title: "Open numbered result", keys: "⌘1–9", group: "Navigation", keywords: "command cmd number jump"),
+            .init(title: "Show sessions", keys: "⇧⌘S", group: "Sessions", keywords: "shift command cmd s view"),
+            .init(title: "Rename session", keys: "⌃R", group: "Sessions", keywords: "ctrl control r name"),
+            .init(title: "Close session", keys: "⌃X", group: "Sessions", keywords: "ctrl control x stop"),
+            .init(title: "Delete session and worktree", keys: "⌃⇧X", group: "Sessions", keywords: "ctrl control shift x remove"),
+            .init(title: "Open pull request", keys: "⇧⌘P", group: "Actions", keywords: "shift command cmd p pr github"),
+            .init(title: "Next open target", keys: "⌃O", group: "Actions", keywords: "ctrl control o tab window destination"),
+            .init(title: "Previous open target", keys: "⌃⇧O", group: "Actions", keywords: "ctrl control shift o tab window destination"),
+            .init(title: "Toggle split mode", keys: "⌃P", group: "Actions", keywords: "ctrl control p pane cancel")
+        ]
+        if splitMode {
+            entries += [
+                .init(title: "Split below", keys: "j  ↓", group: "Split", keywords: "pane down arrow"),
+                .init(title: "Split right", keys: "l  →", group: "Split", keywords: "pane arrow")
+            ]
+        }
+        if isForm {
+            entries += [
+                .init(title: "Next field", keys: "Tab", group: "Forms", keywords: "focus editing"),
+                .init(title: "Previous field", keys: "⇧Tab", group: "Forms", keywords: "shift focus editing"),
+                .init(title: "Submit form", keys: "⌘↵", group: "Forms", keywords: "command cmd enter return create worktree pull request")
+            ]
+        }
+        if sessionDeletion != nil {
+            entries.append(.init(title: "Offer force delete", keys: "⌃⇧X", group: "Confirmation", keywords: "ctrl control shift x force remove"))
+        }
+        if renameCandidate != nil || hasSessionAction {
+            entries.append(.init(title: "Confirm rename or session action", keys: "↵", group: "Confirmation", keywords: "enter return close delete"))
+        }
+        let terms = shortcutsQuery.lowercased().split(whereSeparator: { $0.isWhitespace })
+        return entries.filter { entry in
+            let text = "\(entry.title) \(entry.keys) \(entry.group) \(entry.keywords)".lowercased()
+            let words = text.split { !$0.isLetter && !$0.isNumber }
+            return terms.allSatisfy { term in
+                term.count == 1 && term.first?.isLetter == true ? words.contains(term) : text.contains(term)
+            }
+        }
+    }
+
+    func toggleShortcuts() {
+        guard !busy, renameCandidate == nil, !hasSessionAction, removalCandidate == nil,
+              !basePickerPresented, !targetPickerPresented, !prCommitConfirmationPresented else { return }
+        shortcutsQuery = ""
+        selectedShortcutID = shortcuts.first?.id
+        shortcutsPresented.toggle()
+    }
     @Published var prInput = "" {
         didSet {
             if prInput != oldValue {
@@ -683,7 +760,7 @@ final class PickerModel: ObservableObject {
     }
 
     /// Hide only. An issued mutation must finish in its original context.
-    func dismiss() { setPresented(false); onDismiss?() }
+    func dismiss() { shortcutsPresented = false; setPresented(false); onDismiss?() }
 
     private func finishNavigation() {
         if keepsBackendWarmOnNavigation { dismiss() }
@@ -1012,6 +1089,7 @@ final class PickerModel: ObservableObject {
     }
 
     func escape() {
+        if shortcutsPresented { shortcutsPresented = false; return }
         if sessionCloseCandidate != nil { removalCandidate = nil; return }
         if sessionDeletion != nil {
             if busy { dismiss() } else { cancelDeleteSession() }
@@ -1590,7 +1668,7 @@ final class PickerModel: ObservableObject {
     static func targetLabel(_ target: String) -> String {
         switch target {
         case "tab": return "New tab"
-        case "session": return "Session"
+        case "session": return "New session"
         case "here": return "cd here"
         case "pane_right": return "Split right"
         case "pane_below": return "Split below"

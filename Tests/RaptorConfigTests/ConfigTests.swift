@@ -35,11 +35,20 @@ final class ConfigTests: XCTestCase {
         setenv("HOME", home(), 1)
         defer { setenv("HOME", String(cString: getenv("HOME")), 1) }
         let cfg = RaptorConfig.load()
-        XCTAssertEqual(cfg.enter, "tab")
+        XCTAssertEqual(cfg.enter, "session")
         XCTAssertEqual(cfg.slugLen, 24)
         XCTAssertEqual(cfg.targets, ["session", "tab", "here", "pane_right", "pane_below"])
         XCTAssertTrue(cfg.worktreeRoot.hasSuffix("/Workspace/worktrees"))
         XCTAssertTrue(cfg.pins.isEmpty)
+    }
+
+    func testExplicitTabTargetIsPreserved() throws {
+        let h = home()
+        let originalHome = String(cString: getenv("HOME"))
+        setenv("HOME", h, 1)
+        defer { setenv("HOME", originalHome, 1) }
+        try writeConfig("enter = \"tab\"\n", home: h)
+        XCTAssertEqual(RaptorConfig.load().enter, "tab")
     }
 
     func testSavePinsPreservesOtherLines() throws {

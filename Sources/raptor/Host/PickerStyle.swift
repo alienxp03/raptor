@@ -20,6 +20,7 @@ enum PickerStyle {
     static let searchFieldHeight: CGFloat = 30
     static let createHeaderHeight: CGFloat = searchHeight
     static let footerHeight: CGFloat = 34
+    static let maxVisibleRows = 16
     static let rowHeight: CGFloat = 32
     static let agentRowHeight: CGFloat = 32
     static let agentGroupHeight: CGFloat = 22
@@ -90,6 +91,10 @@ enum PickerStyle {
     }
 
     @MainActor static func height(for model: PickerModel) -> CGFloat {
+        if model.shortcutsPresented {
+            let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
+            return min(594, max(available, 180))
+        }
         if model.page == .pr {
             // Status is available once GitHub metadata resolves; progress gets
             // a separate row only while an operation is in flight.
@@ -103,7 +108,7 @@ enum PickerStyle {
         }
         let rowHeight = model.view == .agents ? Self.agentRowHeight : (model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight)
         // Reserve the list footprint before the first backend response arrives.
-        let rowCount = model.loading && model.items.isEmpty ? 8 : min(max(model.items.count, 2), 8)
+        let rowCount = model.loading && model.items.isEmpty ? maxVisibleRows : min(max(model.items.count, 2), maxVisibleRows)
         let rows = CGFloat(rowCount)
         let status: CGFloat = model.error == nil && model.notice == nil ? 0 : 32
         let detail = model.view == .sessions && model.page == .worktrees ? selectedPathHeight : 0
@@ -136,6 +141,7 @@ private struct RexPanelBackground: ViewModifier {
         // window (RaptorApp.makeContent) — PickerView itself stays transparent
         // so the system glass shows through.
         content
+            .preferredColorScheme(PickerPalette.isDark ? .dark : .light)
             .background(PickerStyle.background)
             .clipShape(RoundedRectangle(cornerRadius: PickerStyle.radius))
             .overlay(RoundedRectangle(cornerRadius: PickerStyle.radius).strokeBorder(PickerPalette.stroke))

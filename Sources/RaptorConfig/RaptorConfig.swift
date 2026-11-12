@@ -17,7 +17,7 @@ public struct RaptorConfig {
     public init(
         worktreeRoot: String? = nil,
         slugLen: Int = 24,
-        enter: String = "tab",
+        enter: String = "session",
         targets: [String] = ["session", "tab", "here", "pane_right", "pane_below"],
         pins: [String] = []
     ) {

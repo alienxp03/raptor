@@ -48,6 +48,7 @@ Sessions come first (the current one marked), then directories by frequency. `En
 | Key | Action |
 | --- | --- |
 | Type | Filter |
+| `⌘/` | Search keyboard shortcuts; `Esc` returns to the picker |
 | `↑`/`↓`, `Ctrl+J`/`Ctrl+K` | Move through results |
 | `Ctrl+O` | Change where the item opens |
 | `Ctrl+R` | Rename the selected session; `Enter` saves, `Esc` cancels |
@@ -57,6 +58,8 @@ Sessions come first (the current one marked), then directories by frequency. `En
 | `Ctrl+P`, then `H J K L` | Open in a pane split |
 | `⇧⌘P` | Open a pull request (or paste a PR URL) |
 | `Esc` | Clear filter, then dismiss |
+
+The **Shortcuts** footer button opens the same help page. Search action names or keys, such as `rename`, `ctrl r`, or `split`. Use `↑`/`↓` or `Ctrl+J`/`Ctrl+K` to move through shortcuts. The selected row uses the picker theme and stays visible. Help lists Raptor actions only, with action names and keys. Split directions and form keys appear only in their active context. Help never runs an action, and returning preserves the picker search and selection. `?` also opens help when no text field is active; in a text field it stays normal text.
 
 Close and Delete use inline confirmation: `Enter` confirms, `Esc` cancels. Delete shows the host, worktree path, and local branch before removal. Dirty worktrees or unmerged commits require a separate Force confirmation (`Ctrl+Shift+X`, then `Enter`); Force can discard files and commits. Primary worktrees and the picker’s origin session are protected. Remote Git branches are never changed.
 
