@@ -1,4 +1,5 @@
 import Foundation
+import RaptorAgent
 import RaptorConfig
 import RaptorPaths
 import RaptorPullrequest
@@ -72,15 +73,16 @@ public extension RaptorDispatch {
     static var teachZoxide: (String) -> Void = { Rex.zoxideAdd($0) }
 
     /// Dispatch opens dir with the given target, mirroring the old shell script.
-    static func dispatch(target: String, dir: String, ctx: Ctx, cfg: RaptorConfig) throws {
-        _ = try dispatchResult(target: target, dir: dir, ctx: ctx, cfg: cfg)
+    /// `launch` runs as the new session/tab/pane's command (agent invocation).
+    static func dispatch(target: String, dir: String, ctx: Ctx, cfg: RaptorConfig, launch: [String] = []) throws {
+        _ = try dispatchResult(target: target, dir: dir, ctx: ctx, cfg: cfg, launch: launch)
     }
 
     /// DispatchResult retains exact resource identities even if selection fails.
-    static func dispatchResult(target: String, dir: String, ctx: Ctx, cfg: RaptorConfig) throws -> OpenResult {
+    static func dispatchResult(target: String, dir: String, ctx: Ctx, cfg: RaptorConfig, launch: [String] = []) throws -> OpenResult {
         var result = OpenResult(path: dir)
         do {
-            try dispatchInto(target: target, dir: dir, ctx: ctx, cfg: cfg, result: &result)
+            try dispatchInto(target: target, dir: dir, ctx: ctx, cfg: cfg, result: &result, launch: launch)
             return result
         } catch {
             throw DispatchError(result: result, cause: error)
@@ -89,7 +91,7 @@ public extension RaptorDispatch {
 }
 
 extension RaptorDispatch {
-    static func dispatchInto(target: String, dir: String, ctx: Ctx, cfg: RaptorConfig, result: inout OpenResult) throws {
+    static func dispatchInto(target: String, dir: String, ctx: Ctx, cfg: RaptorConfig, result: inout OpenResult, launch: [String] = []) throws {
         let pending = try Pullrequest.localPending(dir)
         if pending && (target == "session" || target == "tab") {
             do {
@@ -114,7 +116,12 @@ extension RaptorDispatch {
             let name = RaptorPaths.basename(dir)
             var sid = Rex.sessionByLabel(name) ?? ""
             if sid.isEmpty {
-                let out = try rexRun(["new", "--json", "-c", dir, name])
+                var args = ["new", "--json", "-c", dir, name]
+                if !launch.isEmpty {
+                    args.append("--")
+                    args.append(contentsOf: launch)
+                }
+                let out = try rexRun(args)
                 let res = Rex.decodeJSON(NewSessionResponse.self, from: Data(out.utf8))
                 guard let created = res?.sessionID, !created.isEmpty else {
                     throw RexError("could not create session for \(dir)")
@@ -131,7 +138,12 @@ extension RaptorDispatch {
             if ctx.session.isEmpty {
                 throw RexError("no session context")
             }
-            let out = try rexRun(["window", "new", "-s", ctx.session, RaptorPaths.basename(dir), "-c", dir, "--json"])
+            var args = ["window", "new", "-s", ctx.session, RaptorPaths.basename(dir), "-c", dir, "--json"]
+            if !launch.isEmpty {
+                args.append("--")
+                args.append(contentsOf: launch)
+            }
+            let out = try rexRun(args)
             let res = Rex.decodeJSON(NewWindowResponse.self, from: Data(out.utf8))
             guard let windowID = res?.windowID, !windowID.isEmpty else {
                 throw RexError("could not identify the new tab")
@@ -165,6 +177,9 @@ extension RaptorDispatch {
                 let startup = try Pullrequest.localStartup(path: dir, target: target)
                 args.append("--")
                 args.append(contentsOf: startup)
+            } else if !launch.isEmpty {
+                args.append("--")
+                args.append(contentsOf: launch)
             }
             var out = ""
             var createErr: (any Error)?
@@ -223,6 +238,10 @@ extension RaptorDispatch {
             case "zsh", "bash", "sh", "dash", "ksh", "fish", "nu", "elvish":
                 let command = try shellCD(shell, dir)
                 _ = try Rex.run("send", "-b", ctx.block, command)
+                if !launch.isEmpty {
+                    // The agent command is data, never executable shell input.
+                    _ = try Rex.run("send", "-b", ctx.block, AgentLaunch.shellLine(launch) + "\n")
+                }
                 return
             default:
                 throw RexError("pane is not at a shell prompt")

@@ -8,6 +8,7 @@ let settings: [SwiftSetting] = [.swiftLanguageMode(.v5)]
 let packages: [(name: String, deps: [String])] = [
     ("RaptorPaths", []),
     ("RaptorExecx", ["RaptorPaths"]),
+    ("RaptorAgent", ["RaptorExecx", "RaptorPaths"]),
     ("RaptorConfig", ["RaptorPaths"]),
     ("RaptorRexconfig", ["RaptorPaths"]),
     ("RaptorLauncherupdate", ["RaptorPaths"]),
@@ -17,9 +18,9 @@ let packages: [(name: String, deps: [String])] = [
     ("RaptorWorktree", ["RaptorConfig", "RaptorExecx", "RaptorPaths"]),
     ("RaptorCatalog", ["RaptorConfig", "RaptorPaths", "RaptorRex", "RaptorWorktree"]),
     ("RaptorPullrequest", ["RaptorPaths", "RaptorRex", "RaptorWorktree"]),
-    ("RaptorDispatch", ["RaptorConfig", "RaptorPaths", "RaptorPullrequest", "RaptorRex"]),
+    ("RaptorDispatch", ["RaptorAgent", "RaptorConfig", "RaptorPaths", "RaptorPullrequest", "RaptorRex"]),
     ("RaptorTask", ["RaptorCatalog", "RaptorConfig", "RaptorPaths", "RaptorPullrequest", "RaptorRex", "RaptorWorktree"]),
-    ("RaptorAPI", ["RaptorCatalog", "RaptorConfig", "RaptorDispatch", "RaptorLauncherupdate", "RaptorPaths", "RaptorPullrequest", "RaptorRex", "RaptorTheme", "RaptorWorktree"]),
+    ("RaptorAPI", ["RaptorAgent", "RaptorCatalog", "RaptorConfig", "RaptorDispatch", "RaptorLauncherupdate", "RaptorPaths", "RaptorPullrequest", "RaptorRex", "RaptorTheme", "RaptorWorktree"]),
 ]
 
 let targets = packages.map { pkg in

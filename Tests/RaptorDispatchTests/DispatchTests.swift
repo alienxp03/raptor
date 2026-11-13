@@ -152,3 +152,92 @@ final class LockedRecord {
         lock.unlock()
     }
 }
+
+extension DispatchTests {
+    /// Agent launch rides the open command for tab and pane targets; the
+    /// command list must reach rex as data arguments after `--`.
+    func testDispatchLaunchesAgentInNewTabAndPane() throws {
+        for (target, rexCallPrefix) in [("tab", "window new"), ("pane_right", "split")] {
+            subtest(target + "-launch") {
+                let env = TestEnv()
+                defer { env.restore() }
+                let dir = try makeTempDir()
+                let log = dir + "/rex-calls"
+                env.set("XDG_CACHE_HOME", try makeTempDir())
+                env.set("XDG_STATE_HOME", try makeTempDir())
+                env.set("PATH", dir + ":" + (env.get("PATH") ?? ""))
+                env.set("REX_CALLS", log)
+                let script = #"""
+                #!/bin/sh
+                printf '%s\n' "$*" >> "$REX_CALLS"
+                case "$*" in
+                  'ls --json') echo '{"sessions":[]}' ;;
+                  'window new '*) echo '{"window_id":"new-window"}' ;;
+                  'split '*) echo '{"block_ids":["new-pane"]}' ;;
+                  'api call '*session.describe_block*) echo '{"block":{"window_id":"new-window"}}' ;;
+                  *session.select*) ;;
+                esac
+                """#
+                try writeExecutable(dir + "/rex", script)
+                let ctx = Ctx(session: "origin-session", block: "origin-pane", client: "client")
+                _ = try RaptorDispatch.dispatch(target: target, dir: "/tmp/project", ctx: ctx,
+                                                cfg: RaptorConfig.default(),
+                                                launch: ["pi", "--model", "glm-5.3", "--thinking", "max"])
+                let calls = try String(contentsOfFile: log, encoding: .utf8)
+                    .components(separatedBy: "\n").filter { !$0.isEmpty }
+                let open = calls.first { $0.hasPrefix(rexCallPrefix) }
+                XCTAssertTrue(open?.contains(" -- pi --model glm-5.3 --thinking max") == true, open ?? "no open call")
+            }
+        }
+    }
+
+    /// Session opens pass the agent command to `rex new`; "here" sends the
+    /// quoted command as terminal input after the cd.
+    func testDispatchLaunchesAgentInSessionAndHere() throws {
+        for target in ["session", "here"] {
+            subtest(target + "-launch") {
+                let env = TestEnv()
+                defer { env.restore() }
+                let dir = try makeTempDir()
+                let log = dir + "/rex-calls"
+                let sends = dir + "/rex-sends"
+                env.set("XDG_CACHE_HOME", try makeTempDir())
+                env.set("XDG_STATE_HOME", try makeTempDir())
+                env.set("PATH", dir + ":" + (env.get("PATH") ?? ""))
+                env.set("REX_CALLS", log)
+                env.set("REX_SENDS", sends)
+                let script = #"""
+                #!/bin/sh
+                printf '%s\n' "$*" >> "$REX_CALLS"
+                if [ "$1" = "send" ]; then
+                  shift 3 # send -b BLOCK
+                  printf '%s\n' "$*" >> "$REX_SENDS"
+                  exit 0
+                fi
+                case "$*" in
+                  'ls --json') echo '{"sessions":[]}' ;;
+                  'new '*) echo '{"session_id":"fresh-session"}' ;;
+                  *session.select*) ;;
+                  'do -b origin-pane -e '*) echo 'zsh' ;;
+                esac
+                """#
+                try writeExecutable(dir + "/rex", script)
+                let ctx = Ctx(session: "origin-session", block: "origin-pane", client: "client")
+                _ = try RaptorDispatch.dispatch(target: target, dir: "/tmp/project", ctx: ctx,
+                                                cfg: RaptorConfig.default(),
+                                                launch: ["pi", "--thinking", "max"])
+                if target == "session" {
+                    let calls = try String(contentsOfFile: log, encoding: .utf8)
+                        .components(separatedBy: "\n").filter { !$0.isEmpty }
+                    let new = calls.first { $0.hasPrefix("new --json") }
+                    XCTAssertTrue(new?.contains(" -- pi --thinking max") == true, new ?? "no new call")
+                } else {
+                    let lines = try String(contentsOfFile: sends, encoding: .utf8)
+                        .components(separatedBy: "\n").filter { !$0.isEmpty }
+                    XCTAssertTrue(lines.contains("cd -- '/tmp/project'"), lines.joined(separator: "|"))
+                    XCTAssertTrue(lines.last?.contains("'pi' '--thinking' 'max'") == true, lines.joined(separator: "|"))
+                }
+            }
+        }
+    }
+}

@@ -55,6 +55,7 @@ final class PickerModel: ObservableObject {
         }
         if isForm {
             entries += [
+                .init(title: "Show agent fields", keys: "⌃⌥O", group: "Forms", keywords: "ctrl control option o agent model reasoning worktree pi codex"),
                 .init(title: "Next field", keys: "Tab", group: "Forms", keywords: "focus editing"),
                 .init(title: "Previous field", keys: "⇧Tab", group: "Forms", keywords: "shift focus editing"),
                 .init(title: "Submit form", keys: "⌘↵", group: "Forms", keywords: "command cmd enter return create worktree pull request")
@@ -125,6 +126,20 @@ final class PickerModel: ObservableObject {
     @Published private(set) var refreshing = false
     @Published var targets: [String] = []
     @Published var target = ""
+    // Agent launch controls (worktree form). Collapsed until ⌃⇧O or the
+    // summary row opens them; selections ride the create/dispatch request.
+    @Published var agentControlsShown = false
+    @Published private(set) var agentChoices: [String] = ["pi", "codex"]
+    @Published private(set) var agent = "none"
+    @Published private(set) var agentProvider = ""
+    @Published private(set) var agentModel = ""
+    @Published private(set) var agentReasoning = "" // "" or "default": tool default
+    @Published private(set) var agentCatalogs: [String: [AgentModelPayload]] = [:]
+    @Published private(set) var agentCatalogLoading = false
+    @Published private(set) var agentCatalogWarning: String?
+    private var agentCatalogsRequested = Set<String>()
+    private var agentDefaultsApplied = false
+    private var createdLaunch: (agent: String, provider: String, model: String, reasoning: String)?
     @Published var repo: String? {
         didSet {
             if repo != oldValue {
@@ -183,6 +198,9 @@ final class PickerModel: ObservableObject {
     @Published var renameLabel = ""
     private var pendingRename: (context: Int, item: PickerItem, label: String)?
     @Published var basePickerPresented = false
+    @Published var agentPickerPresented = false
+    @Published var agentModelPickerPresented = false
+    @Published var agentReasoningPickerPresented = false
     @Published var targetPickerPresented = false
     @Published var themeLoaded = false
     @Published private(set) var themeRevision = 0
@@ -689,6 +707,10 @@ final class PickerModel: ObservableObject {
         formRequestRepo = options.repo
         if page == .create {
             if sameContext { targets = previousTargets; target = previousTarget }
+            agentControlsShown = false
+            agentDefaultsApplied = false
+            agentCatalogWarning = nil
+            createdLaunch = nil
             restoreFormMetadata()
         }
         createParent = .worktrees
@@ -1019,7 +1041,10 @@ final class PickerModel: ObservableObject {
                     if currentPage != .create || self.base.isEmpty || self.base == initialBase {
                         self.base = result.baseBranch ?? self.branches.first ?? ""
                     }
-                    if currentPage == .create { self.applyBranchDefault() }
+                    if currentPage == .create {
+                        self.applyBranchDefault()
+                        self.applyAgentDefaults(result)
+                    }
                     self.rememberFormMetadata(result, requestedRepo: currentRepo)
                 }
                 if !self.items.contains(where: { $0.id == self.scrollID }) { self.scrollID = nil }
@@ -1280,7 +1305,9 @@ final class PickerModel: ObservableObject {
         if formMetadata.count >= 32 { formMetadata.removeAll() }
         let metadata = APIResult(targets: result.targets, target: result.target, repo: result.repo,
                                  destinationRoot: result.destinationRoot, branches: result.branches,
-                                 baseBranch: result.baseBranch, suggestedBranch: result.suggestedBranch)
+                                 baseBranch: result.baseBranch, suggestedBranch: result.suggestedBranch,
+                                 agent: result.agent, agentModel: result.agentModel,
+                                 agentReasoning: result.agentReasoning, agents: result.agents)
         formMetadata[formContext(repo: requestedRepo)] = metadata
         if let repo = result.repo { formMetadata[formContext(repo: repo)] = metadata }
     }
@@ -1294,8 +1321,179 @@ final class PickerModel: ObservableObject {
         destinationRoot = cached.destinationRoot
         targets = cached.targets ?? targets
         if !targets.contains(target) { target = cached.target ?? targets.first ?? "" }
+        applyAgentDefaults(cached)
         applyBranchDefault()
         // Never restore validation: Create still requires a fresh preview.
+    }
+
+    // Config defaults apply once per form open; later refreshes never clobber
+    // an in-progress selection.
+    private func applyAgentDefaults(_ result: APIResult) {
+        if let choices = result.agents, !choices.isEmpty { agentChoices = choices }
+        guard !agentDefaultsApplied else { return }
+        let configured = result.agent.flatMap { $0.isEmpty ? nil : $0 } ?? "none"
+        agent = configured
+        agentModel = result.agentModel ?? ""
+        agentProvider = Self.providerPartition(agentModel).provider
+        agentModel = Self.providerPartition(agentModel).id
+        agentReasoning = result.agentReasoning ?? ""
+        if configured != "none" {
+            ensureAgentCatalog(for: configured)
+        }
+        agentDefaultsApplied = true
+    }
+
+    /// Config may store "provider/id"; split once so flags stay separate.
+    static func providerPartition(_ value: String) -> (provider: String, id: String) {
+        guard let slash = value.firstIndex(of: "/") else { return ("", value) }
+        let provider = String(value[value.startIndex..<slash])
+        let id = String(value[value.index(after: slash)...])
+        if provider.isEmpty || id.isEmpty { return ("", value) }
+        return (provider, id)
+    }
+
+    // MARK: Agent launch controls
+
+    /// ⌃⌥O or the summary row: reveal/hide the agent, model, and reasoning fields.
+    func toggleAgentControls() {
+        guard page == .create, createdPath == nil, contextReady, !busy,
+              !basePickerPresented, !agentPickerPresented, !agentModelPickerPresented, !agentReasoningPickerPresented else { return }
+        agentControlsShown.toggle()
+        if agentControlsShown { ensureAgentCatalog(for: agent) }
+    }
+
+    var hasPopover: Bool {
+        basePickerPresented || targetPickerPresented || agentPickerPresented
+            || agentModelPickerPresented || agentReasoningPickerPresented
+    }
+
+    func closeAgentPopovers() {
+        agentPickerPresented = false
+        agentModelPickerPresented = false
+        agentReasoningPickerPresented = false
+    }
+
+    var agentCatalogModels: [AgentModelPayload] { agentCatalogs[agent] ?? [] }
+
+    func agentDisplayName(_ name: String) -> String {
+        switch name {
+        case "none": return "No agent"
+        case "pi": return "Pi"
+        case "codex": return "Codex"
+        default: return name.isEmpty ? "No agent" : name.capitalized
+        }
+    }
+
+    var agentDisplayLabel: String { agentDisplayName(agent) }
+
+    /// Model button title: selected label, discovery state, or tool default.
+    var selectedModelLabel: String {
+        guard agent != "none" else { return "—" }
+        if let selected = agentCatalogModels.first(where: { $0.id == agentModel }) {
+            return selected.displayLabel
+        }
+        if agentModel.isEmpty {
+            return agentCatalogLoading && agentCatalogModels.isEmpty ? "Discovering models…" : "Agent default"
+        }
+        return agentModel
+    }
+
+    var agentSummary: String {
+        guard agent != "none" else { return "No agent" }
+        var parts = [agent]
+        if let selected = agentCatalogModels.first(where: { $0.id == agentModel }) {
+            parts.append(selected.displayLabel)
+        } else if !agentModel.isEmpty {
+            parts.append(agentModel)
+        }
+        if let reasoning = agentReasoningDetail { parts.append(reasoning) }
+        return parts.joined(separator: " · ")
+    }
+
+    private var agentReasoningDetail: String? {
+        agentReasoning.isEmpty || agentReasoning == agentReasoningDefault ? nil : agentReasoning
+    }
+
+    /// Reasoning options for the selected model; "default" first.
+    var agentReasoningChoices: [String] {
+        let levels = agentCatalogModels.first(where: { $0.id == agentModel })?.reasoning ?? []
+        return [agentReasoningDefault] + levels
+    }
+
+    func selectAgent(_ choice: String) {
+        guard page == .create, createdPath == nil, choice == "none" || agentChoices.contains(choice) || choice == agent else { return }
+        agent = choice
+        agentProvider = ""
+        agentModel = ""
+        agentReasoning = ""
+        ensureAgentCatalog(for: choice)
+    }
+
+    func selectAgentModel(_ model: AgentModelPayload) {
+        agent = agent == "none" ? "pi" : agent
+        agentModel = model.id
+        agentProvider = model.provider ?? ""
+        agentReasoning = model.defaultReasoning.flatMap { $0.isEmpty ? nil : $0 } ?? ""
+    }
+
+    func selectAgentReasoning(_ level: String) {
+        agentReasoning = level
+    }
+
+    /// Persists the current selections as config defaults (explicit Save).
+    func saveAgentDefaults() {
+        guard page == .create, contextReady, !busy else { return }
+        let agent = agent, provider = agentProvider, model = agentModel, reasoning = agentReasoning
+        // Pi models need their provider on reload; store the qualified id.
+        let stored = agent == "pi" && !provider.isEmpty ? provider + "/" + model : model
+        perform {
+            _ = try await self.request("config.saveAgent", params: [
+                "agent": .text(agent), "agent_provider": .text(provider),
+                "agent_model": .text(stored), "agent_reasoning": .text(reasoning),
+            ])
+            self.notice = "Saved agent defaults"
+        }
+    }
+
+    /// Discovery is cached by the backend; requests dedupe per agent.
+    private func ensureAgentCatalog(for agent: String) {
+        guard page == .create else { return }
+        guard agent != "none", !agent.isEmpty else {
+            agentCatalogWarning = nil
+            return
+        }
+        guard agentCatalogs[agent] == nil, !agentCatalogsRequested.contains(agent) else { return }
+        agentCatalogsRequested.insert(agent)
+        agentCatalogLoading = true
+        agentCatalogWarning = nil
+        perform {
+            defer { self.agentCatalogLoading = false }
+            do {
+                let result = try await self.request("agents.catalog", params: ["agent": .text(agent)])
+                let models = result.agentModels ?? []
+                self.agentCatalogs[agent] = models
+                self.agentCatalogWarning = result.agentWarning.flatMap { $0.isEmpty ? nil : $0 }
+                if self.agent == agent, self.agentControlsShown {
+                    self.applyCatalogDefaults(models)
+                }
+            } catch {
+                self.agentCatalogsRequested.remove(agent)
+                self.agentCatalogWarning = error.localizedDescription
+            }
+        }
+    }
+
+    private func applyCatalogDefaults(_ models: [AgentModelPayload]) {
+        guard !models.isEmpty else { return }
+        if let selected = models.first(where: { $0.id == agentModel }) {
+            agentProvider = selected.provider ?? agentProvider
+            return
+        }
+        let chosen = models.first(where: { $0.isDefault == true }) ?? models.first
+        guard let chosen else { return }
+        agentModel = chosen.id
+        agentProvider = chosen.provider ?? ""
+        agentReasoning = chosen.defaultReasoning.flatMap { $0.isEmpty ? nil : $0 } ?? ""
     }
 
     // Never queue Enter for a pending preview.
@@ -1336,7 +1534,13 @@ final class PickerModel: ObservableObject {
         guard !basePickerPresented else { return }
         if createdPath != nil { openCreated(); return }
         guard canCreate, let repo else { return }
-        let params: [String: APIValue] = ["repo": .text(repo), "branch": .text(branch), "base": .text(base)]
+        var params: [String: APIValue] = ["repo": .text(repo), "branch": .text(branch), "base": .text(base)]
+        if agent != "none" {
+            params["agent"] = .text(agent)
+            params["agent_provider"] = .text(agentProvider)
+            params["agent_model"] = .text(agentModel)
+            params["agent_reasoning"] = .text(agentReasoning)
+        }
         let target = target
         perform {
             let result = try await self.request("worktrees.create", params: params)
@@ -1345,6 +1549,9 @@ final class PickerModel: ObservableObject {
             // Commit this state before opening. A failed dispatch must never
             // turn the retry button into a second create request.
             self.createdPath = path
+            if self.agent != "none" {
+                self.createdLaunch = (self.agent, self.agentProvider, self.agentModel, self.agentReasoning)
+            }
             do { try await self.openPath(path, target: target) }
             catch { throw APIError.message("Worktree created, but opening failed. \(error.localizedDescription)") }
         }
@@ -1802,7 +2009,26 @@ final class PickerModel: ObservableObject {
     }
 
     private func dispatch(path: String, target: String) {
-        perform { try await self.openPath(path, target: target) }
+        perform {
+            let result: APIResult
+            if let launch = self.createdLaunch {
+                result = try await self.request("dispatch", params: [
+                    "target": .text(target), "path": .text(path),
+                    "agent": .text(launch.agent), "agent_provider": .text(launch.provider),
+                    "agent_model": .text(launch.model), "agent_reasoning": .text(launch.reasoning),
+                ])
+            } else {
+                result = try await self.request("dispatch", params: ["target": .text(target), "path": .text(path)])
+            }
+            self.acceptLauncherMutation(result)
+            if let message = result.error, !message.isEmpty { throw APIError.message(message) }
+            if self.options.demo {
+                self.notice = "Demo only: opened \(PathDisplay.abbreviate(path, home: "/Users/demo")) → \(Self.targetLabel(target)). No Rex call."
+            } else {
+                self.createdPath = nil // Dispatch succeeded: no recovery remains to preserve.
+                self.finishNavigation()
+            }
+        }
     }
 
     private func openPath(_ path: String, target: String) async throws {

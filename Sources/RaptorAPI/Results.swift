@@ -1,4 +1,5 @@
 import Foundation
+import RaptorAgent
 import RaptorCatalog
 import RaptorPaths
 import RaptorPullrequest
@@ -57,8 +58,11 @@ enum MethodResult {
     case directories(items: [Directory], targets: [String], target: String)
     case tree(
         destinationRoot: String, repo: String, needsRepo: Bool, items: [TreeItem], branches: [String],
-        baseBranch: String, suggestedBranch: String, targets: [String], target: String)
+        baseBranch: String, suggestedBranch: String, targets: [String], target: String,
+        agent: String, agentModel: String, agentReasoning: String, agentChoices: [String])
     case branches(items: [String])
+    /// agents.catalog: one agent's launchable models plus any degradation note.
+    case agentCatalog(agent: String, models: [AgentModel], warning: String)
     case preview(path: String, validationError: String)
     case path(String)
     /// sessions.create's map: sorted keys, plus optional error/launcher_items.
@@ -95,7 +99,8 @@ enum MethodResult {
                 ("target", .string(target)),
             ]).encode()
         case .tree(let destinationRoot, let repo, let needsRepo, let items, let branches, let baseBranch,
-            let suggestedBranch, let targets, let target):
+            let suggestedBranch, let targets, let target,
+            let agent, let agentModel, let agentReasoning, let agentChoices):
             var fields: [(String, JS)] = [
                 ("destination_root", .string(destinationRoot)),
                 ("repo", .string(repo)),
@@ -109,9 +114,19 @@ enum MethodResult {
             }
             fields.append(("targets", .array(targets.map { .string($0) })))
             fields.append(("target", .string(target)))
+            fields.append(("agent", .string(agent)))
+            fields.append(("agent_model", .string(agentModel)))
+            fields.append(("agent_reasoning", .string(agentReasoning)))
+            fields.append(("agents", .array(agentChoices.map { .string($0) })))
             return JS.object(fields).encode()
         case .branches(let items):
             return JS.object([("branches", .array(items.map { .string($0) }))]).encode()
+        case .agentCatalog(let agent, let models, let warning):
+            var fields: [(String, JS)] = [("agent", .string(agent)), ("agent_models", .array(models.map(agentModelJS)))]
+            if !warning.isEmpty {
+                fields.append(("agent_warning", .string(warning)))
+            }
+            return JS.object(fields).encode()
         case .preview(let path, let validationError):
             return JS.object([("path", .string(path)), ("validation_error", .string(validationError))]).encode()
         case .path(let path):
@@ -159,6 +174,17 @@ enum MethodResult {
             return JS.object(fields).encode()
         }
     }
+}
+
+/// One launchable agent model of the agents.catalog payload.
+func agentModelJS(_ model: AgentModel) -> JS {
+    var fields: [(String, JS)] = [("id", .string(model.id))]
+    if !model.provider.isEmpty { fields.append(("provider", .string(model.provider))) }
+    fields.append(("label", .string(model.label.isEmpty ? model.id : model.label)))
+    fields.append(("reasoning", .array(model.reasoning.map { .string($0) })))
+    if !model.defaultReasoning.isEmpty { fields.append(("default_reasoning", .string(model.defaultReasoning))) }
+    if model.isDefault { fields.append(("is_default", .bool(true))) }
+    return .object(fields)
 }
 
 /// rex.AgentEntry wire shape: Go struct field order with omitempty tags.

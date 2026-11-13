@@ -399,7 +399,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         // SwiftUI popover events can still name the parent panel. Let the
         // branch picker own Escape, Return, Tab, and all editing shortcuts.
-        if model.basePickerPresented || model.targetPickerPresented { return false }
+        if model.basePickerPresented || model.targetPickerPresented || model.hasPopover { return false }
         // Synthesized events can arrive without a window tag; when our panel
         // is key with no sheet or modal, its shortcuts own the keyboard.
         guard panel.isKeyWindow, panel.attachedSheet == nil, NSApp.modalWindow == nil,
@@ -506,6 +506,11 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             case "k" where !model.isForm: model.move(-1); return true
             default: break
             }
+        }
+        // ⌃⌥O shows/hides the worktree form's agent, model, and reasoning fields.
+        if control && option && !command && !shift && key == "o" {
+            model.toggleAgentControls()
+            return true
         }
         if !model.isForm && !command && !option && !control {
             switch event.keyCode {

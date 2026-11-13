@@ -172,7 +172,9 @@ enum PickerStyle {
         }
         if model.page == .create {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
-            return createHeight + validation + (model.error == nil && model.notice == nil ? 0 : 32)
+            // One collapsed agent row; ⌃⌥O expansion adds model and reasoning.
+            let agent: CGFloat = model.createdPath == nil ? (model.agentControlsShown ? 100 : 30) : 0
+            return createHeight + agent + validation + (model.error == nil && model.notice == nil ? 0 : 32)
         }
         let rowHeight = model.view == .agents ? Self.agentRowHeight : (model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight)
         // Reserve the list footprint before the first backend response arrives.
