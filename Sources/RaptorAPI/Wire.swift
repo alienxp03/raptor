@@ -122,6 +122,13 @@ public final class PipeInput: RequestInput {
             if errno == EINTR {
                 continue
             }
+            if errno == EAGAIN || errno == EWOULDBLOCK {
+                // A pipe can be nonblocking (or have its shared flags changed).
+                // No bytes available is not EOF. Wait without spinning, then
+                // retry the read; the serve loop handles owner cancellation.
+                var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+                if Darwin.poll(&descriptor, 1, 200) >= 0 || errno == EINTR { continue }
+            }
             throw StreamError.closedPipe
         }
     }

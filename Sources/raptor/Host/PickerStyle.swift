@@ -59,6 +59,15 @@ enum PickerStyle {
     static var fieldBackground: Color { PickerPalette.fieldBackground }
     static var foreground: Color { PickerPalette.foreground }
     static var secondaryText: Color { foreground.opacity(0.55) }
+    /// Opaque prompt ink: AppKit's default placeholder and translucent text can
+    /// become unreadable when Rex's theme differs from the system appearance.
+    static var placeholderText: Color {
+        let surface = background.overlay(with: fieldBackground,
+                                          fraction: NSColor(fieldBackground).alphaComponent)
+        let preferred = surface.overlay(with: foreground, fraction: 0.7)
+        return preferred.contrastRatio(with: surface) >= 4.5
+            ? preferred : contrastText(for: surface)
+    }
     static var sessionText: Color {
         PickerPalette.isDark ? Color(red: 173 / 255.0, green: 208 / 255.0, blue: 173 / 255.0)
             : Color(red: 57 / 255.0, green: 96 / 255.0, blue: 57 / 255.0)
@@ -172,4 +181,18 @@ private struct RexPanelBackground: ViewModifier {
 
 extension View {
     func pickerGlass() -> some View { modifier(RexPanelBackground()) }
+
+    /// Draw outside the native field: AppKit can replace prompt attributes when
+    /// its field editor gains focus or the window's appearance changes.
+    func pickerPlaceholder(_ prompt: String, when empty: Bool) -> some View {
+        overlay(alignment: .leading) {
+            if empty {
+                Text(prompt)
+                    .foregroundStyle(PickerStyle.placeholderText)
+                    .lineLimit(1)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
 }

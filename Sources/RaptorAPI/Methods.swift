@@ -322,7 +322,7 @@ extension Handler {
             return (.directories(items: resultItems, targets: targets(), target: cfg.enter), nil)
         case "pullrequests.resolve", "pullrequests.prepare", "pullrequests.open":
             return pullRequest(method, params)
-        case "worktrees.list":
+        case "worktrees.list", "worktrees.form":
             let obj: JSONValue
             do {
                 var parser = JSONParser(params)
@@ -350,7 +350,8 @@ extension Handler {
             var baseBranch = ""
             var suggestedBranch = ""
             if !repo.isEmpty {
-                let info = Catalog.listWorktrees(repo, cfg)
+                let info = method == "worktrees.form"
+                    ? Catalog.worktreeForm(repo) : Catalog.listWorktrees(repo, cfg)
                 destinationRoot = info.root
                 branches.append(contentsOf: info.branches)
                 baseBranch = info.baseBranch

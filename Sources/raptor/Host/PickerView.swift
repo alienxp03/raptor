@@ -119,9 +119,9 @@ struct PickerView: View {
             }
             .padding(.horizontal, PickerStyle.horizontalInset)
             .frame(height: PickerStyle.searchHeight)
-            TextField("Search shortcuts…", text: $model.shortcutsQuery,
-                      prompt: Text("Search shortcuts…").foregroundColor(PickerStyle.foreground.opacity(0.45)))
+            TextField("", text: $model.shortcutsQuery)
                 .textFieldStyle(.plain)
+                .pickerPlaceholder("Search shortcuts…", when: model.shortcutsQuery.isEmpty)
                 .focused($field, equals: .shortcuts)
                 .task { await Task.yield(); field = .shortcuts }
                 .font(.system(size: PickerStyle.rowFontSize))
@@ -205,10 +205,10 @@ struct PickerView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12))
                         .foregroundStyle(PickerStyle.foreground.opacity(0.5))
-                    TextField(searchPrompt, text: $model.query,
-                              prompt: Text(searchPrompt).foregroundColor(PickerStyle.foreground.opacity(0.45)))
+                    TextField("", text: $model.query)
                         .textFieldStyle(.plain)
                         .font(.system(size: PickerStyle.rowFontSize))
+                        .pickerPlaceholder(searchPrompt, when: model.query.isEmpty)
                         .focused($field, equals: .search)
                         .task { await Task.yield(); field = .search }
                         .disabled(model.busy || model.renameCandidate != nil || model.hasSessionAction)
@@ -588,9 +588,11 @@ struct PickerView: View {
             pathRow("Repo", value: model.repo.map(displayPath) ?? "Loading…", path: model.repo)
             HStack(spacing: 10) {
                 formLabel("Branch")
-                TextField("feat/my-change", text: Binding(get: { model.branch }, set: { model.editBranch($0) }))
+                TextField("", text: Binding(get: { model.branch }, set: { model.editBranch($0) }))
                     .disableAutocorrection(true)
-                    .textFieldStyle(.plain).padding(.horizontal, 9)
+                    .textFieldStyle(.plain)
+                    .pickerPlaceholder("feat/my-change", when: model.branch.isEmpty)
+                    .padding(.horizontal, 9)
                     .frame(height: PickerStyle.controlHeight)
                     .modifier(PickerFormField(focused: field == .branch))
                     .focused($field, equals: .branch)

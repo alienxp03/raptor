@@ -36,10 +36,11 @@ struct BranchPickerPopover: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TextField("Search local branches…", text: $query)
+            TextField("", text: $query)
                 .disableAutocorrection(true)
                 .textFieldStyle(.plain)
                 .font(.system(size: PickerStyle.rowFontSize))
+                .pickerPlaceholder("Search local branches…", when: query.isEmpty)
                 .focused($searchFocused)
                 .accessibilityLabel("Search local base branches")
                 .accessibilityIdentifier("base-search")

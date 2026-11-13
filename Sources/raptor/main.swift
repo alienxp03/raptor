@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import RaptorAPI
 import RaptorConfig
 import RaptorDispatch
@@ -121,12 +122,14 @@ let sub = Array(rest.dropFirst())
 
 switch command {
 case "api":
+    Logger(subsystem: "com.alienxp03.raptor", category: "backend").notice("API started pid=\(getpid())")
     let token = CancelToken()
     // Unblock an idle request reader as well as canceling Rex children.
     func installSignal(_ sig: Int32) {
         signal(sig, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
         source.setEventHandler {
+            Logger(subsystem: "com.alienxp03.raptor", category: "backend").error("API received signal \(sig)")
             FileHandle.standardInput.closeFile()
             token.cancel()
         }
@@ -143,7 +146,9 @@ case "api":
             output: PipeOutput(FileHandle.standardOutput),
             cancel: token
         )
+        Logger(subsystem: "com.alienxp03.raptor", category: "backend").notice("API serve ended: cancelled=\(token.isCancelled)")
     } catch {
+        Logger(subsystem: "com.alienxp03.raptor", category: "backend").error("API failed: \(String(describing: error), privacy: .public)")
         // Go: errors after normal cancellation are not fatal reports.
         if !token.isCancelled {
             fail(String(describing: error))

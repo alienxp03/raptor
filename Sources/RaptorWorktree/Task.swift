@@ -33,6 +33,34 @@ extension WorktreeKit {
         try suggestTaskName(repo: repo, cfg: cfg, names: taskNamePairs(shuffledTaskWords()))
     }
 
+    /// Provisional form suggestion using only refs the caller already read.
+    /// Does not inspect HEAD, destinations, or the filesystem; preview and create
+    /// must still perform fresh, full validation. Empty means no candidate remains.
+    public static func suggestTaskNameFast(branches: [String]) -> String {
+        suggestTaskNameFast(branches: branches, names: taskNamePairs(shuffledTaskWords()))
+    }
+
+    static func suggestTaskNameFast(branches: [String], names: [String]) -> String {
+        let existing = Set(branches)
+        var blocked = existing
+        for branch in branches {
+            var prefix = ""
+            for component in branch.split(separator: "/").dropLast() {
+                prefix = prefix.isEmpty ? String(component) : prefix + "/" + component
+                blocked.insert(prefix)
+            }
+        }
+        return names.first { candidate in
+            if blocked.contains(candidate) { return false }
+            var prefix = ""
+            for component in candidate.split(separator: "/").dropLast() {
+                prefix = prefix.isEmpty ? String(component) : prefix + "/" + component
+                if existing.contains(prefix) { return false }
+            }
+            return true
+        } ?? ""
+    }
+
     static func suggestTaskName(repo: String, cfg: RaptorConfig, names: [String]) throws -> String {
         _ = try taskHEAD(repo: repo)
         let blocked = try taskBlockedBranches(repo: repo)

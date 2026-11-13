@@ -342,6 +342,8 @@ public extension Rex {
         return false
     }
 
+    /// Output-only capture: Execx isolates stdin with /dev/null so CLI children
+    /// cannot change the resident API input pipe's file-status flags.
     /// Process capture with a hard timeout: on expiry the child is terminated and
     /// nil is returned (Go's CommandContext + Output error path). Output is read
     /// on a side queue so the deadline is polled while blocked children keep the

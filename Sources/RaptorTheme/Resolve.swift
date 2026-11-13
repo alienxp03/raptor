@@ -313,6 +313,7 @@ private func runCommand(_ name: String, _ args: [String]) throws -> Data {
         throw CommandError(message: name + ": no such file or directory")
     }
     let process = Process()
+    process.standardInput = FileHandle.nullDevice
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments = args
     let pipe = Pipe()

@@ -273,8 +273,15 @@ extension Handler {
         guard let data = FileManager.default.contents(atPath: launcherCachePath()) else {
             return (LauncherCacheEntry(), false)
         }
-        guard let entry = decodeLauncherCache(data), entry.items != nil else {
+        guard var entry = decodeLauncherCache(data), entry.items != nil else {
             return (LauncherCacheEntry(), false)
+        }
+        // Disk rows restore navigation, not live activity. A previous backend's
+        // working/blocked flags may be hours old; only a fresh native snapshot
+        // can assert them. Keep completion identities for receipt reconciliation.
+        for i in entry.items!.indices {
+            entry.items![i].state = ""
+            entry.items![i].working = false
         }
         cacheMu.lock()
         launcher = entry

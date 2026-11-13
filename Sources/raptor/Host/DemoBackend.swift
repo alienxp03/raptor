@@ -115,9 +115,9 @@ actor DemoBackend: BackendClient {
         case "context":
             contextUpdates += 1
             return APIResult()
-        case "worktrees.list":
+        case "worktrees.list", "worktrees.form":
             if text("repo").isEmpty { return APIResult(needsRepo: true) }
-            return APIResult(items: worktrees.filter {
+            return APIResult(items: method == "worktrees.form" ? [] : worktrees.filter {
                 text("query").isEmpty || $0.path.localizedCaseInsensitiveContains(text("query")) || ($0.branch ?? "").localizedCaseInsensitiveContains(text("query"))
             }, targets: targets, target: "session", repo: repo, destinationRoot: "/Users/demo/Projects/example-kit-worktrees", needsRepo: false,
             branches: branches, baseBranch: "main", suggestedBranch: "amber-falcon")

@@ -172,6 +172,8 @@ extension EventWatcher {
     func runBounded(name: String, args: [String], timeout: TimeInterval, limit: Int) -> Data? {
         guard let executable = Execx.lookup(name: name) else { return nil }
         let process = Process()
+        // Capture children must not share their parent's stdin status flags.
+        process.standardInput = FileHandle.nullDevice
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         let pipe = Pipe()
@@ -254,6 +256,7 @@ extension EventWatcher {
         }
         args.append(contentsOf: ["do", "-e", Rex.eventsScript, "--all", "--fail-fast"])
         let process = Process()
+        process.standardInput = FileHandle.nullDevice
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         let pipe = Pipe()

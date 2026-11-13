@@ -70,6 +70,7 @@ cached_swiftc NativeChecks -framework SwiftUI -framework AppKit \
   "$SCRIPT_ROOT/Sources/raptor/Host/FocusFileWatcher.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/RexFocusTracker.swift" \
   "$SCRIPT_ROOT/macos/Tests/RexFocusChecks.swift" \
+  "$SCRIPT_ROOT/macos/Tests/PlaceholderChecks.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/PathDisplay.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/PickerStyle.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/RexTheme.swift" \

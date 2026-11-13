@@ -199,6 +199,41 @@ final class SnapshotsTests: APITestCase {
         }
     }
 
+    func testDiskSnapshotDoesNotRestoreLiveActivity() throws {
+        env.set("XDG_CACHE_HOME", makeTempDir())
+        let h = Handler(ctx: Ctx(), cfg: .default())
+        let completion = CompletionSource(block: "block:done", state: "done", updatedAt: "2026-11-12T19:39:27Z")
+        var working = LauncherItem(kind: "session", id: "session:work", label: "Work", state: "working", working: true)
+        working.completionSources = [completion]
+        let blocked = LauncherItem(kind: "dir", id: "/blocked", path: "/blocked", state: "blocked")
+        h.writeLauncherCache([working, blocked], nil)
+        let hook = BlockingHook()
+        addTeardown {
+            hook.release()
+            waitSnapshot(h)
+        }
+        h.loadSnapshot = { _, _ in
+            hook.markStarted()
+            hook.waitRelease(30)
+            return ([], [working, blocked], nil, nil)
+        }
+        let (result, error) = h.call("sessions", "{}")
+        XCTAssertNil(error)
+        guard case .sessions(_, let items, _, _, _) = result else {
+            return XCTFail("unexpected sessions result")
+        }
+        XCTAssertEqual(items.map(\.id), [working.id, blocked.id])
+        XCTAssertTrue(items.allSatisfy { $0.state.isEmpty && !$0.working }, "Persisted activity is not live")
+        XCTAssertEqual(items.first?.completionSources, [completion], "Keep unread receipt identities")
+        XCTAssertTrue(hook.waitStarted(1))
+        hook.release()
+        waitSnapshot(h)
+        let fresh = h.readLauncherCache().0.items ?? []
+        XCTAssertEqual(fresh.first?.state, "working")
+        XCTAssertEqual(fresh.first?.working, true, "Fresh native activity must still be shown")
+        XCTAssertEqual(fresh.last?.state, "blocked")
+    }
+
     func testContextRecomputesOriginWithoutMutatingSnapshot() throws {
         let h = warmHandler()
         let base = h.launcher.items ?? []

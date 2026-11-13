@@ -30,7 +30,7 @@ private actor ScriptedBackend: BackendClient {
             await delay(query == "old" ? 0.45 : 0.02)
             return APIResult(items: [PickerItem(path: "/demo/" + query, kind: "dir")], targets: ["tab", "session"], target: "tab")
         }
-        if method == "worktrees.list" {
+        if method == "worktrees.list" || method == "worktrees.form" {
             return APIResult(items: [PickerItem(path: "/demo/tree", branch: "main", isMain: true)], targets: ["tab"], target: "tab", repo: "/demo", branches: ["main"], baseBranch: "main")
         }
         if method == "worktrees.preview" {
@@ -58,7 +58,7 @@ private actor CreateThenOpenBackend: BackendClient {
     func targets() -> [String] { openedTargets }
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         switch method {
-        case "worktrees.list":
+        case "worktrees.list", "worktrees.form":
             return APIResult(items: [], targets: ["tab", "session"], target: "tab", repo: "/demo", branches: ["main"], baseBranch: "main")
         case "worktrees.preview": return APIResult(path: "/demo/new-worktree", validationError: "")
         case "worktrees.branches":
@@ -83,7 +83,7 @@ private actor DelayedMetadataBackend: BackendClient {
     func requestedRepo() -> String? { origin }
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         calls.append(method)
-        if method == "worktrees.list" {
+        if method == "worktrees.list" || method == "worktrees.form" {
             if case let .text(value) = params["repo"] { origin = value }
             // Simulate a pipe response that cannot be recalled on cancellation.
             await withCheckedContinuation { continuation in
@@ -160,7 +160,7 @@ private actor CachedListBackend: BackendClient {
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         calls.append(method)
         lastParams[method] = params
-        if ["directories", "sessions", "agents", "worktrees.list"].contains(method) || held.contains(method) {
+        if ["directories", "sessions", "agents", "worktrees.list", "worktrees.form"].contains(method) || held.contains(method) {
             return try await withCheckedThrowingContinuation { pending[method, default: []].append($0) }
         }
         return APIResult()
@@ -1007,6 +1007,7 @@ struct NativeChecks {
         compactList.close()
 
         try await directCreateChecks()
+        try await fastCreateMetadataChecks()
         try await suggestedBranchChecks()
         try await residentChecks()
         try launcherEscapeChecks()
@@ -1120,6 +1121,7 @@ struct NativeChecks {
 
         try await liveEventChecks()
         try await unreadCompletionChecks()
+        PlaceholderChecks.run()
 
         // Optional transport fixture exists only inside an aux test .app bundle.
         if CommandLine.arguments.contains("--transport-fixture") {
@@ -1297,8 +1299,8 @@ struct NativeChecks {
                 try await pending("pullrequests.prepare", backend)
                 await backend.reply("pullrequests.prepare", APIResult(repo: "/repo", path: "/new"))
             } else if method == "dispatch" {
-                try await pending("worktrees.list", backend)
-                await backend.reply("worktrees.list", APIResult(targets: ["session", "tab", "here"], target: "session", repo: "/repo", branches: ["main"], baseBranch: "main"))
+                try await pending("worktrees.form", backend)
+                await backend.reply("worktrees.form", APIResult(targets: ["session", "tab", "here"], target: "session", repo: "/repo", branches: ["main"], baseBranch: "main"))
                 try await wait({ !model.loading }, label: "dispatch:!loading")
                 model.branch = "feat/new"; model.destination = "/new"; model.previewReady = true
                 model.create()
@@ -2589,8 +2591,8 @@ struct NativeChecks {
         var hidden = 0
         create.onDismiss = { hidden += 1 }
         create.start()
-        try await pending("worktrees.list", backend)
-        await backend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/repo", branches: ["main"], baseBranch: "main"))
+        try await pending("worktrees.form", backend)
+        await backend.reply("worktrees.form", APIResult(targets: ["tab"], target: "tab", repo: "/repo", branches: ["main"], baseBranch: "main"))
         try await wait { !create.loading }
         create.branch = "feat/new"
         create.destination = "/repo-new"; create.previewReady = true
@@ -2627,7 +2629,7 @@ struct NativeChecks {
                          "Unrelated requests must show recovery, not retarget its repo or origin")
         }
         let contexts = await backend.count("context")
-        let lists = await backend.count("worktrees.list")
+        let lists = await backend.count("worktrees.form")
         require(contexts == 0 && lists == 1,
                      "Recovery reopen must not reconfigure the backend or regenerate the form")
         create.submitBranch() // Retry opens only, never creates again.
@@ -2676,13 +2678,13 @@ struct NativeChecks {
                      "Explicit discard must gate all old-context actions until a new request")
         let freshContext = discard.prepareReconfigure(unrelated)
         await discard.completeReconfigure(freshContext)
-        try await pending("worktrees.list", discardBackend)
+        try await pending("worktrees.form", discardBackend)
         require(discard.options.matches(unrelated) && discard.repo == "/other")
         let contextParams = await discardBackend.parameters("context")
         if case .text("new") = contextParams["session"], case .text("new") = contextParams["block"] {} else {
             testFailure("Only explicit discard may install the new origin")
         }
-        await discardBackend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/other", branches: ["main"], baseBranch: "main"))
+        await discardBackend.reply("worktrees.form", APIResult(targets: ["tab"], target: "tab", repo: "/other", branches: ["main"], baseBranch: "main"))
         try await wait { !discard.loading }
         let discardedCreates = await discardBackend.count("worktrees.create")
         let discardedOpens = await discardBackend.count("dispatch")
@@ -3054,10 +3056,10 @@ struct NativeChecks {
             await backend.hold("worktrees.preview")
             let model = PickerModel(options: options, backend: backend)
             model.start()
-            try await pending("worktrees.list", backend)
+            try await pending("worktrees.form", backend)
             if let edit { model.editBranch(edit) }
             model.submitBranch()
-            await backend.reply("worktrees.list", APIResult(targets: ["tab"], target: "tab", repo: "/demo",
+            await backend.reply("worktrees.form", APIResult(targets: ["tab"], target: "tab", repo: "/demo",
                 branches: ["main"], baseBranch: "main", suggestedBranch: "quiet-otter"))
             try await wait { !model.loading }
             require(model.branch == (edit ?? "quiet-otter"), "Metadata must preserve early typing and explicit blank")
@@ -3137,6 +3139,63 @@ struct NativeChecks {
         print("PASS: suggested branch decoding, direct/list prefill, one-Enter create/open, early edits/blank, refresh, reset, missing suggestion, collision and loading gates")
     }
 
+    @MainActor private static func fastCreateMetadataChecks() async throws {
+        for explicitRepo in [false, true] {
+            let backend = CachedListBackend()
+            await backend.hold("worktrees.preview")
+            var arguments = ["--mode", "wt-create", "--session", "S", "--block", "B", "--client", "C"]
+            if explicitRepo { arguments += ["--repo", "/hint"] }
+            let options = try LaunchOptions(arguments: arguments)
+            let model = PickerModel(options: options, backend: backend)
+            model.start()
+            try await pending("worktrees.form", backend)
+            await backend.reply("worktrees.form", APIResult(targets: ["tab", "session"], target: "tab", repo: "/one",
+                branches: ["main"], baseBranch: "main", suggestedBranch: "quiet-otter"))
+            try await pending("worktrees.preview", backend)
+            require(await backend.count("worktrees.list") == 0, "Form setup must not list worktrees")
+            require(model.branch == "quiet-otter" && model.base == "main" && model.target == "tab" && !model.canCreate)
+            await backend.reply("worktrees.preview", APIResult(path: "/trees/quiet-otter"))
+            try await wait { model.canCreate }
+
+            model.dismiss()
+            let token = model.prepareReconfigure(options)
+            // No await: all known fields must be visible synchronously.
+            require(model.repo == "/one" && model.branch == "quiet-otter" && model.base == "main" && model.target == "tab",
+                    "Warm form defaults should not flash empty while metadata refreshes")
+            require(!model.contextReady && !model.previewReady && model.destination == nil && !model.canCreate,
+                    "Cached form fields must not restore a stale validated destination")
+            await model.completeReconfigure(token)
+            try await pending("worktrees.form", backend)
+            let parameters = await backend.parameters("worktrees.form")
+            if explicitRepo {
+                guard case .text("/hint") = parameters["repo"] else { testFailure("Original explicit repo hint lost") }
+            } else {
+                require(parameters["repo"] == nil, "A cached resolved repo must not replace pane-directory resolution")
+            }
+            model.editBranch("feat/typed-while-loading")
+            await backend.reply("worktrees.form", APIResult(targets: ["tab"], target: "tab", repo: "/two",
+                branches: ["develop"], baseBranch: "develop", suggestedBranch: "fresh-otter"))
+            try await pending("worktrees.preview", backend)
+            let preview = await backend.parameters("worktrees.preview")
+            if case .text("/two") = preview["repo"], case .text("develop") = preview["base"],
+               case .text("feat/typed-while-loading") = preview["branch"] {} else {
+                testFailure("Changed pane repo must replace cached repo/base without losing an early branch edit")
+            }
+            await backend.reply("worktrees.preview", APIResult(path: "/trees/typed", validationError: "Branch exists"))
+            try await wait { model.previewReady }
+            let creates = await backend.count("worktrees.create")
+            require(!model.canCreate && creates == 0)
+
+            var changed = arguments
+            changed[3] = "another-session"
+            _ = model.prepareReconfigure(try LaunchOptions(arguments: changed))
+            require(model.branch.isEmpty && model.base.isEmpty && model.targets.isEmpty,
+                    "Another origin must not inherit cached form defaults")
+            model.close()
+        }
+        print("PASS: lightweight form metadata, synchronous cached defaults, fresh validation gates, original repo hints, changed-directory and early-edit safety")
+    }
+
     @MainActor private static func directCreateChecks() async throws {
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/origin"])
         require(options.mode == "wt-create" && options.repo == "/origin")
@@ -3150,7 +3209,7 @@ struct NativeChecks {
         try await Task.sleep(for: .milliseconds(230))
         let pendingMethods = await backend.methods()
         require(direct.page == .create && direct.branch == "feat/typed-early" && !direct.canCreate)
-        require(pendingMethods.filter { $0 != "theme" } == ["worktrees.list"], "Metadata must precede preview and create")
+        require(pendingMethods.filter { $0 != "theme" } == ["worktrees.form"], "Metadata must precede preview and create")
         try await wait { direct.canCreate }
         let origin = await backend.requestedRepo()
         require(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)
@@ -3383,6 +3442,13 @@ struct NativeChecks {
                     error.localizedDescription.contains("Missing field 'path'"),
                     "Decode errors must identify the missing field and row: \(error.localizedDescription)")
         }
+        do {
+            _ = try await missingPath.request("ok", params: [:])
+            testFailure("Broken decoding connection accepted a later request")
+        } catch {
+            require(error.localizedDescription.contains("Missing field 'path'"),
+                    "Later requests must preserve the original connection failure: \(error.localizedDescription)")
+        }
         missingPath.close()
         for _ in 0..<8 {
             let finalReply = ProcessBackend(options: options)
@@ -3432,6 +3498,13 @@ struct NativeChecks {
         } catch {}
         require(timed.isClosed && Date().timeIntervalSince(began) >= 0.2 && Date().timeIntervalSince(began) < 5,
                 "Request timeout must close and wake the connection at the injected deadline")
+        do {
+            _ = try await timed.request("ok", params: [:])
+            testFailure("Timed out connection accepted a later request")
+        } catch {
+            require(error.localizedDescription.contains("'hang' timed out"),
+                    "Timeout diagnostics must retain the method that failed")
+        }
         print("PASS: persistent NDJSON, split reads, idle/interleaved notifications, unsubscribe, valid API error recovery, strict IDs/envelopes, malformed JSON, EOF, closed connection, final reply before EOF, graceful EOF shutdown and injected request timeout")
     }
 }

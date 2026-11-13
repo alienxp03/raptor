@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import OSLog
 
 struct LaunchOptions: Sendable {
     let mode: String
@@ -329,6 +330,7 @@ extension BackendClient {
 // The condition protects reply, event-handler and shutdown/timeout state;
 // it is never held during pipe I/O.
 final class ProcessBackend: BackendClient, @unchecked Sendable {
+    private static let logger = Logger(subsystem: "com.alienxp03.raptor", category: "backend")
     private let queue = DispatchQueue(label: "raptor.backend.io", qos: .userInitiated)
     private let lock = NSCondition()
     private var reply: Result<APIResult, Error>?
@@ -382,7 +384,9 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     private func startIfNeeded() throws {
         lock.lock()
         defer { lock.unlock() }
-        guard !closed else { throw APIError.message("Backend connection is closed. Close and reopen the picker.") }
+        guard !closed else {
+            throw APIError.message(connectionFailure ?? "Backend connection is closed. Close and reopen the picker.")
+        }
         if process != nil { return }
         // The backend is this same binary in api mode, sitting next to the
         // host. No bundle, no app: the resh model keeps one executable that
@@ -403,7 +407,11 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         child.standardOutput = stdout
         // Do not merge stderr into the NDJSON stream or leave an unread stderr pipe.
         child.standardError = FileHandle.standardError
+        child.terminationHandler = { child in
+            Self.logger.error("Backend pid=\(child.processIdentifier) ended: reason=\(child.terminationReason.rawValue) status=\(child.terminationStatus)")
+        }
         try child.run()
+        Self.logger.notice("Started backend pid=\(child.processIdentifier)")
         input = stdin.fileHandleForWriting
         // A backend crash must produce a write error, not terminate the app with SIGPIPE.
         _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
@@ -433,7 +441,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
     }
 
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
-        let read = ["sessions", "agents", "directories", "worktrees.list", "worktrees.branches",
+        let read = ["sessions", "agents", "directories", "worktrees.list", "worktrees.form", "worktrees.branches",
                     "worktrees.preview", "pullrequests.resolve", "sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare", "theme"].contains(method) ? QueuedRead() : nil
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -503,7 +511,8 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         activeID = id
         reply = nil
         lock.unlock()
-        let timeout = DispatchWorkItem { [weak self] in self?.timeout(id) }
+        Self.logger.debug("Request id=\(id) method=\(method, privacy: .public)")
+        let timeout = DispatchWorkItem { [weak self] in self?.timeout(id, method: method) }
         DispatchQueue.global().asyncAfter(deadline: .now() + requestTimeout(method), execute: timeout)
         defer {
             timeout.cancel()
@@ -538,6 +547,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
             throw APIError.message("Backend connection failed: \(error.localizedDescription)")
         }
         // Application errors are valid responses; keep the persistent connection open.
+        Self.logger.debug("Reply id=\(id) method=\(method, privacy: .public)")
         return try response.get()
     }
 
@@ -599,7 +609,9 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         } catch {
             lock.lock()
             if !closed { connectionFailure = Self.describeReadError(error) }
+            let failure = connectionFailure ?? error.localizedDescription
             lock.unlock()
+            Self.logger.error("Backend reader stopped: \(failure, privacy: .public)")
             close()
         }
     }
@@ -648,9 +660,11 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         }
     }
 
-    private func timeout(_ id: Int) {
+    private func timeout(_ id: Int, method: String) {
         lock.lock()
-        guard activeID == id else { lock.unlock(); return }
+        guard activeID == id, reply == nil else { lock.unlock(); return }
+        connectionFailure = "Backend request '\(method)' timed out. Check whether the operation completed before retrying."
+        Self.logger.error("Request timed out: id=\(id) method=\(method, privacy: .public)")
         closed = true
         changeHandler = nil
         lock.broadcast()

@@ -220,6 +220,17 @@ final class PickerModel: ObservableObject {
         var target: String
     }
     private var cache: [CacheKey: CachedList] = [:]
+    private struct FormContext: Hashable {
+        let session: String
+        let block: String
+        let client: String
+        let title: String
+        let repo: String?
+    }
+    private var formMetadata: [FormContext: APIResult] = [:]
+    // Cached resolved repos are display-only until the invocation's original
+    // hint is resolved again: the pane may have changed directory.
+    private var formRequestRepo: String?
     private var activeKey: CacheKey?
     private var displayedKey: CacheKey?
     // Per presentation and query. Cache stores backend order for the next open.
@@ -426,6 +437,7 @@ final class PickerModel: ObservableObject {
         generation += 1
         queryTask?.cancel()
         cache.removeAll()
+        formMetadata.removeAll()
         activeKey = nil
         refreshing = false
     }
@@ -463,6 +475,7 @@ final class PickerModel: ObservableObject {
         self.view = Self.initialView(for: options)
         self.page = options.mode == "pr" ? .pr : (options.mode == "wt-create" ? .create : .directories)
         self.repo = options.repo
+        self.formRequestRepo = options.repo
         self.loading = true
     }
 
@@ -593,6 +606,8 @@ final class PickerModel: ObservableObject {
         agentOrder.removeAll()
         agentGroups.removeAll()
         sessionHosts = []
+        let previousTargets = targets
+        let previousTarget = target
         let sameContext = self.options.session == options.session && self.options.block == options.block
             && self.options.client == options.client && self.options.title == options.title
             && self.options.demo == options.demo
@@ -671,6 +686,11 @@ final class PickerModel: ObservableObject {
         pullRequest = nil; prInput = ""; prStage = nil; prReturn = nil
         prCommitConfirmationPresented = false; prCheckoutCommit = false
         repo = options.repo
+        formRequestRepo = options.repo
+        if page == .create {
+            if sameContext { targets = previousTargets; target = previousTarget }
+            restoreFormMetadata()
+        }
         createParent = .worktrees
         query = ""
         splitMode = false
@@ -946,7 +966,8 @@ final class PickerModel: ObservableObject {
         let currentPage = page
         let currentView = view
         let currentQuery = query
-        let currentRepo = repo
+        let currentRepo = currentPage == .create ? formRequestRepo : repo
+        let initialBase = base
         let initialSelection = selectedID
         let debounce = immediate ? 0 : queryDebounceMilliseconds
         queryTask = Task { [weak self] in
@@ -960,7 +981,7 @@ final class PickerModel: ObservableObject {
                 if currentView == .agents {
                     method = "agents"
                 } else if currentPage == .worktrees || currentPage == .create {
-                    method = "worktrees.list"
+                    method = currentPage == .create ? "worktrees.form" : "worktrees.list"
                     if let currentRepo { params["repo"] = .text(currentRepo) }
                 } else {
                     method = "sessions"
@@ -987,14 +1008,19 @@ final class PickerModel: ObservableObject {
                 if let targets = result.targets { self.targets = targets }
                 if !self.targets.contains(self.target) { self.target = result.target ?? self.targets.first ?? "" }
                 if currentView == .sessions, currentPage == .worktrees || currentPage == .create {
+                    if currentPage == .create, let resolved = result.repo, let displayed = self.repo, resolved != displayed {
+                        self.base = ""
+                        if !self.branchWasEdited { self.resetBranchDefault() }
+                    }
                     self.repo = result.repo ?? currentRepo
                     self.destinationRoot = result.destinationRoot
                     self.branches = result.branches ?? []
                     self.suggestedBranch = result.suggestedBranch
-                    if currentPage != .create || self.base.isEmpty {
+                    if currentPage != .create || self.base.isEmpty || self.base == initialBase {
                         self.base = result.baseBranch ?? self.branches.first ?? ""
                     }
                     if currentPage == .create { self.applyBranchDefault() }
+                    self.rememberFormMetadata(result, requestedRepo: currentRepo)
                 }
                 if !self.items.contains(where: { $0.id == self.scrollID }) { self.scrollID = nil }
                 self.loading = false
@@ -1006,7 +1032,7 @@ final class PickerModel: ObservableObject {
                     self.cache[resolvedKey] = CachedList(result: result, selectedID: self.selectedID,
                                                         scrollID: self.scrollID, target: self.target)
                 }
-                if currentPage == .create { self.schedulePreview() }
+                if currentPage == .create { self.schedulePreview(immediate: true) }
             } catch {
                 guard !Task.isCancelled, token == self.generation, !self.closed else { return }
                 self.loading = false
@@ -1154,12 +1180,13 @@ final class PickerModel: ObservableObject {
         refreshing = false
         activeKey = nil
         page = .create
+        formRequestRepo = repo
         splitMode = false
         error = nil; notice = nil; createdPath = nil
         items = []; selectedID = nil; scrollID = nil
         resetBranchDefault()
         applyBranchDefault()
-        schedulePreview()
+        schedulePreview(immediate: true)
     }
 
     /// Forget only the recovery UI, never remove the created worktree.
@@ -1244,13 +1271,40 @@ final class PickerModel: ObservableObject {
         settingBranchDefault = false
     }
 
+    private func formContext(repo: String?) -> FormContext {
+        FormContext(session: options.session, block: options.block, client: options.client,
+                    title: options.title, repo: repo)
+    }
+
+    private func rememberFormMetadata(_ result: APIResult, requestedRepo: String?) {
+        if formMetadata.count >= 32 { formMetadata.removeAll() }
+        let metadata = APIResult(targets: result.targets, target: result.target, repo: result.repo,
+                                 destinationRoot: result.destinationRoot, branches: result.branches,
+                                 baseBranch: result.baseBranch, suggestedBranch: result.suggestedBranch)
+        formMetadata[formContext(repo: requestedRepo)] = metadata
+        if let repo = result.repo { formMetadata[formContext(repo: repo)] = metadata }
+    }
+
+    private func restoreFormMetadata() {
+        guard let cached = formMetadata[formContext(repo: formRequestRepo)] else { return }
+        repo = cached.repo ?? repo
+        branches = cached.branches ?? []
+        base = cached.baseBranch ?? branches.first ?? ""
+        suggestedBranch = cached.suggestedBranch
+        destinationRoot = cached.destinationRoot
+        targets = cached.targets ?? targets
+        if !targets.contains(target) { target = cached.target ?? targets.first ?? "" }
+        applyBranchDefault()
+        // Never restore validation: Create still requires a fresh preview.
+    }
+
     // Never queue Enter for a pending preview.
     func submitBranch() {
         guard page == .create, canSubmitForm else { return }
         create()
     }
 
-    private func schedulePreview() {
+    private func schedulePreview(immediate: Bool = false) {
         guard contextReady, page == .create, !closed, createdPath == nil else { return }
         previewGeneration += 1
         let token = previewGeneration
@@ -1262,7 +1316,7 @@ final class PickerModel: ObservableObject {
         previewTask = Task { [weak self] in
             guard let self else { return }
             do {
-                try await Task.sleep(for: .milliseconds(180))
+                if !immediate { try await Task.sleep(for: .milliseconds(180)) }
                 try Task.checkCancellation()
                 let result = try await self.request("worktrees.preview", params: ["repo": .text(repo), "branch": .text(branch), "base": .text(base)])
                 guard !Task.isCancelled, token == self.previewGeneration, self.page == .create, !self.closed else { return }

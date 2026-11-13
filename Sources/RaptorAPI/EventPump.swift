@@ -165,6 +165,8 @@ final class APIEventPump: @unchecked Sendable {
     private func runBounded(name: String, args: [String], timeout: TimeInterval, limit: Int) -> Data? {
         guard let executable = ExecxLookup.lookup(name) else { return nil }
         let process = Process()
+        // Never share the resident API's stdin or its file-status flags.
+        process.standardInput = FileHandle.nullDevice
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         let pipe = Pipe()
@@ -235,6 +237,8 @@ final class APIEventPump: @unchecked Sendable {
         }
         args.append(contentsOf: ["do", "-e", Rex.eventsScript, "--all", "--fail-fast"])
         let process = Process()
+        // Event streams are output-only, including across reconnects.
+        process.standardInput = FileHandle.nullDevice
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         let pipe = Pipe()

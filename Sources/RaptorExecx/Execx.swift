@@ -49,6 +49,9 @@ public enum Execx {
             throw ExecxError(result: ExecResult(), message: name + ": no such file or directory")
         }
         let process = Process()
+        // Captures never accept input. Inherited stdin shares file-status flags
+        // with the resident API pipe; a child setting O_NONBLOCK would break it.
+        process.standardInput = FileHandle.nullDevice
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
         if !dir.isEmpty {
