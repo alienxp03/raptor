@@ -266,6 +266,26 @@ struct DeletionWorktree: Codable, Sendable, Identifiable {
     }
 }
 
+/// Reasoning sentinel meaning "leave the agent CLI's default in place". The
+/// shared backend maps it (and empty) to no launch flag.
+let agentReasoningDefault = "default"
+
+/// One launchable model reported by agents.catalog.
+struct AgentModelPayload: Codable, Equatable, Sendable {
+    var id: String
+    var provider: String? = nil
+    var label: String? = nil
+    var reasoning: [String]? = nil
+    var defaultReasoning: String? = nil
+    var isDefault: Bool? = nil
+    enum CodingKeys: String, CodingKey {
+        case id, provider, label, reasoning
+        case defaultReasoning = "default_reasoning"
+        case isDefault = "is_default"
+    }
+    var displayLabel: String { label.flatMap { $0.isEmpty ? nil : $0 } ?? id }
+}
+
 struct APIResult: Codable, Sendable {
     var items: [PickerItem]? = nil
     var launcherItems: [PickerItem]? = nil
@@ -304,6 +324,12 @@ struct APIResult: Codable, Sendable {
     var deletedPaths: [String]? = nil
     var pinned: Bool? = nil
     var theme: ThemePayload? = nil
+    var agent: String? = nil
+    var agentModel: String? = nil
+    var agentReasoning: String? = nil
+    var agents: [String]? = nil
+    var agentModels: [AgentModelPayload]? = nil
+    var agentWarning: String? = nil
     enum CodingKeys: String, CodingKey {
         case items, hosts, targets, target, repo, branches, path, theme, worktrees, pinned
         case deletedPaths = "deleted_paths"
@@ -318,6 +344,8 @@ struct APIResult: Codable, Sendable {
         case destinationRoot = "destination_root"
         case suggestedBranch = "suggested_branch"
         case needsRepo = "needs_repo", baseBranch = "base_branch", validationError = "validation_error"
+        case agent, agentModel = "agent_model", agentReasoning = "agent_reasoning", agents
+        case agentModels = "agent_models", agentWarning = "agent_warning"
     }
 }
 
@@ -448,7 +476,7 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
 
     func request(_ method: String, params: [String: APIValue]) async throws -> APIResult {
         let read = ["sessions", "agents", "directories", "worktrees.list", "worktrees.form", "worktrees.branches",
-                    "worktrees.preview", "pullrequests.resolve", "sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare", "theme"].contains(method) ? QueuedRead() : nil
+                    "worktrees.preview", "pullrequests.resolve", "sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare", "theme", "agents.catalog"].contains(method) ? QueuedRead() : nil
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async { [self] in
@@ -465,6 +493,8 @@ final class ProcessBackend: BackendClient, @unchecked Sendable {
         switch method {
         case "pullrequests.prepare": return 600
         case "pullrequests.resolve", "pullrequests.open", "worktrees.create", "worktrees.remove", "sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare", "sessions.delete", "dispatch": return 180
+        // Discovery runs a bounded subprocess; caches keep it usually instant.
+        case "agents.catalog": return 60
         default: return 30
         }
     }

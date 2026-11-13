@@ -1,4 +1,5 @@
 import Foundation
+import RaptorAgent
 import RaptorCatalog
 import RaptorConfig
 import RaptorDispatch
@@ -365,7 +366,9 @@ extension Handler {
                 .tree(
                     destinationRoot: destinationRoot, repo: repo, needsRepo: repo.isEmpty,
                     items: items, branches: branches, baseBranch: baseBranch,
-                    suggestedBranch: suggestedBranch, targets: targets(), target: cfg.enter),
+                    suggestedBranch: suggestedBranch, targets: targets(), target: cfg.enter,
+                    agent: cfg.agent, agentModel: cfg.agentModel, agentReasoning: cfg.agentReasoning,
+                    agentChoices: cfg.agentChoices()),
                 nil
             )
         case "worktrees.branches":
@@ -394,6 +397,56 @@ extension Handler {
                 return (nil, MessageError("choose a repository"))
             }
             return (.branches(items: Catalog.filterBranches(WorktreeKit.localBranches(repo: repo), query)), nil)
+        case "agents.catalog":
+            let obj: JSONValue
+            do {
+                var parser = JSONParser(params)
+                obj = try parser.parseTop().value
+            } catch {
+                return (nil, error)
+            }
+            let agent: String
+            do {
+                agent = try Params.string(obj, "agent")
+            } catch {
+                return (nil, error)
+            }
+            var refresh = false
+            if let node = obj.field("refresh"), case .bool(let value) = node.value { refresh = value }
+            let cwdValue = obj.field("cwd").flatMap { node -> String? in
+                if case .string(let value) = node.value { return value }
+                return nil
+            } ?? ""
+            let catalog = AgentCatalogStore.catalogSync(agent: agent, refresh: refresh, cwd: cwdValue)
+            return (.agentCatalog(agent: catalog.agent, models: catalog.models, warning: catalog.warning), nil)
+        case "config.saveAgent":
+            let obj: JSONValue
+            do {
+                var parser = JSONParser(params)
+                obj = try parser.parseTop().value
+            } catch {
+                return (nil, error)
+            }
+            let agent: String, model: String, reasoning: String
+            do {
+                agent = try Params.string(obj, "agent")
+                model = obj.field("agent_model").flatMap { node -> String? in
+                    if case .string(let value) = node.value { return value }
+                    return nil
+                } ?? ""
+                reasoning = obj.field("agent_reasoning").flatMap { node -> String? in
+                    if case .string(let value) = node.value { return value }
+                    return nil
+                } ?? ""
+            } catch {
+                return (nil, error)
+            }
+            do {
+                try RaptorConfig.saveAgent(agent: agent, model: model, reasoning: reasoning)
+            } catch {
+                return (nil, error)
+            }
+            return (.empty, nil)
         case "worktrees.preview", "worktrees.create", "worktrees.remove":
             let obj: JSONValue
             do {
@@ -512,11 +565,21 @@ extension Handler {
             if path.isEmpty {
                 return (nil, MessageError("path is required"))
             }
+            func optionalString(_ key: String) -> String {
+                if let node = obj.field(key), case .string(let value) = node.value { return value }
+                return ""
+            }
+            let agent = optionalString("agent")
+            let launch = agent.isEmpty || agent == "none"
+                ? []
+                : AgentLaunch.arguments(
+                    agent: agent, provider: optionalString("agent_provider"),
+                    model: optionalString("agent_model"), reasoning: optionalString("agent_reasoning")) ?? []
             let ctxValue = Ctx(session: ctx.session, block: ctx.block, client: ctx.client, title: ctx.title)
             let result: OpenResult
             let dispatchError: Error?
             do {
-                result = try RaptorDispatch.dispatchResult(target: target, dir: path, ctx: ctxValue, cfg: cfg)
+                result = try RaptorDispatch.dispatchResult(target: target, dir: path, ctx: ctxValue, cfg: cfg, launch: launch)
                 dispatchError = nil
             } catch let error as DispatchError {
                 result = error.result

@@ -980,7 +980,21 @@ struct NativeChecks {
         try await wait { !model.busy && !model.loading }
         require(model.items.count == 2)
         model.beginCreate()
-        require(PickerStyle.height(for: model) == 240, "Creation form grew beyond the compact layout")
+        require(PickerStyle.height(for: model) == 270, "Creation form grew beyond the compact layout")
+        // beginCreate reuses the list context: no form metadata fetch, so the
+        // agent starts at none until the user picks one.
+        require(model.agentControlsShown == false && model.agent == "none",
+                     "Agent controls must start collapsed with no agent")
+        model.selectAgent("pi")
+        require(model.agent == "pi" && model.agentModel == "",
+                     "Picking an agent without a catalog must keep the model unset")
+        try await wait { !model.busy } // per-agent catalog fetch settles
+        model.toggleAgentControls()
+        require(model.agentControlsShown && PickerStyle.height(for: model) == 340,
+                     "⌃⌥O expansion must add the model and reasoning rows")
+        model.toggleAgentControls()
+        require(!model.agentControlsShown && PickerStyle.height(for: model) == 270,
+                     "Collapsing the agent controls must restore the compact form")
         model.branch = "feat/test"
         try await wait { model.previewReady }
         require(model.canCreate && model.destination == "/Users/demo/Projects/example-kit-worktrees/feat-test")
@@ -3346,11 +3360,11 @@ struct NativeChecks {
         let origin = await backend.requestedRepo()
         require(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)
         require(direct.branch == "feat/typed-early" && direct.base == "main")
-        require(PickerStyle.height(for: direct) == 240)
+        require(PickerStyle.height(for: direct) == 270)
         direct.validationError = "Branch already exists"
-        require(!direct.canSubmitForm && PickerStyle.height(for: direct) == 264)
+        require(!direct.canSubmitForm && PickerStyle.height(for: direct) == 294)
         direct.error = "Backend error"
-        require(PickerStyle.height(for: direct) == 296)
+        require(PickerStyle.height(for: direct) == 326)
         direct.validationError = nil
         direct.error = nil
         let targets = ["tab", "session", "here", "pane_right", "pane_below"]

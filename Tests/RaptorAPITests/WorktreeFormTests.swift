@@ -31,7 +31,12 @@ final class WorktreeFormTests: APITestCase {
             XCTAssertEqual(Set(dict.keys), Set([
                 "destination_root", "repo", "needs_repo", "items", "branches",
                 "base_branch", "suggested_branch", "targets", "target",
+                "agent", "agent_model", "agent_reasoning", "agents",
             ]))
+            XCTAssertEqual(dict["agent"] as? String, "pi")
+            XCTAssertEqual(dict["agent_model"] as? String, "")
+            XCTAssertEqual(dict["agent_reasoning"] as? String, "")
+            XCTAssertEqual(dict["agents"] as? [String], ["pi", "codex"])
             let tree = try decodeTreeRows(result)
             XCTAssertEqual(tree.repo, repo)
             XCTAssertFalse(tree.needsRepo)

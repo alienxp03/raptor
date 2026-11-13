@@ -13,6 +13,7 @@ actor DemoBackend: BackendClient {
     private var contextUpdates = 0
     private var deletionReview: [DeletionWorktree] = []
     private var deletionPreparation: Set<String>?
+    private var savedAgent = ""
     private var calls: [String] = []
     private var lastParams: [String: [String: APIValue]] = [:]
     private let agents = [
@@ -129,7 +130,18 @@ actor DemoBackend: BackendClient {
             return APIResult(items: method == "worktrees.form" ? [] : worktrees.filter {
                 text("query").isEmpty || $0.path.localizedCaseInsensitiveContains(text("query")) || ($0.branch ?? "").localizedCaseInsensitiveContains(text("query"))
             }, targets: targets, target: "session", repo: repo, destinationRoot: "/Users/demo/Projects/example-kit-worktrees", needsRepo: false,
-            branches: branches, baseBranch: "main", suggestedBranch: "amber-falcon")
+            branches: branches, baseBranch: "main", suggestedBranch: "amber-falcon",
+            agent: "pi", agentModel: "glm-5.3", agentReasoning: "high", agents: ["pi", "codex"])
+        case "agents.catalog":
+            let agent = text("agent")
+            let models: [AgentModelPayload]
+            if agent == "codex" {
+                models = [AgentModelPayload(id: "gpt-6-luna", label: "GPT-6 Luna", reasoning: ["low", "high", "xhigh"], defaultReasoning: "high", isDefault: true)]
+            } else {
+                models = [AgentModelPayload(id: "glm-5.3", provider: "zai", label: "GLM-5.3", reasoning: ["low", "high", "max"]),
+                          AgentModelPayload(id: "gpt-6.1-sol", provider: "openai-codex", label: "GPT-6.1 Sol", reasoning: ["medium", "high", "xhigh"])]
+            }
+            return APIResult(agent: agent, agentModels: models)
         case "worktrees.branches":
             return APIResult(branches: branches.filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) })
         case "sessions.delete.preview":
@@ -197,6 +209,9 @@ actor DemoBackend: BackendClient {
                              cloneRequired: false, existing: false)
         case "pullrequests.open":
             return APIResult(path: text("path"), sessionID: "session:demo-pr", windowID: "window:demo-pr", blockID: "block:demo-pr")
+        case "config.saveAgent":
+            savedAgent = text("agent")
+            return APIResult()
         case "dispatch":
             return APIResult() // No Rex call; the UI shows the synthetic result.
         default: throw APIError.message("Unknown demo method: \(method)")
