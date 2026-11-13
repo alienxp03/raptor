@@ -115,13 +115,50 @@ enum PickerStyle {
         return lines.last { !$0.isEmpty && !$0.hasPrefix("parse wt switch:") } ?? error
     }
 
-    @MainActor static func height(for model: PickerModel) -> CGFloat {
-        if model.sessionDeletion != nil {
-            let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
-            let count = model.sessionDeletion?.plan?.worktrees?.count ?? 0
-            let extraRows = min(max(count - 1, 0), 4)
-            return min(380 + CGFloat(extraRows) * 72, max(available, 180))
+    static func deletionErrorSummary(_ error: String) -> String {
+        if error.localizedCaseInsensitiveContains("not a git repository") { return "Not a Git repository." }
+        return errorSummary(error)
+    }
+
+    static func hasDeletionSelection(_ deletion: PickerModel.SessionDeletion) -> Bool {
+        deletion.plan?.worktrees?.contains(where: \.deletable) == true
+            || !deletion.selectedPaths.isEmpty || deletion.preparationSelection?.isEmpty == false
+    }
+
+    static func deletionHeight(_ deletion: PickerModel.SessionDeletion) -> CGFloat {
+        let rows = Array((deletion.plan?.worktrees ?? []).prefix(5))
+        let hasSelection = hasDeletionSelection(deletion)
+        // Match the compact context, rows and footer; additional rows scroll.
+        var content: CGFloat = 20 + 14
+        if !rows.isEmpty {
+            content += 10
+            for row in rows {
+                content += row.branch.isEmpty ? 30 : 47
+                if let error = row.error {
+                    content += deletionErrorSummary(error) == "Not a Git repository." ? 17 : 31
+                } else if deletion.checkingPath == row.path || !row.isChecked || row.needsForce == true
+                    || deletion.deletedPaths.contains(row.path)
+                    || (deletion.phase == .preparing && deletion.preparationSelection?.contains(row.path) == true) {
+                    content += 17
+                }
+            }
+            content += CGFloat(rows.count - 1)
         }
+        if deletion.plan != nil {
+            if hasSelection && [.confirm, .forceOffered, .forceConfirm, .deleting].contains(deletion.phase) {
+                content += 30
+            }
+            content += 24
+        }
+        if deletion.phase == .forceConfirm { content += 38 }
+        if deletion.error != nil { content += 52 }
+        if (deletion.plan == nil && deletion.phase == .loading) || deletion.phase == .deleting { content += 30 }
+        let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
+        return min(max(searchHeight + content + 39, 180), max(available, 180))
+    }
+
+    @MainActor static func height(for model: PickerModel) -> CGFloat {
+        if let deletion = model.sessionDeletion { return deletionHeight(deletion) }
         if model.shortcutsPresented {
             let available = (NSScreen.main?.visibleFrame.height ?? 800) - topInset - 24
             return min(594, max(available, 180))

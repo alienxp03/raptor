@@ -9,10 +9,13 @@ struct DeleteSessionPage: View {
         deletion.preparationSelection == nil && !model.busy
             && (deletion.phase == .confirm || deletion.phase == .loading || deletion.phase == .review)
     }
+    private var hasDeletableWorktrees: Bool {
+        PickerStyle.hasDeletionSelection(deletion)
+    }
     private var title: String {
         if forceConfirmation { return "Force delete worktrees?" }
-        if deletion.phase == .preparing { return "Prepare deletion" }
-        return deletion.preparationSelection == nil ? "Delete worktrees" : "Delete selected worktrees?"
+        if deletion.phase == .preparing { return "Verify worktrees" }
+        return "Delete worktrees"
     }
 
     var body: some View {
@@ -30,58 +33,71 @@ struct DeleteSessionPage: View {
             .frame(height: PickerStyle.searchHeight)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Label(deletion.candidate.label ?? deletion.candidate.path, systemImage: "terminal")
-                        .font(.system(size: PickerStyle.titleFontSize, weight: .semibold))
-                    HStack {
-                        Text(deletion.candidate.host ?? "This Mac")
-                        Spacer()
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Label(deletion.candidate.label ?? deletion.candidate.path, systemImage: "terminal")
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(deletion.candidate.label ?? deletion.candidate.path)
+                        Text("· " + (deletion.candidate.host ?? "This Mac"))
+                            .foregroundStyle(PickerStyle.secondaryText)
+                            .fixedSize()
+                        Spacer(minLength: 4)
                         if deletion.phase == .preparing, let rows = deletion.plan?.worktrees, let selected = deletion.preparationSelection {
-                            Text("\(rows.filter { selected.contains($0.path) && $0.isPrepared }.count) of \(selected.count) verified")
+                            Text("\(rows.filter { selected.contains($0.path) && $0.isPrepared }.count)/\(selected.count) verified")
+                                .foregroundStyle(PickerStyle.secondaryText)
                                 .accessibilityIdentifier("worktree-prepare-count")
                         } else if deletion.phase == .loading, let rows = deletion.plan?.worktrees {
-                            Text("\(rows.filter(\.isChecked).count) of \(rows.count) checked")
+                            Text("\(rows.filter(\.isChecked).count)/\(rows.count) checked")
+                                .foregroundStyle(PickerStyle.secondaryText)
                                 .accessibilityIdentifier("worktree-check-count")
                         }
                     }
                     .font(.system(size: 11))
-                    .foregroundStyle(PickerStyle.secondaryText)
+                    .frame(height: 20)
 
                     if let worktrees = deletion.plan?.worktrees {
-                        VStack(spacing: 0) {
-                            ForEach(worktrees) { worktree in
-                                worktreeRow(worktree)
-                                if worktree.id != worktrees.last?.id {
-                                    Divider().overlay(PickerPalette.stroke).padding(.horizontal, 12)
+                        if !worktrees.isEmpty {
+                            VStack(spacing: 0) {
+                                ForEach(worktrees) { worktree in
+                                    worktreeRow(worktree)
+                                    if worktree.id != worktrees.last?.id {
+                                        Divider().overlay(PickerPalette.stroke)
+                                    }
                                 }
                             }
                         }
-                        .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
 
-                        if deletion.phase == .confirm || deletion.phase == .forceOffered || forceConfirmation || deletion.phase == .deleting {
-                            Toggle("Close this session and all its tabs and panes", isOn: Binding(
+                        if hasDeletableWorktrees,
+                           deletion.phase == .confirm || deletion.phase == .forceOffered || forceConfirmation || deletion.phase == .deleting {
+                            Toggle("Close session, including unselected tabs/panes", isOn: Binding(
                                 get: { deletion.closeSessionConfirmed },
                                 set: { model.confirmDeletionSessionClose($0) }
                             ))
                             .toggleStyle(.checkbox)
                             .disabled(model.busy || deletion.phase != .confirm)
+                            .help("Closes every tab and pane, including those for unselected worktrees.")
                             .accessibilityIdentifier("confirm-close-deletion-session")
                         }
 
                         Text(explanation)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundStyle(PickerStyle.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if forceConfirmation {
-                        Text("Discards uncommitted files and unmerged commits in the selected worktrees. This cannot be undone.")
+                        Text("Discards uncommitted files and unmerged commits. Cannot be undone.")
+                            .font(.system(size: 11))
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let error = deletion.error {
-                        Text(error)
-                            .font(.system(size: 12))
+                        Text(PickerStyle.deletionErrorSummary(error))
+                            .font(.system(size: 11))
+                            .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
+                            .help(error)
+                            .accessibilityLabel(error)
                             .accessibilityIdentifier("delete-session-error")
                     }
                     if deletion.plan == nil && deletion.phase == .loading || deletion.phase == .deleting {
@@ -90,18 +106,21 @@ struct DeleteSessionPage: View {
                             if deletion.phase == .deleting {
                                 TimelineView(.periodic(from: .now, by: 1)) { context in
                                     let seconds = max(0, Int(context.date.timeIntervalSince(deletion.checkStartedAt ?? context.date)))
-                                    Text("Revalidating selected files and deleting… \(seconds)s")
+                                    Text("Revalidating and deleting… \(seconds)s")
                                 }
-                                .foregroundStyle(PickerStyle.secondaryText)
                             } else {
-                                Text("Loading pane directories…").foregroundStyle(PickerStyle.secondaryText)
+                                Text("Reading pane directories…")
                             }
                         }
+                        .font(.system(size: 11))
+                        .foregroundStyle(PickerStyle.secondaryText)
                         .accessibilityIdentifier("delete-session-progress")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+                .padding(.bottom, 12)
             }
             Divider().overlay(PickerPalette.stroke)
             HStack(spacing: 12) {
@@ -115,27 +134,28 @@ struct DeleteSessionPage: View {
                 } else if deletion.phase == .failed {
                     Button("Refresh review") { model.refreshDeletionReview() }
                         .accessibilityIdentifier("refresh-worktree-review")
-                } else if deletion.phase == .review || deletion.plan != nil && deletion.phase == .loading {
+                } else if hasDeletableWorktrees, deletion.phase == .review || deletion.plan != nil && deletion.phase == .loading {
                     Button { model.prepareSessionDeletion() } label: {
-                        Text("Prepare deletion")
+                        Text("Continue")
                             .fontWeight(.medium)
                             .foregroundStyle(model.canPrepareSessionDeletion ? PickerStyle.selectionText : PickerStyle.secondaryText)
-                            .padding(.horizontal, 12)
-                            .frame(height: PickerStyle.controlHeight)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
                             .background(model.canPrepareSessionDeletion ? PickerStyle.selectionBackground : PickerStyle.foreground.opacity(0.06),
-                                        in: RoundedRectangle(cornerRadius: 8))
+                                        in: RoundedRectangle(cornerRadius: 6))
                     }
                     .disabled(!model.canPrepareSessionDeletion)
+                    .help("Verify selected files before deletion. Nothing is deleted yet.")
                     .accessibilityIdentifier("prepare-session-deletion")
-                } else if deletion.phase == .confirm || forceConfirmation {
+                } else if hasDeletableWorktrees, deletion.phase == .confirm || forceConfirmation {
                     Button { model.confirmDeleteSession() } label: {
                         Text(forceConfirmation ? "Force delete selected" : "Delete selected")
                             .fontWeight(.medium)
                             .foregroundStyle(actionColor)
-                            .padding(.horizontal, 12)
-                            .frame(height: PickerStyle.controlHeight)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
                             .background(model.canConfirmSessionDeletion ? PickerStyle.selectionBackground : PickerStyle.foreground.opacity(0.06),
-                                        in: RoundedRectangle(cornerRadius: 8))
+                                        in: RoundedRectangle(cornerRadius: 6))
                     }
                     .disabled(!model.canConfirmSessionDeletion)
                     .accessibilityIdentifier("confirm-delete-session")
@@ -143,7 +163,7 @@ struct DeleteSessionPage: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
-            .frame(height: 44)
+            .frame(height: 38)
         }
         .font(.system(size: PickerStyle.bodyFontSize))
         .foregroundStyle(PickerStyle.foreground)
@@ -152,12 +172,13 @@ struct DeleteSessionPage: View {
 
     private var explanation: String {
         if deletion.phase == .loading || deletion.phase == .review {
-            return "Choose worktrees, then prepare deletion to verify their files. Nothing is deleted yet."
+            return "Choose worktrees. Continue verifies files; nothing is deleted yet."
         }
         if deletion.phase == .preparing {
-            return "Verifying only selected worktrees. Large dependency folders can take time. Nothing is being deleted."
+            return "Verifying selected files; nothing is being deleted. Large folders may take longer."
         }
-        return "Selected worktrees and local branches will be deleted. Unselected worktrees and remote branches are kept. All tabs close, including tabs for unselected repos."
+        if !hasDeletableWorktrees { return "No deletable worktrees in this session." }
+        return "Deletes selected worktrees and local branches. Other worktrees and remote branches stay."
     }
 
     private var actionColor: Color {
@@ -167,7 +188,7 @@ struct DeleteSessionPage: View {
 
     private func worktreeRow(_ worktree: DeletionWorktree) -> some View {
         let removed = deletion.deletedPaths.contains(worktree.path)
-        return HStack(alignment: .top, spacing: 10) {
+        return HStack(alignment: .top, spacing: 8) {
             if deletion.checkingPath == worktree.path {
                 ProgressView().controlSize(.small).tint(PickerStyle.foreground).frame(width: 16)
                     .accessibilityLabel("Checking \(worktree.path)")
@@ -186,33 +207,22 @@ struct DeleteSessionPage: View {
                     .foregroundStyle(PickerStyle.secondaryText)
                     .frame(width: 16)
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(worktree.branch.isEmpty ? (worktree.path.isEmpty ? "Unknown directory" : URL(fileURLWithPath: worktree.path).lastPathComponent) : worktree.branch)
-                    .fontWeight(.medium)
-                Text(displayPath(worktree.path))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(worktree.branch.isEmpty ? (worktree.path.isEmpty ? "Unknown directory" : displayPath(worktree.path)) : worktree.branch)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1).truncationMode(.middle)
+                    .help(worktree.path)
+                if !worktree.branch.isEmpty {
+                    Text(displayPath(worktree.path))
+                        .font(.system(size: 11))
+                        .foregroundStyle(PickerStyle.secondaryText)
+                        .textSelection(.enabled)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(worktree.path)
+                }
+                worktreeStatus(worktree, removed: removed)
                     .font(.system(size: 11))
                     .foregroundStyle(PickerStyle.secondaryText)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if removed {
-                    Text("Worktree removed").font(.system(size: 11)).foregroundStyle(PickerStyle.secondaryText)
-                } else if deletion.checkingPath == worktree.path {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        let seconds = max(0, Int(context.date.timeIntervalSince(deletion.checkStartedAt ?? context.date)))
-                        Text("\(deletion.phase == .preparing ? "Verifying selected files" : "Reading Git worktree details")… \(seconds)s")
-                            .font(.system(size: 11)).foregroundStyle(PickerStyle.secondaryText)
-                    }
-                } else if let error = worktree.error {
-                    Text(error).font(.system(size: 11)).foregroundStyle(PickerStyle.secondaryText)
-                        .help(error)
-                } else if !worktree.isChecked {
-                    Text("Waiting to check…").font(.system(size: 11)).foregroundStyle(PickerStyle.secondaryText)
-                } else if deletion.phase == .preparing, deletion.preparationSelection?.contains(worktree.path) == true {
-                    Text(worktree.isPrepared ? "Files verified" : "Waiting for file verification…")
-                        .font(.system(size: 11)).foregroundStyle(PickerStyle.secondaryText)
-                } else if worktree.needsForce == true {
-                    Text("Needs force confirmation").font(.system(size: 11)).foregroundStyle(PickerStyle.secondaryText)
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if deletion.checkingPath == nil,
@@ -224,7 +234,29 @@ struct DeleteSessionPage: View {
                     .accessibilityIdentifier("retry-worktree:\(worktree.path)")
             }
         }
-        .padding(12)
+        .padding(.vertical, 7)
+    }
+
+    @ViewBuilder private func worktreeStatus(_ worktree: DeletionWorktree, removed: Bool) -> some View {
+        if removed {
+            Text("Removed")
+        } else if deletion.checkingPath == worktree.path {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let seconds = max(0, Int(context.date.timeIntervalSince(deletion.checkStartedAt ?? context.date)))
+                Text("\(deletion.phase == .preparing ? "Verifying files" : "Reading Git details")… \(seconds)s")
+            }
+        } else if let error = worktree.error {
+            Text(PickerStyle.deletionErrorSummary(error))
+                .lineLimit(2)
+                .help(error)
+                .accessibilityLabel(error)
+        } else if !worktree.isChecked {
+            Text("Waiting to check…")
+        } else if deletion.phase == .preparing, deletion.preparationSelection?.contains(worktree.path) == true {
+            Text(worktree.isPrepared ? "Files verified" : "Waiting to verify files…")
+        } else if worktree.needsForce == true {
+            Text("Needs force confirmation")
+        }
     }
 
     private func displayPath(_ path: String) -> String {

@@ -441,7 +441,7 @@ struct NativeChecks {
             await backend.reply("sessions.delete.preview", plan)
             try await wait { model.sessionDeletion?.phase == .confirm }
             let available = max((NSScreen.main?.visibleFrame.height ?? 800) - PickerStyle.topInset - 24, 180)
-            require(PickerStyle.height(for: model) == min(380, available) && !model.canOpen,
+            require(PickerStyle.height(for: model) <= min(260, available) && !model.canOpen,
                     "Delete must show a screen-fitted confirmation page and block list navigation")
             model.move(1); model.askCloseSession(); model.beginRenameSession()
             require(model.selectedID == candidate.id && model.removalCandidate == nil && model.renameCandidate == nil)
@@ -1122,6 +1122,7 @@ struct NativeChecks {
         try await liveEventChecks()
         try await unreadCompletionChecks()
         PlaceholderChecks.run()
+        try DeletionLayoutChecks.run()
 
         // Optional transport fixture exists only inside an aux test .app bundle.
         if CommandLine.arguments.contains("--transport-fixture") {

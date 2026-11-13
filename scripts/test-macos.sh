@@ -67,10 +67,12 @@ cached_swiftc NativeChecks -framework SwiftUI -framework AppKit \
   "$SCRIPT_ROOT/Sources/raptor/Host/Backend.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/DemoBackend.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/PickerModel.swift" \
+  "$SCRIPT_ROOT/Sources/raptor/Host/DeleteSessionPage.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/FocusFileWatcher.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/RexFocusTracker.swift" \
   "$SCRIPT_ROOT/macos/Tests/RexFocusChecks.swift" \
   "$SCRIPT_ROOT/macos/Tests/PlaceholderChecks.swift" \
+  "$SCRIPT_ROOT/macos/Tests/DeletionLayoutChecks.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/PathDisplay.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/PickerStyle.swift" \
   "$SCRIPT_ROOT/Sources/raptor/Host/RexTheme.swift" \
