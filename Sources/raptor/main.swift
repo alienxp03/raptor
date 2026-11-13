@@ -229,11 +229,18 @@ case "panel":
         fail(String(describing: error))
     }
 case "pinned-session":
-    guard sub.count == 1, let slot = Int(sub[0]), (1...9).contains(slot) else {
-        fail("usage: raptor [context flags] pinned-session <1..9>")
+    guard (sub.count == 1 || (sub.count == 2 && sub[1] == "--resolve")),
+          let slot = Int(sub[0]), (1...9).contains(slot) else {
+        fail("usage: raptor [context flags] pinned-session <1..9> [--resolve]")
     }
     do {
-        out(try Handler(ctx: ctx, cfg: cfg).selectPinnedSession(slot: slot))
+        let handler = Handler(ctx: ctx, cfg: cfg)
+        if sub.count == 2 {
+            let pin = try handler.resolvePinnedSession(slot: slot)
+            out(String(decoding: try JSONEncoder().encode(pin), as: UTF8.self))
+        } else {
+            out(try handler.selectPinnedSession(slot: slot))
+        }
     } catch {
         fail(String(describing: error))
     }

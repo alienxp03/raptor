@@ -4,9 +4,9 @@ import RaptorWorktree
 import RaptorRex
 
 extension Handler {
-    /// Select only the stored identity. Never resolve a prefix, recreate a closed
-    /// session, or consult the launcher's potentially stale multi-host cache.
-    public func selectPinnedSession(slot: Int) throws -> String {
+    /// Resolve and validate without calling the app. Lua actions must queue local
+    /// selection after returning, rather than wait for their own blocked client.
+    public func resolvePinnedSession(slot: Int) throws -> SessionPin {
         guard (1...9).contains(slot) else {
             throw MessageError("pinned session slot must be 1...9")
         }
@@ -29,6 +29,14 @@ extension Handler {
               sessions.contains(where: { $0["session_id"] as? String == pin.sessionID }) else {
             throw MessageError("pinned session \(slot) is closed or missing on \(displayHost) (\(pin.sessionID))")
         }
+        return SessionPin(sessionID: pin.sessionID, host: host, slot: slot)
+    }
+
+    /// Select only the stored identity. Never recreate a closed session.
+    public func selectPinnedSession(slot: Int) throws -> String {
+        let pin = try resolvePinnedSession(slot: slot)
+        let host = pin.host
+        let displayHost = host.isEmpty ? "local host" : host
         do {
             try apiJumpOnHost(host, SessionEntry(kind: "session", id: pin.sessionID,
                 path: pin.sessionID, sessionID: pin.sessionID, sessionLabel: pin.sessionID), ctx.client)

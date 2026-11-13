@@ -61,6 +61,29 @@ final class PinnedSessionsTests: APITestCase {
         XCTAssertEqual(try calls(), "ls --json\n-C client:viewer do session.select session_id=session:target\n")
     }
 
+    func testResolveLocalPinValidatesWithoutCallingWaitingClient() throws {
+        try pins("""
+        [{"sessionID":"session:target","host":"LOCAL-MAC","slot":1}]
+        """)
+        try stub(list: "{\"sessions\":[{\"session_id\":\"session:target\"}]}")
+        let pin = try handler().resolvePinnedSession(slot: 1)
+        XCTAssertEqual(pin.sessionID, "session:target")
+        XCTAssertEqual(pin.host, "")
+        XCTAssertEqual(pin.slot, 1)
+        XCTAssertEqual(try calls(), "ls --json\n")
+    }
+
+    func testResolveRemotePinKeepsHostAndDoesNotSelect() throws {
+        try pins("""
+        [{"sessionID":"session:target","host":"remote","slot":9}]
+        """)
+        try stub(list: "{\"sessions\":[{\"session_id\":\"session:target\"}]}")
+        let pin = try handler().resolvePinnedSession(slot: 9)
+        XCTAssertEqual(pin.host, "remote")
+        XCTAssertEqual(pin.sessionID, "session:target")
+        XCTAssertEqual(try calls(), "-S remote ls --json\n")
+    }
+
     func testRemoteStoredHostOnlyAndVariadicSelection() throws {
         try pins("""
         [{"sessionID":"session:target","host":"remote","slot":9}]

@@ -239,6 +239,17 @@ function M.setup(options)
 		end,
 	})
 
+	-- Cache only resolved identities, never liveness. The backend owns slot and
+	-- host normalization; changed pin-file bytes invalidate every cached slot.
+	local pin_source, pin_cache = nil, {}
+	local function read_pin_source()
+		local file = io.open(os.getenv("HOME") .. "/.config/raptor/session-pins.json", "rb")
+		if not file then return nil end
+		local contents = file:read("*a")
+		file:close()
+		return contents
+	end
+
 	-- Register actions only; user config owns the Rex-wide shortcuts.
 	for index = 1, 9 do
 		local slot = index
@@ -252,10 +263,41 @@ function M.setup(options)
 				if ctx.client_id == nil or ctx.client_id == "" or ctx.session_id == nil or ctx.session_id == "" then
 					error("raptor: no client or session context", 0)
 				end
+				local source = read_pin_source()
+				if source ~= pin_source then
+					pin_source, pin_cache = source, {}
+				end
+				local cached = source and pin_cache[slot]
+				if cached then
+					-- Direct server call: no Swift startup or nested Rex CLI.
+					local listing, err = rex.call("session.list", {})
+					if not listing then error("raptor: " .. tostring(err), 0) end
+					for _, session in ipairs(listing.sessions or {}) do
+						if session.session_id == cached.sessionID then
+							rex.client.queue("session.select", { session_id = cached.sessionID })
+							return { selected = cached.sessionID }
+						end
+					end
+					error("raptor: pinned session " .. slot .. " is closed or missing on local host (" .. cached.sessionID .. ")", 0)
+				end
 				local command = base_cmd(ctx)
 				table.insert(command, "pinned-session")
 				table.insert(command, tostring(slot))
+				table.insert(command, "--resolve")
 				local result, err = rex.exec(command, { timeout = 30 })
+				if result == nil then error("raptor: " .. tostring(err), 0) end
+				if not result.ok then error("raptor: " .. (result.stdout or "") .. (result.stderr or ""), 0) end
+				local pin = rex.json.decode(result.stdout)
+				if pin.host == "" then
+					if source and read_pin_source() == source then pin_cache[slot] = pin end
+					-- The app is waiting for this action. Calling it through a
+					-- nested CLI here deadlocks; return its selection as a queue.
+					rex.client.queue("session.select", { session_id = pin.sessionID })
+					return { selected = pin.sessionID }
+				end
+				-- Remote selection retains the host-specific client/focus routing.
+				table.remove(command)
+				result, err = rex.exec(command, { timeout = 30 })
 				if result == nil then error("raptor: " .. tostring(err), 0) end
 				if not result.ok then error("raptor: " .. (result.stdout or "") .. (result.stderr or ""), 0) end
 				return { selected = result.stdout:match("^%s*(.-)%s*$") }
