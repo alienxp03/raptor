@@ -6,7 +6,7 @@ import RaptorWorktree
 @testable import RaptorTask
 
 /// Ported from setup_test.go: configured hooks must run visibly inside the
-/// created tab, before Pi, with selection failures recoverable.
+/// created session, before Pi, with selection failures recoverable.
 final class SetupTests: XCTestCase {
     func testTaskConfiguredSetupRunsBeforePi() throws {
         let env = TestEnv()
@@ -29,7 +29,7 @@ final class SetupTests: XCTestCase {
         XCTAssertEqual(WorktreeKit.list(repo: repo).count, 2, "wrong worktree count")
     }
 
-    func testTaskConfiguredSelectionRetryReusesTab() throws {
+    func testTaskConfiguredSelectionRetryReusesSession() throws {
         let env = TestEnv()
         defer { env.restore() }
         let (repo, cfg, ctx, log) = try fixture(env)
@@ -60,10 +60,12 @@ final class SetupTests: XCTestCase {
         env.set("TASK_FAIL", "")
         let (second, secondErr) = startResult(ctx, cfg, repo, first.path)
         if let secondErr { throw secondErr }
+        XCTAssertEqual(second.sessionID, "new-session", "\(second)")
+        XCTAssertEqual(second.sessionID, first.sessionID)
         XCTAssertEqual(second.windowID, first.windowID, "\(second)")
         XCTAssertEqual(second.path, first.path, "\(second)")
         let calls = try readText(log)
-        XCTAssertEqual(countOccurrences(calls, "window\nnew\n"), 1, "retry duplicated tab: \(calls)")
+        XCTAssertEqual(countOccurrences(calls, "CALL\nnew\n"), 1, "retry duplicated session: \(calls)")
     }
 
     func testTaskPreSwitchStopsBeforeCreation() throws {
@@ -80,7 +82,7 @@ final class SetupTests: XCTestCase {
         XCTAssertTrue(String(describing: error).contains("pre-switch"), "\(error)")
         XCTAssertEqual(WorktreeKit.list(repo: repo).count, 1, "pre-switch refusal created a worktree")
         let calls = (try? readText(log)) ?? ""
-        XCTAssertFalse(calls.contains("window\nnew"), "opened a tab before refusal")
+        XCTAssertFalse(calls.contains("CALL\nnew\n"), "opened a session before refusal")
     }
 }
 

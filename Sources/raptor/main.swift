@@ -155,9 +155,15 @@ case "api":
         }
     }
 case "task":
-    let (values, _, _) = Flags.parse(sub, valueFlags: ["repo", "resume"])
+    let (values, bools, _) = Flags.parse(sub, valueFlags: ["repo", "resume"], boolFlags: ["finish-in-session"])
     do {
-        let result = try RaptorTask.start(ctx: ctx, cfg: cfg, explicitRepo: values["repo"] ?? "", resumePath: values["resume"] ?? "")
+        let result: TaskResult
+        if bools.contains("finish-in-session") {
+            result = try RaptorTask.start(ctx: ctx, cfg: cfg, explicitRepo: values["repo"] ?? "", resumePath: values["resume"] ?? "", inSession: true)
+        } else {
+            result = try RaptorTask.launch(ctx: ctx, cfg: cfg, explicitRepo: values["repo"] ?? "", resumePath: values["resume"] ?? "",
+                                           executable: URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path)
+        }
         let data = try JSONEncoder().encode(result)
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data("\n".utf8))

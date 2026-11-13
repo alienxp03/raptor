@@ -19,7 +19,7 @@ More screenshots in the [gallery](docs/screenshots/README.md).
 
 - **Resume, don't re-pick** — the launcher opens on your most-recent other session; `⌘P` returns to the last one. Live sessions and frequent directories from every connected host in one searchable list.
 - **Open anywhere** — a session, new tab, the current shell, or a pane split (`Ctrl+P`, then `H J K L`).
-- **Worktrees** — create from a searchable base branch with a validated destination preview. `⌃⇧N` skips the form entirely: a two-word branch, a new tab, and a fresh agent.
+- **Worktrees** — create from a searchable base branch with a validated destination preview. `⌘⌥N` skips the form entirely: a two-word branch, a new session, and a fresh agent.
 - **Pull requests** — paste any GitHub PR URL and confirm; Raptor clones or reuses the repo and opens the PR worktree. Closed PRs with deleted branches still open from the PR commit.
 - **Safe by default** — nothing is created without Enter, project hooks always ask for approval, and a failed open offers retry instead of creating twice.
 
@@ -42,7 +42,7 @@ rex config reload
 | `⇧⌘O` | Open Raptor |
 | `⇧⌘C` | Checkout pull request |
 | `⇧⌘N` | Create a worktree (form) |
-| `⌃⇧N` | Instant agent worktree (pi, no form) |
+| `⌘⌥N` | Instant agent worktree (pi, no form) |
 | `⌃⌘1`–`⌃⌘9` | Jump directly to pinned session slot 1–9, Rex-wide (no picker) |
 
 The plugin registers `raptor_pin_1` through `raptor_pin_9`; bindings live in your Rex config, not plugin setup. `raptor init` adds these defaults to its managed block; custom bindings outside that block stay untouched. Plain `⌘1`–`⌘9` are unchanged.
@@ -89,7 +89,7 @@ If the project has setup hooks, they run visibly in the destination terminal. `w
 
 ### Instant agent worktree
 
-`⌃⇧N` skips the form: a two-word branch (`otter-falcon`) is created from the repo's HEAD, a new tab opens, and `pi` starts. The CLI equivalent is `raptor task`.
+`⌘⌥N` skips the form and switches immediately to a new session showing setup progress. A two-word branch (`otter-falcon`) is created from the repo's HEAD, the session takes its branch name, and `pi` starts. Repeat presses while creation is pending focus that session instead of creating duplicates. Setup failures retain their output and a usable shell. The CLI equivalent is `raptor task`.
 
 ### Pull requests
 

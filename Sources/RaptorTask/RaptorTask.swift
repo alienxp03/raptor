@@ -6,26 +6,29 @@ import RaptorRex
 import RaptorWorktree
 
 /// Namespace for the ported internal/task package: the noninteractive
-/// new-worktree → tab → fresh Pi flow shared by the CLI and Rex action.
+/// new-worktree → session → fresh Pi flow shared by the CLI and Rex action.
 public enum RaptorTask {}
 
-/// Start outcome. Mirrors Go's Result JSON tags; window_id/block_id are
+/// Start outcome. Session, window, and block IDs are
 /// omitempty, so absent IDs stay nil.
 public struct TaskResult: Codable, Equatable {
     public var path: String
     public var branch: String
+    public var sessionID: String?
     public var windowID: String?
     public var blockID: String?
 
-    public init(path: String = "", branch: String = "", windowID: String? = nil, blockID: String? = nil) {
+    public init(path: String = "", branch: String = "", sessionID: String? = nil, windowID: String? = nil, blockID: String? = nil) {
         self.path = path
         self.branch = branch
+        self.sessionID = sessionID
         self.windowID = windowID
         self.blockID = blockID
     }
 
     enum CodingKeys: String, CodingKey {
         case path, branch
+        case sessionID = "session_id"
         case windowID = "window_id"
         case blockID = "block_id"
     }
@@ -34,6 +37,7 @@ public struct TaskResult: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
         branch = try c.decodeIfPresent(String.self, forKey: .branch) ?? ""
+        sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
         windowID = try c.decodeIfPresent(String.self, forKey: .windowID)
         blockID = try c.decodeIfPresent(String.self, forKey: .blockID)
     }
@@ -42,13 +46,14 @@ public struct TaskResult: Codable, Equatable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(path, forKey: .path)
         try c.encode(branch, forKey: .branch)
+        if let sessionID, !sessionID.isEmpty { try c.encode(sessionID, forKey: .sessionID) }
         if let windowID, !windowID.isEmpty { try c.encode(windowID, forKey: .windowID) }
         if let blockID, !blockID.isEmpty { try c.encode(blockID, forKey: .blockID) }
     }
 }
 
 /// Thrown where Go returned (Result, error) from Start so recovery keeps the
-/// preserved worktree and opened tab IDs even on failure.
+/// preserved worktree and opened session IDs even on failure.
 public struct StartError: Error, CustomStringConvertible {
     public let result: TaskResult
     public let cause: any Error
@@ -70,10 +75,19 @@ struct OpenedWindowResponse: Decodable {
     }
 }
 
+struct OpenedSessionResponse: Decodable {
+    var sessionID: String?
+    var initialWindows: [OpenedWindowResponse]?
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case initialWindows = "initial_windows"
+    }
+}
+
 public extension RaptorTask {
-    /// Start preserves the worktree/tab on later failure. resumePath reuses an
+    /// Start preserves the worktree/session on later failure. resumePath reuses an
     /// existing registered worktree, avoiding another branch on a retry.
-    static func start(ctx: Ctx, cfg: RaptorConfig, explicitRepo: String, resumePath: String) throws -> TaskResult {
+    static func start(ctx: Ctx, cfg: RaptorConfig, explicitRepo: String, resumePath: String, inSession: Bool = false) throws -> TaskResult {
         var result = TaskResult()
         func fail(_ error: any Error) -> StartError {
             StartError(result: result, cause: error)
@@ -162,14 +176,17 @@ public extension RaptorTask {
             } catch let error as ResumeError {
                 prior = error.result
                 resumed = error.handled
+                result.sessionID = prior.sessionID
                 result.windowID = prior.windowID
                 result.blockID = prior.blockID
                 throw fail(error)
             } catch {
+                result.sessionID = prior.sessionID
                 result.windowID = prior.windowID
                 result.blockID = prior.blockID
                 throw fail(error)
             }
+            result.sessionID = prior.sessionID
             result.windowID = prior.windowID
             result.blockID = prior.blockID
             if resumed {
@@ -181,7 +198,9 @@ public extension RaptorTask {
                 throw fail(error)
             }
         }
-        let args = ["window", "new", "-s", ctx.session, tree.branch, "-c", tree.path, "--json", "--"] + command
+        let args = (inSession
+            ? ["window", "new", "-s", ctx.session, tree.branch, "-c", tree.path, "--json", "--"]
+            : ["new", tree.branch, "-c", tree.path, "--json", "--"]) + command
         var out = ""
         var createErr: (any Error)?
         do {
@@ -189,12 +208,17 @@ public extension RaptorTask {
         } catch {
             createErr = error
         }
-        let opened = Rex.decodeJSON(OpenedWindowResponse.self, from: Data(out.utf8))
-        result.windowID = opened?.windowID ?? ""
-        if let first = opened?.blockIDs?.first {
-            result.blockID = first
+        let opened = Rex.decodeJSON(OpenedSessionResponse.self, from: Data(out.utf8))
+        let window = inSession
+            ? Rex.decodeJSON(OpenedWindowResponse.self, from: Data(out.utf8))
+            : opened?.initialWindows?.first
+        result.sessionID = inSession ? ctx.session : opened?.sessionID
+        result.windowID = window?.windowID
+        result.blockID = window?.blockIDs?.first
+        if createErr == nil, let sessionID = result.sessionID, !sessionID.isEmpty {
+            Rex.recordLauncherCreation("", sessionID, tree.branch, tree.path)
         }
-        let destination = OpenResult(path: tree.path, sessionID: ctx.session, windowID: result.windowID, blockID: result.blockID)
+        let destination = OpenResult(path: tree.path, sessionID: result.sessionID, windowID: result.windowID, blockID: result.blockID)
         if pending {
             do {
                 try Pullrequest.localDestination(path: tree.path, result: destination, released: false)
@@ -203,16 +227,19 @@ public extension RaptorTask {
             }
         }
         if let err = createErr {
-            throw fail(MessageError("worktree preserved at \(tree.path) (\(tree.branch)); could not open Pi tab: \(err); retry with task --resume PATH"))
+            throw fail(MessageError("worktree preserved at \(tree.path) (\(tree.branch)); could not open Pi session: \(err); retry with task --resume PATH"))
         }
-        if opened == nil || (result.windowID ?? "").isEmpty || (pending && (result.blockID ?? "").isEmpty) {
-            throw fail(MessageError("worktree preserved at \(tree.path); tab creation response was invalid; inspect the session before retrying"))
+        if window == nil || (result.sessionID ?? "").isEmpty || (result.windowID ?? "").isEmpty || (pending && (result.blockID ?? "").isEmpty) {
+            throw fail(MessageError("worktree preserved at \(tree.path); session creation response was invalid; inspect the session before retrying"))
         }
         do {
+            if inSession {
+                _ = try taskRexRun(["session", "rename", ctx.session, tree.branch])
+            }
             try Rex.doAction(client: ctx.client, action: "session.select",
-                             kv: ["session_id=" + ctx.session, "window_id=" + (opened?.windowID ?? "")])
+                             kv: ["session_id=" + (result.sessionID ?? ""), "window_id=" + (result.windowID ?? "")])
         } catch {
-            throw fail(MessageError("Pi tab \(opened?.windowID ?? "") and worktree \(tree.path) were created, but switching the app failed: \(error); select that tab instead of creating another task"))
+            throw fail(MessageError("Pi session \(result.sessionID ?? "") and worktree \(tree.path) were created, but switching the app failed: \(error); select that session instead of creating another task"))
         }
         if pending {
             do {

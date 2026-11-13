@@ -134,7 +134,7 @@ final class RexconfigTests: XCTestCase {
         rex.bind("shift+cmd+o", "raptor")
         rex.bind("shift+cmd+c", "raptor_pr_open")
         rex.bind("shift+cmd+n", "raptor_worktree_new")
-        rex.bind("ctrl+shift+n", "raptor_worktree_agent")
+        rex.bind("cmd+opt+n", "raptor_worktree_agent")
         rex.bind("ctrl+cmd+1", "raptor_pin_1")
         rex.bind("ctrl+cmd+2", "raptor_pin_2")
         rex.bind("ctrl+cmd+3", "raptor_pin_3")

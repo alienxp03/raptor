@@ -30,7 +30,7 @@ public enum Rexconfig {
             ["shift+cmd+o", "raptor"],
             ["shift+cmd+c", "raptor_pr_open"],
             ["shift+cmd+n", "raptor_worktree_new"],
-            ["ctrl+shift+n", "raptor_worktree_agent"],
+            ["cmd+opt+n", "raptor_worktree_agent"],
         ] + (1...9).map { ["ctrl+cmd+\($0)", "raptor_pin_\($0)"] })
     }
 

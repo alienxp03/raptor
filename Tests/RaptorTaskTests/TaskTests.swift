@@ -6,7 +6,7 @@ import RaptorWorktree
 
 /// Ported from task_test.go.
 final class TaskTests: XCTestCase {
-    func testTaskCreatesTabWithFreshEmptyPi() throws {
+    func testTaskCreatesSessionWithFreshEmptyPi() throws {
         let env = TestEnv()
         defer { env.restore() }
         let (repo, cfg, ctx, log) = try fixture(env)
@@ -14,14 +14,15 @@ final class TaskTests: XCTestCase {
         if let error { throw error }
         XCTAssertEqual(result.windowID, "new-window", "\(result)")
         XCTAssertEqual(result.blockID, "new-block", "\(result)")
+        XCTAssertEqual(result.sessionID, "new-session", "\(result)")
         XCTAssertFalse(result.path.isEmpty, "\(result)")
         let branch = result.branch
         XCTAssertFalse(branch.rangeOfCharacter(from: CharacterSet(charactersIn: "/0123456789")) != nil, branch)
         XCTAssertEqual(branch.components(separatedBy: "-").count, 2, branch)
         let calls = try readText(log)
-        let want = "window\nnew\n-s\norigin-session\n" + result.branch + "\n-c\n" + result.path + "\n--json\n--\n"
-        XCTAssertTrue(calls.contains(want), "wrong tab command:\n\(calls)")
-        XCTAssertFalse(calls.contains("--keep-open\n"), "Pi tab must close after Pi exits")
+        let want = "new\n" + result.branch + "\n-c\n" + result.path + "\n--json\n--\n"
+        XCTAssertTrue(calls.contains(want), "wrong session command:\n\(calls)")
+        XCTAssertFalse(calls.contains("--keep-open\n"), "Pi terminal must close after Pi exits")
         let parts = calls.components(separatedBy: "--\n")
         XCTAssertGreaterThanOrEqual(parts.count, 2)
         let after = parts[1]
@@ -30,7 +31,7 @@ final class TaskTests: XCTestCase {
         XCTAssertEqual(trimmedPi.components(separatedBy: "\n").count, 1,
                        "Pi must receive no prompt/resume arguments: \(piCall)")
         XCTAssertTrue(trimmedPi.hasSuffix("/pi"), "Pi must receive no prompt/resume arguments: \(piCall)")
-        XCTAssertTrue(calls.contains("-C\niphone\ndo\nsession.select\nsession_id=origin-session\nwindow_id=new-window"),
+        XCTAssertTrue(calls.contains("-C\niphone\ndo\nsession.select\nsession_id=new-session\nwindow_id=new-window"),
                       "requesting app not selected")
     }
 
@@ -76,7 +77,7 @@ final class TaskTests: XCTestCase {
         XCTAssertNotNil(unregistered, "unregistered retry path accepted")
     }
 
-    func testTaskFocusFailureIdentifiesExistingTab() throws {
+    func testTaskFocusFailureIdentifiesExistingSession() throws {
         let env = TestEnv()
         defer { env.restore() }
         let (repo, cfg, ctx, _) = try fixture(env)
@@ -87,7 +88,7 @@ final class TaskTests: XCTestCase {
             return
         }
         XCTAssertEqual(result.windowID, "new-window", "\(result)")
-        XCTAssertTrue(String(describing: error).contains("select that tab"), "\(error)")
+        XCTAssertTrue(String(describing: error).contains("select that session"), "\(error)")
         XCTAssertEqual(WorktreeKit.list(repo: repo).count, 2, "worktree removed after focus error")
     }
 

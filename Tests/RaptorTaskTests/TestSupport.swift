@@ -112,8 +112,10 @@ func fixture(_ env: TestEnv) throws -> (repo: String, cfg: RaptorConfig, ctx: Ct
     printf '%s\n' "$@" >> "$TASK_LOG"
     case "$1" in
      window)
-      if [ "$TASK_FAIL" = open ]; then echo 'open failed' >&2; exit 1; fi
       echo '{"window_id":"new-window","block_ids":["new-block"]}' ;;
+     new)
+      if [ "$TASK_FAIL" = open ]; then echo 'open failed' >&2; exit 1; fi
+      echo '{"session_id":"new-session","initial_windows":[{"window_id":"new-window","block_ids":["new-block"]}]}' ;;
      -C)
       if [ "$TASK_FAIL" = focus ]; then echo 'focus failed' >&2; exit 1; fi ;;
     esac

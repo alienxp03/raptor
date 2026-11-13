@@ -218,24 +218,43 @@ function M.setup(options)
 		end,
 	})
 
+	local instantLaunching = false
+	local pendingInstantSession
 	rex.action({
 		name = "raptor_worktree_agent",
 		title = "Raptor: Instant Agent Worktree",
-		description = "Auto-name a branch and worktree from HEAD, open a tab, and start a fresh agent (pi) without a prompt.",
+		description = "Switch immediately to a new session, create a worktree from HEAD, and start a fresh agent (pi) without a prompt.",
 		category = "Navigate",
-		keywords = "agent pi task instant branch worktree tab",
+		keywords = "agent pi task instant branch worktree session",
 		run = function(ctx)
 			if ctx.session_id == nil or ctx.block_id == nil then
 				error("raptor: instant task needs a session and origin pane", 0)
 			end
 			ctx = resolve_context(ctx)
 			if ctx.client_id == nil then error("raptor: cannot identify the app client", 0) end
+			if instantLaunching then return { pending = true } end
+			if pendingInstantSession then
+				local listing, err = rex.call("session.list", {})
+				if not listing then error("raptor: " .. tostring(err), 0) end
+				for _, session in ipairs(listing.sessions or {}) do
+					if session.session_id == pendingInstantSession and session.label == "Starting agent…" then
+						rex.client.queue("session.select", { session_id = pendingInstantSession })
+						return { session_id = pendingInstantSession, pending = true }
+					end
+				end
+				pendingInstantSession = nil
+			end
 			local command = base_cmd(ctx)
 			table.insert(command, "task")
-			local result, err = rex.exec(command, { timeout = 30 })
+			instantLaunching = true
+			local ok, result, err = pcall(rex.exec, command, { timeout = 30 })
+			instantLaunching = false
+			if not ok then error(result, 0) end
 			if result == nil then error(err, 0) end
 			if not result.ok then error("raptor: " .. result.stdout .. result.stderr, 0) end
-			return rex.json.decode(result.stdout)
+			local launched = rex.json.decode(result.stdout)
+			pendingInstantSession = launched.session_id
+			return launched
 		end,
 	})
 
