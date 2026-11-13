@@ -254,9 +254,29 @@ public extension Catalog {
         }
     }
 
-    /// Stable partition for empty-query presentation only; search retains relevance.
+    /// Saved pin order for empty-query presentation only; search retains relevance.
+    /// Session pins precede directory pins, whose order is stored separately.
     static func pinnedLauncherFirst(_ items: [LauncherItem]) -> [LauncherItem] {
-        items.filter { $0.pinned } + items.filter { !$0.pinned }
+        let sessions = RaptorConfig.loadSessionPins()
+        let sessionOrder = Dictionary(sessions.enumerated().map { ($0.element, $0.offset) },
+                                      uniquingKeysWith: { first, _ in first })
+        let directoryOrder = Dictionary(RaptorConfig.loadPins().enumerated().map {
+            (canonicalPath($0.element), sessions.count + $0.offset)
+        }, uniquingKeysWith: { first, _ in first })
+        func rank(_ item: LauncherItem) -> Int {
+            if item.kind == "session" {
+                return sessionOrder[SessionPin(sessionID: item.sessionID, host: item.host)] ?? Int.max
+            }
+            if item.kind == "dir", item.local {
+                return directoryOrder[canonicalPath(item.path)] ?? Int.max
+            }
+            return Int.max
+        }
+        let pinned = items.enumerated().filter { $0.element.pinned }.sorted {
+            let left = rank($0.element), right = rank($1.element)
+            return left == right ? $0.offset < $1.offset : left < right
+        }.map(\.element)
+        return pinned + items.filter { !$0.pinned }
     }
 
     /// Local port of Catalog.sameSession (internal in RaptorRex): compares a local
