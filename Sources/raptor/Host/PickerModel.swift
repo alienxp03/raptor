@@ -55,10 +55,16 @@ final class PickerModel: ObservableObject {
         }
         if isForm {
             entries += [
-                .init(title: "Show agent fields", keys: "⌃⌥O", group: "Forms", keywords: "ctrl control option o agent model reasoning worktree pi codex"),
                 .init(title: "Next field", keys: "Tab", group: "Forms", keywords: "focus editing"),
                 .init(title: "Previous field", keys: "⇧Tab", group: "Forms", keywords: "shift focus editing"),
                 .init(title: "Submit form", keys: "⌘↵", group: "Forms", keywords: "command cmd enter return create worktree pull request")
+            ]
+        }
+        if page == .create {
+            entries += [
+                .init(title: "Next agent", keys: "⌃⌥O", group: "Forms", keywords: "ctrl control option alt o cycle agent pi codex"),
+                .init(title: "Next model", keys: "⌃⌥M", group: "Forms", keywords: "ctrl control option alt m cycle agent model"),
+                .init(title: "Next reasoning level", keys: "⌃⌥R", group: "Forms", keywords: "ctrl control option alt r cycle reasoning effort thinking")
             ]
         }
         if sessionDeletion != nil {
@@ -126,9 +132,7 @@ final class PickerModel: ObservableObject {
     @Published private(set) var refreshing = false
     @Published var targets: [String] = []
     @Published var target = ""
-    // Agent launch controls (worktree form). Collapsed until ⌃⇧O or the
-    // summary row opens them; selections ride the create/dispatch request.
-    @Published var agentControlsShown = false
+    // Agent launch selections ride the create/dispatch request.
     @Published private(set) var agentChoices: [String] = ["pi", "codex"]
     @Published private(set) var agent = "none"
     @Published private(set) var agentProvider = ""
@@ -173,6 +177,10 @@ final class PickerModel: ObservableObject {
     @Published var notice: String?
     @Published var splitMode = false
     @Published var removalCandidate: PickerItem?
+    enum DeletionFocus: Hashable {
+        case worktree(String), retry(String), closeSession, action, cancel
+    }
+
     struct SessionDeletion {
         enum Phase { case loading, review, preparing, confirm, deleting, failed, forceOffered, forceConfirm }
         let id = UUID()
@@ -181,11 +189,30 @@ final class PickerModel: ObservableObject {
         var plan: APIResult?
         var error: String?
         var selectedPaths: Set<String> = []
+        var selectionOnLoad: Set<String>?
+        var automaticallyVerifies = false
         var deletedPaths: Set<String> = []
         var closeSessionConfirmed = false
         var checkingPath: String?
         var checkStartedAt: Date?
+        var preparingPaths: [String: Date] = [:]
         var preparationSelection: Set<String>?
+        var keyboardFocus: DeletionFocus?
+
+        var forceWarningCount: Int {
+            (plan?.worktrees ?? []).filter {
+                selectedPaths.contains($0.path) && !deletedPaths.contains($0.path)
+                    && $0.isPrepared && $0.needsForce == true
+            }.count
+        }
+
+        func isChecking(_ path: String) -> Bool {
+            checkingPath == path || preparingPaths[path] != nil
+        }
+
+        func startedChecking(_ path: String) -> Date? {
+            preparingPaths[path] ?? (checkingPath == path ? checkStartedAt : nil)
+        }
     }
     @Published private(set) var sessionDeletion: SessionDeletion?
     private var deletionPreviewTask: Task<Void, Never>?
@@ -718,7 +745,6 @@ final class PickerModel: ObservableObject {
         formRequestRepo = options.repo
         if page == .create {
             if sameContext { targets = previousTargets; target = previousTarget }
-            agentControlsShown = false
             agentDefaultsApplied = false
             agentCatalogWarning = nil
             createdLaunch = nil
@@ -1343,16 +1369,20 @@ final class PickerModel: ObservableObject {
     // Config defaults apply once per form open; later refreshes never clobber
     // an in-progress selection.
     private func applyAgentDefaults(_ result: APIResult) {
-        if let choices = result.agents, !choices.isEmpty { agentChoices = choices }
+        if let choices = result.agents, !choices.isEmpty {
+            var seen = Set<String>()
+            agentChoices = choices.map { $0.lowercased() }.filter { $0 != "none" && seen.insert($0).inserted }
+        }
         guard !agentDefaultsApplied else { return }
-        let configured = result.agent.flatMap { $0.isEmpty ? nil : $0 } ?? "none"
+        let configured = result.agent.flatMap { $0.isEmpty ? nil : $0.lowercased() } ?? "none"
         agent = configured
         agentModel = result.agentModel ?? ""
         agentProvider = Self.providerPartition(agentModel).provider
         agentModel = Self.providerPartition(agentModel).id
         agentReasoning = result.agentReasoning ?? ""
         if configured != "none" {
-            ensureAgentCatalog(for: configured)
+            if let models = agentCatalogs[configured] { applyCatalogDefaults(models) }
+            else { ensureAgentCatalog(for: configured) }
         }
         agentDefaultsApplied = true
     }
@@ -1368,12 +1398,29 @@ final class PickerModel: ObservableObject {
 
     // MARK: Agent launch controls
 
-    /// ⌃⌥O or the summary row: reveal/hide the agent, model, and reasoning fields.
-    func toggleAgentControls() {
-        guard page == .create, createdPath == nil, contextReady, !busy,
-              !basePickerPresented, !agentPickerPresented, !agentModelPickerPresented, !agentReasoningPickerPresented else { return }
-        agentControlsShown.toggle()
-        if agentControlsShown { ensureAgentCatalog(for: agent) }
+    /// ⌃⌥O cycles actual agents, not different presentations of the same value.
+    func cycleAgent() {
+        guard page == .create, createdPath == nil, contextReady, !busy, !hasPopover else { return }
+        let choices = ["none"] + agentChoices
+        let index = choices.firstIndex(of: agent) ?? 0
+        selectAgent(choices[(index + 1) % choices.count])
+    }
+
+    /// ⌃⌥M cycles exact provider/model identities and applies model defaults.
+    func cycleAgentModel() {
+        guard page == .create, createdPath == nil, contextReady, !busy, !hasPopover,
+              agent != "none", !agentCatalogModels.isEmpty else { return }
+        let index = agentCatalogModels.firstIndex { $0.selectionID == selectedModelOptionID } ?? -1
+        selectAgentModel(agentCatalogModels[(index + 1) % agentCatalogModels.count])
+    }
+
+    /// ⌃⌥R cycles only the selected model's supported reasoning values.
+    func cycleAgentReasoning() {
+        guard page == .create, createdPath == nil, contextReady, !busy, !hasPopover,
+              agent != "none", !agentReasoningChoices.isEmpty else { return }
+        let choices = agentReasoningChoices
+        let index = choices.firstIndex(of: selectedReasoningLabel) ?? -1
+        selectAgentReasoning(choices[(index + 1) % choices.count])
     }
 
     var hasPopover: Bool {
@@ -1400,47 +1447,48 @@ final class PickerModel: ObservableObject {
 
     var agentDisplayLabel: String { agentDisplayName(agent) }
 
-    /// Model button title: selected label, discovery state, or tool default.
+    var selectedAgentModel: AgentModelPayload? {
+        agentCatalogModels.first { $0.id == agentModel && ($0.provider ?? "") == agentProvider }
+            ?? (agentProvider.isEmpty ? agentCatalogModels.first { $0.id == agentModel } : nil)
+    }
+
+    var selectedModelOptionID: String {
+        selectedAgentModel?.selectionID ?? (agentProvider.isEmpty ? agentModel : agentProvider + "/" + agentModel)
+    }
+
+    /// Show the exact launch ID, not an ambiguous name or "Default" label.
     var selectedModelLabel: String {
         guard agent != "none" else { return "—" }
-        if let selected = agentCatalogModels.first(where: { $0.id == agentModel }) {
-            return selected.displayLabel
-        }
-        if agentModel.isEmpty {
-            return agentCatalogLoading && agentCatalogModels.isEmpty ? "Discovering models…" : "Agent default"
-        }
-        return agentModel
+        if !agentModel.isEmpty { return selectedModelOptionID }
+        return agentCatalogLoading ? "Discovering models…" : "Model unavailable"
     }
 
-    var agentSummary: String {
-        guard agent != "none" else { return "No agent" }
-        var parts = [agent]
-        if let selected = agentCatalogModels.first(where: { $0.id == agentModel }) {
-            parts.append(selected.displayLabel)
-        } else if !agentModel.isEmpty {
-            parts.append(agentModel)
-        }
-        if let reasoning = agentReasoningDetail { parts.append(reasoning) }
-        return parts.joined(separator: " · ")
+    var selectedReasoningLabel: String {
+        guard agent != "none" else { return "—" }
+        if !agentReasoning.isEmpty, agentReasoning != agentReasoningDefault { return agentReasoning }
+        if let value = selectedAgentModel?.defaultReasoning, !value.isEmpty { return value }
+        if agentCatalogLoading { return "Discovering…" }
+        return selectedAgentModel?.reasoning?.isEmpty == true ? "Not supported" : "Reasoning unavailable"
     }
 
-    private var agentReasoningDetail: String? {
-        agentReasoning.isEmpty || agentReasoning == agentReasoningDefault ? nil : agentReasoning
-    }
-
-    /// Reasoning options for the selected model; "default" first.
+    /// Only concrete, tool-reported levels are selectable.
     var agentReasoningChoices: [String] {
-        let levels = agentCatalogModels.first(where: { $0.id == agentModel })?.reasoning ?? []
-        return [agentReasoningDefault] + levels
+        var levels = selectedAgentModel?.reasoning ?? []
+        if let value = selectedAgentModel?.defaultReasoning, !value.isEmpty, !levels.contains(value) {
+            levels.insert(value, at: 0)
+        }
+        return levels
     }
 
     func selectAgent(_ choice: String) {
         guard page == .create, createdPath == nil, choice == "none" || agentChoices.contains(choice) || choice == agent else { return }
+        guard choice != agent else { return }
         agent = choice
         agentProvider = ""
         agentModel = ""
         agentReasoning = ""
-        ensureAgentCatalog(for: choice)
+        if let models = agentCatalogs[choice] { applyCatalogDefaults(models) }
+        else { ensureAgentCatalog(for: choice) }
     }
 
     func selectAgentModel(_ model: AgentModelPayload) {
@@ -1487,9 +1535,7 @@ final class PickerModel: ObservableObject {
                 let models = result.agentModels ?? []
                 self.agentCatalogs[agent] = models
                 self.agentCatalogWarning = result.agentWarning.flatMap { $0.isEmpty ? nil : $0 }
-                if self.agent == agent, self.agentControlsShown {
-                    self.applyCatalogDefaults(models)
-                }
+                if self.agent == agent { self.applyCatalogDefaults(models) }
             } catch {
                 self.agentCatalogsRequested.remove(agent)
                 self.agentCatalogWarning = error.localizedDescription
@@ -1499,15 +1545,20 @@ final class PickerModel: ObservableObject {
 
     private func applyCatalogDefaults(_ models: [AgentModelPayload]) {
         guard !models.isEmpty else { return }
-        if let selected = models.first(where: { $0.id == agentModel }) {
+        if let selected = selectedAgentModel {
             agentProvider = selected.provider ?? agentProvider
+            if agentReasoning.isEmpty || agentReasoning == agentReasoningDefault {
+                agentReasoning = selected.defaultReasoning.flatMap { $0.isEmpty ? nil : $0 } ?? ""
+            }
             return
         }
-        let chosen = models.first(where: { $0.isDefault == true }) ?? models.first
-        guard let chosen else { return }
+        // Preserve an explicit configured model even if discovery cannot find it.
+        guard agentModel.isEmpty, let chosen = models.first(where: { $0.isDefault == true }) else { return }
         agentModel = chosen.id
         agentProvider = chosen.provider ?? ""
-        agentReasoning = chosen.defaultReasoning.flatMap { $0.isEmpty ? nil : $0 } ?? ""
+        if agentReasoning.isEmpty || agentReasoning == agentReasoningDefault {
+            agentReasoning = chosen.defaultReasoning.flatMap { $0.isEmpty ? nil : $0 } ?? ""
+        }
     }
 
     // Never queue Enter for a pending preview.
@@ -1733,11 +1784,124 @@ final class PickerModel: ObservableObject {
         }
     }
 
-    func beginDeleteSession() {
+    private var deletionKeyboardControls: [DeletionFocus] {
+        guard let deletion = sessionDeletion else { return [] }
+        guard !busy, deletion.phase != .deleting else { return [.cancel] }
+        var controls: [DeletionFocus] = []
+        switch deletion.phase {
+        case .loading, .review, .confirm, .preparing:
+            for row in deletion.plan?.worktrees ?? [] {
+                guard !deletion.deletedPaths.contains(row.path),
+                      deletion.automaticallyVerifies || deletion.checkingPath != row.path else { continue }
+                if deletion.automaticallyVerifies || deletion.preparationSelection == nil, row.isChecked,
+                   row.deletable || (deletion.automaticallyVerifies && deletion.selectedPaths.contains(row.path)) {
+                    controls.append(.worktree(row.path))
+                }
+                if deletion.checkingPath == nil {
+                    if deletion.phase == .preparing {
+                        if (deletion.preparationSelection?.contains(row.path) == true && !row.isPrepared)
+                            || (deletion.automaticallyVerifies && row.retryable) {
+                            controls.append(.retry(row.path))
+                        }
+                    } else if deletion.automaticallyVerifies || deletion.preparationSelection == nil, row.retryable || !row.isChecked {
+                        controls.append(.retry(row.path))
+                    }
+                }
+            }
+            if deletion.phase == .confirm, deletion.checkingPath == nil,
+               deletion.plan?.worktrees?.contains(where: \.deletable) == true {
+                controls.append(.closeSession)
+            }
+            if canPrepareSessionDeletion || canConfirmSessionDeletion { controls.append(.action) }
+        case .forceConfirm:
+            if canConfirmSessionDeletion { controls.append(.action) }
+        case .forceOffered:
+            if deletion.closeSessionConfirmed { controls.append(.action) }
+        case .failed:
+            controls.append(.action)
+        case .deleting: break
+        }
+        controls.append(.cancel)
+        return controls
+    }
+
+    var deletionKeyboardFocus: DeletionFocus? {
+        let controls = deletionKeyboardControls
+        if let focus = sessionDeletion?.keyboardFocus, controls.contains(focus) { return focus }
+        if sessionDeletion?.phase == .confirm, controls.contains(.closeSession) { return .closeSession }
+        if sessionDeletion?.phase == .forceConfirm { return .cancel }
+        return controls.first
+    }
+
+    func focusDeletionControl(_ focus: DeletionFocus) {
+        guard deletionKeyboardControls.contains(focus) else { return }
+        sessionDeletion?.keyboardFocus = focus
+    }
+
+    @discardableResult
+    func handleDeletionKeyboard(code: UInt16, characters: String, modifiers: NSEvent.ModifierFlags, isRepeat: Bool = false) -> Bool {
+        guard let deletion = sessionDeletion else { return false }
+        let flags = modifiers.intersection([.command, .control, .option, .shift])
+        let key = characters.lowercased()
+        if flags == [.command, .shift], key == "x" {
+            if !isRepeat { offerForceDeleteSession() }
+            return true
+        }
+        if flags.isEmpty, code == 53 { escape(); return true }
+        if flags == .command, code == 36 || code == 76 {
+            guard !isRepeat else { return true }
+            switch deletion.phase {
+            case .review: prepareSessionDeletion()
+            case .confirm, .forceConfirm: confirmDeleteSession()
+            default: break // Never promote a refused Delete to Force implicitly.
+            }
+            return true
+        }
+        let direction: Int?
+        if flags.isEmpty, code == 125 { direction = 1 }
+        else if flags.isEmpty, code == 126 { direction = -1 }
+        else if flags == .control, key == "j" { direction = 1 }
+        else if flags == .control, key == "k" { direction = -1 }
+        else if (flags.isEmpty || flags == .shift), code == 48 { direction = flags == .shift ? -1 : 1 }
+        else { direction = nil }
+        if let direction {
+            let controls = deletionKeyboardControls
+            guard !controls.isEmpty else { return true }
+            let index = deletionKeyboardFocus.flatMap { controls.firstIndex(of: $0) } ?? 0
+            focusDeletionControl(controls[(index + direction + controls.count) % controls.count])
+            return true
+        }
+        guard flags.isEmpty, code == 36 || code == 76 || code == 49 else { return false }
+        guard !isRepeat, let focus = deletionKeyboardFocus else { return true }
+        switch focus {
+        case .worktree(let path):
+            if code == 49 { selectDeletionWorktree(path, selected: !deletion.selectedPaths.contains(path)) }
+            else if deletion.phase == .review { prepareSessionDeletion() }
+            else if deletion.phase == .confirm { confirmDeleteSession() }
+        case .retry(let path): retryDeletionWorktree(path)
+        case .closeSession:
+            if code == 49 { confirmDeletionSessionClose(!deletion.closeSessionConfirmed) }
+            else { confirmDeleteSession() }
+        case .cancel: escape()
+        case .action:
+            switch deletion.phase {
+            case .review: prepareSessionDeletion()
+            case .confirm, .forceConfirm: confirmDeleteSession()
+            case .forceOffered: offerForceDeleteSession()
+            case .failed: refreshDeletionReview()
+            default: break
+            }
+        }
+        return true
+    }
+
+    func beginDeleteSession(preservingSelection: Set<String>? = nil, automaticallyVerify: Bool = true) {
         guard contextReady, canOpen, view == .sessions, page == .directories,
               let selected, selected.kind == "session" else { return }
         pauseSessionUpdates()
-        let deletion = SessionDeletion(candidate: selected)
+        var deletion = SessionDeletion(candidate: selected)
+        deletion.selectionOnLoad = preservingSelection
+        deletion.automaticallyVerifies = automaticallyVerify
         sessionDeletion = deletion
         let context = contextGeneration
         deletionPreviewTask?.cancel()
@@ -1753,6 +1917,9 @@ final class PickerModel: ObservableObject {
                 if let error = result.error, !error.isEmpty { throw APIError.message(error) }
                 try self.acceptDeletionReview(result)
                 await self.checkDeletionWorktrees(context: context, id: deletion.id)
+                guard !Task.isCancelled, context == self.contextGeneration,
+                      self.sessionDeletion?.id == deletion.id else { return }
+                if automaticallyVerify { self.prepareSessionDeletion() }
             } catch {
                 guard !Task.isCancelled, context == self.contextGeneration,
                       self.sessionDeletion?.id == deletion.id else { return }
@@ -1771,10 +1938,17 @@ final class PickerModel: ObservableObject {
         let previous = Set((sessionDeletion?.plan?.worktrees ?? []).filter(\.deletable).map(\.path))
         let ready = Set(worktrees.filter(\.deletable).map(\.path))
         sessionDeletion?.selectedPaths.formIntersection(ready)
-        sessionDeletion?.selectedPaths.formUnion(ready.subtracting(previous))
+        let added = ready.subtracting(previous)
+        let newlySelected = sessionDeletion?.selectionOnLoad.map { added.intersection($0) } ?? added
+        sessionDeletion?.selectedPaths.formUnion(newlySelected)
         sessionDeletion?.plan = result
+        if worktrees.allSatisfy(\.isChecked) { sessionDeletion?.selectionOnLoad = nil }
         if worktrees.contains(where: { !$0.isChecked }) { sessionDeletion?.phase = .loading }
-        else { sessionDeletion?.phase = worktrees.contains(where: { $0.deletable && !$0.isPrepared }) ? .review : .confirm }
+        else {
+            let phase: SessionDeletion.Phase = worktrees.contains(where: { $0.deletable && !$0.isPrepared }) ? .review : .confirm
+            if phase == .confirm, sessionDeletion?.phase != .confirm { sessionDeletion?.keyboardFocus = .closeSession }
+            sessionDeletion?.phase = phase
+        }
     }
 
     private func checkDeletionWorktrees(context: Int, id: UUID, firstPath: String? = nil) async {
@@ -1830,14 +2004,16 @@ final class PickerModel: ObservableObject {
     var canPrepareSessionDeletion: Bool {
         guard contextReady, !backendIsClosed, !busy, let deletion = sessionDeletion,
               deletion.phase == .review, deletion.checkingPath == nil, deletion.preparationSelection == nil,
-              deletion.plan?.worktrees?.allSatisfy(\.isChecked) == true, !deletion.selectedPaths.isEmpty else { return false }
+              deletion.plan?.worktrees?.allSatisfy(\.isChecked) == true else { return false }
         let eligible = Set((deletion.plan?.worktrees ?? []).filter(\.deletable).map(\.path))
-        return deletion.selectedPaths.isSubset(of: eligible)
+        return (deletion.automaticallyVerifies ? !eligible.isEmpty : !deletion.selectedPaths.isEmpty)
+            && deletion.selectedPaths.isSubset(of: eligible)
     }
 
     func prepareSessionDeletion() {
         guard canPrepareSessionDeletion, let deletion = sessionDeletion else { return }
-        sessionDeletion?.preparationSelection = deletion.selectedPaths
+        sessionDeletion?.preparationSelection = deletion.automaticallyVerifies
+            ? Set((deletion.plan?.worktrees ?? []).filter(\.deletable).map(\.path)) : deletion.selectedPaths
         sessionDeletion?.phase = .preparing
         let context = contextGeneration
         deletionPreviewTask?.cancel()
@@ -1848,60 +2024,85 @@ final class PickerModel: ObservableObject {
         var preferred = firstPath
         while !Task.isCancelled, context == contextGeneration, let deletion = sessionDeletion, deletion.id == id,
               let selection = deletion.preparationSelection, let token = deletion.plan?.deleteToken {
-            let pending = (deletion.plan?.worktrees ?? []).filter { selection.contains($0.path) && !$0.isPrepared }
-            let row = preferred.flatMap { path in pending.first { $0.path == path } } ?? pending.first
+            var pending = (deletion.plan?.worktrees ?? []).filter {
+                selection.contains($0.path) && !$0.isPrepared
+                    && (!deletion.automaticallyVerifies || $0.error == nil || $0.path == preferred)
+            }
+            if let path = preferred, let index = pending.firstIndex(where: { $0.path == path }) {
+                let row = pending.remove(at: index)
+                pending.insert(row, at: 0)
+            }
             preferred = nil
-            guard let row else {
+            let batch = Array(pending.prefix(2))
+            guard let first = batch.first else {
                 sessionDeletion?.phase = .confirm
+                if !deletion.automaticallyVerifies || deletion.keyboardFocus == nil {
+                    sessionDeletion?.keyboardFocus = .closeSession
+                }
+                sessionDeletion?.closeSessionConfirmed = false
                 sessionDeletion?.checkingPath = nil
                 sessionDeletion?.checkStartedAt = nil
+                sessionDeletion?.preparingPaths.removeAll()
                 return
             }
-            sessionDeletion?.checkingPath = row.path
-            sessionDeletion?.checkStartedAt = Date()
+            let started = Date()
+            sessionDeletion?.checkingPath = first.path
+            sessionDeletion?.checkStartedAt = started
+            sessionDeletion?.preparingPaths = Dictionary(uniqueKeysWithValues: batch.map { ($0.path, started) })
             do {
+                // One serial request; the backend runs at most two read-only
+                // checks concurrently, then merges their rows on its owner thread.
                 let result = try await request("sessions.delete.prepare", params: [
                     "kind": .text("session"), "session_id": .text(deletion.candidate.sessionID ?? deletion.candidate.path),
                     "host": .text(deletion.candidate.host ?? ""), "review_worktrees": .flag(true),
-                    "delete_token": .text(token), "path": .text(row.path), "selected_paths": .texts(selection.sorted()),
+                    "delete_token": .text(token), "path": .text(first.path), "paths": .texts(batch.map(\.path)),
+                    "selected_paths": .texts(selection.sorted()),
                 ])
                 guard !Task.isCancelled, context == contextGeneration, sessionDeletion?.id == id else { return }
                 if let error = result.error, !error.isEmpty {
                     sessionDeletion?.error = error
                     sessionDeletion?.phase = .failed
                     sessionDeletion?.checkingPath = nil
+                    sessionDeletion?.preparingPaths.removeAll()
                     return
                 }
                 guard result.deleteToken == token, let rows = result.worktrees,
                       Set(rows.map(\.path)).count == rows.count, rows.allSatisfy(\.isChecked),
                       selection.isSubset(of: Set(rows.map(\.path))),
-                      let finished = rows.first(where: { $0.path == row.path }), finished.isPrepared || finished.error != nil else {
-                    throw APIError.message("Preparation did not finish. Retry this worktree.")
+                      batch.allSatisfy({ requested in
+                          rows.contains { $0.path == requested.path && ($0.isPrepared || $0.error != nil) }
+                      }) else {
+                    throw APIError.message("Preparation did not finish. Retry these worktrees.")
                 }
                 sessionDeletion?.plan = result
-                if finished.error != nil {
-                    sessionDeletion?.checkingPath = nil
-                    return
-                }
+                sessionDeletion?.checkingPath = nil
+                sessionDeletion?.checkStartedAt = nil
+                sessionDeletion?.preparingPaths.removeAll()
+                if !deletion.automaticallyVerifies,
+                   rows.contains(where: { row in batch.contains { $0.path == row.path } && row.error != nil }) { return }
             } catch {
                 guard !Task.isCancelled, context == contextGeneration, sessionDeletion?.id == id else { return }
                 if backendIsClosed {
                     sessionDeletion?.error = "Connection lost. Refresh the review before preparing again. \(error.localizedDescription)"
                     sessionDeletion?.phase = .failed
-                } else if let index = sessionDeletion?.plan?.worktrees?.firstIndex(where: { $0.path == row.path }) {
-                    sessionDeletion?.plan?.worktrees?[index].error = error.localizedDescription
                 } else {
-                    sessionDeletion?.error = error.localizedDescription
-                    sessionDeletion?.phase = .failed
+                    for row in batch {
+                        if let index = sessionDeletion?.plan?.worktrees?.firstIndex(where: { $0.path == row.path }) {
+                            sessionDeletion?.plan?.worktrees?[index].error = error.localizedDescription
+                        }
+                    }
                 }
                 sessionDeletion?.checkingPath = nil
+                sessionDeletion?.checkStartedAt = nil
+                sessionDeletion?.preparingPaths.removeAll()
+                if deletion.automaticallyVerifies, sessionDeletion?.phase != .failed { continue }
                 return
             }
         }
     }
 
     private func retryDeletionPreparation(_ path: String) {
-        guard !busy, let deletion = sessionDeletion, deletion.checkingPath == nil,
+        guard !busy, let deletion = sessionDeletion, deletion.checkingPath == nil, deletion.preparingPaths.isEmpty,
               deletion.preparationSelection?.contains(path) == true,
               deletion.plan?.worktrees?.contains(where: { $0.path == path && !$0.isPrepared }) == true else { return }
         let context = contextGeneration
@@ -1910,6 +2111,15 @@ final class PickerModel: ObservableObject {
     }
 
     func retryDeletionWorktree(_ path: String) {
+        if let deletion = sessionDeletion, deletion.automaticallyVerifies, deletion.preparationSelection != nil {
+            guard !busy, deletion.checkingPath == nil, deletion.preparingPaths.isEmpty else { return }
+            if deletion.preparationSelection?.contains(path) == true {
+                guard deletion.plan?.worktrees?.contains(where: { $0.path == path && !$0.isPrepared }) == true else { return }
+                sessionDeletion?.phase = .preparing
+                retryDeletionPreparation(path)
+            } else { refreshDeletionReview() }
+            return
+        }
         if sessionDeletion?.phase == .preparing { retryDeletionPreparation(path); return }
         guard !busy, let deletion = sessionDeletion, deletion.checkingPath == nil, deletion.preparationSelection == nil,
               deletion.phase == .loading || deletion.phase == .review || deletion.phase == .confirm,
@@ -1919,18 +2129,23 @@ final class PickerModel: ObservableObject {
         sessionDeletion?.phase = .loading
         let context = contextGeneration
         deletionPreviewTask?.cancel()
-        deletionPreviewTask = Task { [weak self] in await self?.checkDeletionWorktrees(context: context, id: deletion.id, firstPath: path) }
+        deletionPreviewTask = Task { [weak self] in
+            guard let self else { return }
+            await self.checkDeletionWorktrees(context: context, id: deletion.id, firstPath: path)
+            guard !Task.isCancelled, context == self.contextGeneration, self.sessionDeletion?.id == deletion.id else { return }
+            if deletion.automaticallyVerifies { self.prepareSessionDeletion() }
+        }
     }
 
     func refreshDeletionReview() {
-        guard !closed, !busy, sessionDeletion != nil else { return }
+        guard !closed, !busy, let deletion = sessionDeletion else { return }
         cancelDeleteSession()
         if let process = backend as? ProcessBackend, process.isClosed {
             themeTask?.cancel()
             backend = ProcessBackend(options: options)
             renewSubscription()
         }
-        beginDeleteSession()
+        beginDeleteSession(preservingSelection: deletion.selectedPaths, automaticallyVerify: deletion.automaticallyVerifies)
     }
 
     func cancelDeleteSession() {
@@ -1943,25 +2158,35 @@ final class PickerModel: ObservableObject {
         guard contextReady, !backendIsClosed, !busy, let deletion = sessionDeletion,
               deletion.phase == .confirm || deletion.phase == .forceConfirm,
               deletion.plan?.deleteToken != nil, deletion.closeSessionConfirmed,
-              deletion.checkingPath == nil, deletion.plan?.worktrees?.allSatisfy(\.isChecked) == true,
-              !deletion.selectedPaths.isEmpty,
-              deletion.preparationSelection == nil || deletion.preparationSelection == deletion.selectedPaths else { return false }
+              deletion.checkingPath == nil, deletion.preparingPaths.isEmpty,
+              deletion.plan?.worktrees?.allSatisfy(\.isChecked) == true, !deletion.selectedPaths.isEmpty,
+              deletion.preparationSelection == nil
+                || (deletion.automaticallyVerifies
+                    ? deletion.selectedPaths.isSubset(of: deletion.preparationSelection ?? [])
+                    : deletion.preparationSelection == deletion.selectedPaths) else { return false }
         let deletable = Set((deletion.plan?.worktrees ?? []).filter { $0.deletable && $0.isPrepared }.map(\.path))
         return deletion.selectedPaths.isSubset(of: deletable)
             && deletion.selectedPaths.isDisjoint(with: deletion.deletedPaths)
     }
 
     func selectDeletionWorktree(_ path: String, selected: Bool) {
-        guard !busy, let deletion = sessionDeletion, deletion.preparationSelection == nil,
-              deletion.phase == .confirm || deletion.phase == .loading || deletion.phase == .review,
-              deletion.plan?.worktrees?.contains(where: { $0.path == path && $0.deletable }) == true else { return }
+        guard !busy, let deletion = sessionDeletion,
+              deletion.automaticallyVerifies || deletion.preparationSelection == nil,
+              deletion.phase == .confirm || deletion.phase == .loading || deletion.phase == .review
+                || (deletion.automaticallyVerifies && deletion.phase == .preparing),
+              !deletion.deletedPaths.contains(path), deletion.automaticallyVerifies || deletion.checkingPath != path,
+              deletion.plan?.worktrees?.contains(where: {
+                  $0.path == path && $0.isChecked
+                      && ($0.deletable || (!selected && deletion.selectedPaths.contains(path)))
+              }) == true else { return }
         if selected { sessionDeletion?.selectedPaths.insert(path) }
         else { sessionDeletion?.selectedPaths.remove(path) }
+        if sessionDeletion?.selectedPaths != deletion.selectedPaths { sessionDeletion?.closeSessionConfirmed = false }
     }
 
     func confirmDeletionSessionClose(_ confirmed: Bool) {
         guard !busy, let deletion = sessionDeletion, deletion.plan != nil,
-              deletion.phase == .confirm || deletion.phase == .loading || deletion.phase == .review else { return }
+              deletion.phase == .confirm else { return }
         sessionDeletion?.closeSessionConfirmed = confirmed
     }
 
@@ -1969,6 +2194,7 @@ final class PickerModel: ObservableObject {
         guard !busy, sessionDeletion?.phase == .forceOffered,
               sessionDeletion?.closeSessionConfirmed == true else { return }
         sessionDeletion?.phase = .forceConfirm
+        sessionDeletion?.keyboardFocus = .cancel
     }
 
     func confirmDeleteSession() {

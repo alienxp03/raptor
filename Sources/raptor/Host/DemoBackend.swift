@@ -138,7 +138,7 @@ actor DemoBackend: BackendClient {
             if agent == "codex" {
                 models = [AgentModelPayload(id: "gpt-6-luna", label: "GPT-6 Luna", reasoning: ["low", "high", "xhigh"], defaultReasoning: "high", isDefault: true)]
             } else {
-                models = [AgentModelPayload(id: "glm-5.3", provider: "zai", label: "GLM-5.3", reasoning: ["low", "high", "max"]),
+                models = [AgentModelPayload(id: "glm-5.3", provider: "zai", label: "GLM-5.3", reasoning: ["low", "high", "max"], defaultReasoning: "high", isDefault: true),
                           AgentModelPayload(id: "gpt-6.1-sol", provider: "openai-codex", label: "GPT-6.1 Sol", reasoning: ["medium", "high", "xhigh"])]
             }
             return APIResult(agent: agent, agentModels: models)
@@ -161,22 +161,31 @@ actor DemoBackend: BackendClient {
             deletionReview[index] = row
             return APIResult(deleteToken: "demo-review", worktrees: deletionReview)
         case "sessions.delete.prepare":
+            let requested: [String]
+            if case .texts(let values) = params["paths"] { requested = values }
+            else { requested = [text("path")] }
             guard text("delete_token") == "demo-review", deletionReview.allSatisfy(\.isChecked),
                   case .texts(let paths) = params["selected_paths"], !paths.isEmpty,
-                  deletionPreparation == nil || deletionPreparation == Set(paths), paths.contains(text("path")),
-                  paths.allSatisfy({ path in deletionReview.contains { $0.path == path && $0.deletable } }),
-                  let index = deletionReview.firstIndex(where: { $0.path == text("path") }),
-                  let row = deletionRows(repo: repo, session: text("session_id")).first(where: { $0.path == text("path") }) else {
+                  deletionPreparation == nil || deletionPreparation == Set(paths),
+                  !requested.isEmpty, requested.count <= 2, Set(requested).count == requested.count,
+                  requested.first == text("path"), Set(requested).isSubset(of: Set(paths)),
+                  paths.allSatisfy({ path in deletionReview.contains { $0.path == path && $0.deletable } }) else {
                 throw APIError.message("Refresh the worktree review.")
             }
             deletionPreparation = Set(paths)
-            deletionReview[index] = row
+            for path in requested {
+                guard let index = deletionReview.firstIndex(where: { $0.path == path }),
+                      let row = deletionRows(repo: repo, session: text("session_id")).first(where: { $0.path == path }) else {
+                    throw APIError.message("Refresh the worktree review.")
+                }
+                deletionReview[index] = row
+            }
             return APIResult(deleteToken: "demo-review", worktrees: deletionReview)
         case "sessions.delete":
             guard case .flag(true) = params["review_worktrees"], case .flag(true) = params["close_session"],
                   case .texts(let paths) = params["selected_paths"], !paths.isEmpty,
                   text("delete_token") == "demo-review", deletionReview.allSatisfy(\.isChecked),
-                  deletionPreparation == nil || deletionPreparation == Set(paths),
+                  deletionPreparation == nil || Set(paths).isSubset(of: deletionPreparation ?? []),
                   paths.allSatisfy({ path in deletionReview.contains { $0.path == path && $0.deletable && $0.isPrepared } }) else {
                 throw APIError.message("Select worktrees and confirm closing the session.")
             }

@@ -11,9 +11,9 @@ public struct AgentModel: Codable, Equatable, Sendable {
     public var label: String
     /// Supported reasoning levels in tool order.
     public var reasoning: [String]
-    /// Tool-reported default reasoning level; empty means tool default.
+    /// Effective default reasoning from tool settings/capabilities; empty means unknown.
     public var defaultReasoning: String
-    /// Catalog-recommended default model (Codex `isDefault` only).
+    /// Effective fresh-session default model, resolved by the tool's settings/rules.
     public var isDefault: Bool
 
     public init(

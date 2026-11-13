@@ -379,17 +379,11 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return true
         }
         if model.sessionDeletion != nil {
-            if event.keyCode == 53 { model.escape(); return true }
-            if event.keyCode == 36 || event.keyCode == 76 {
-                if model.sessionDeletion?.phase == .review { model.prepareSessionDeletion() }
-                else { model.confirmDeleteSession() }
-                return true
-            }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if flags.intersection([.control, .shift, .command, .option]) == [.command, .shift],
-               event.charactersIgnoringModifiers?.lowercased() == "x" { model.offerForceDeleteSession(); return true }
-            // The review page owns Tab/Space and checkbox focus. The list beneath is disabled.
-            return false
+            guard panel.isKeyWindow, panel.attachedSheet == nil, NSApp.modalWindow == nil,
+                  event.window == nil || event.window === panel else { return false }
+            return model.handleDeletionKeyboard(code: event.keyCode,
+                characters: event.charactersIgnoringModifiers ?? "", modifiers: event.modifierFlags,
+                isRepeat: event.isARepeat)
         }
         if model.removalCandidate != nil {
             // The sheet owns its keys. Explicitly cancel Escape without letting
@@ -507,10 +501,14 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             default: break
             }
         }
-        // ⌃⌥O shows/hides the worktree form's agent, model, and reasoning fields.
-        if control && option && !command && !shift && key == "o" {
-            model.toggleAgentControls()
-            return true
+        // Agent launch shortcuts cycle values without opening a popover.
+        if model.page == .create, control && option && !command && !shift {
+            switch key {
+            case "o": model.cycleAgent(); return true
+            case "m": model.cycleAgentModel(); return true
+            case "r": model.cycleAgentReasoning(); return true
+            default: break
+            }
         }
         if !model.isForm && !command && !option && !control {
             switch event.keyCode {

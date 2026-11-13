@@ -23,6 +23,21 @@ struct DeletionLayoutChecks {
         try check(PickerStyle.hasDeletionSelection(selected), "Keep the explicit close consent and delete action for eligible rows")
         let selectedHeight = PickerStyle.deletionHeight(selected)
         try check(selectedHeight <= 260, "Single-worktree review must not reserve 380pt")
+        var inline = selected
+        inline.plan?.worktrees?[0].prepared = false
+        inline.automaticallyVerifies = true
+        inline.phase = .loading
+        try check(PickerStyle.deletionPendingStatus(inline) == "Queued for automatic checks…",
+                  "An identified row waiting for automatic checks must show a queue, not a verification failure")
+        inline.phase = .review
+        let selectionHeight = PickerStyle.deletionHeight(inline)
+        inline.phase = .preparing
+        inline.preparationSelection = inline.selectedPaths
+        try check(PickerStyle.deletionPendingStatus(inline) == "Queued for automatic checks…",
+                  "A later batch must use the same automatic queued status")
+        inline.checkingPath = row.path
+        try check(PickerStyle.deletionHeight(inline) == selectionHeight && selectionHeight == selectedHeight,
+                  "Selection, inline verification and clean confirmation must keep the same page layout")
         selected.phase = .forceConfirm
         try check(PickerStyle.deletionHeight(selected) > selectedHeight, "Force deletion must reserve room for its irreversible-loss warning")
         selected.phase = .confirm

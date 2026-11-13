@@ -23,6 +23,11 @@ struct WorktreeReviewRow: Equatable {
                                     ("branch", .string(branch)), ("is_primary", .bool(isPrimary)),
                                     ("needs_force", .bool(plan?.needsForce ?? false)), ("checked", .bool(checked)),
                                     ("prepared", .bool(prepared))]
+        if let plan {
+            fields += [("has_changes", .bool(plan.hasChanges)),
+                       ("has_ignored_files", .bool(plan.hasIgnoredFiles)),
+                       ("has_unmerged_commits", .bool(plan.unmerged))]
+        }
         if let error { fields.append(("error", .string(error))) }
         return .object(fields)
     }
@@ -272,9 +277,11 @@ extension Handler {
                 throw MessageError("Select unique deletable worktree paths from this preview")
             }
             if ticket.metadataOnly {
-                guard ticket.frozenSelection == selection,
+                // Verification freezes the available plans, not the user's
+                // final checkbox subset. Force remains bound to its exact offer.
+                guard let verified = ticket.frozenSelection, selection.isSubset(of: verified),
                       plans.allSatisfy({ plan in rows.contains { $0.path == plan.path && $0.prepared && $0.eligible } }) else {
-                    throw MessageError("Prepare the exact selected worktrees before Delete")
+                    throw MessageError("Verify every selected worktree before Delete")
                 }
             }
             let force = try Params.bool(obj, "force")
@@ -308,23 +315,23 @@ extension Handler {
             if !force && plans.contains(where: { $0.needsForce }) {
                 ticket.forceSelection = selection
                 worktreeReviewTickets[token] = ticket
-                return result("Dirty/ignored files or unmerged commits. Force discards them.", available: true)
+                return result("Uncommitted changes or unmerged commits. Force discards them.", available: true)
             }
             // A mutation attempt is never replayable, including partial failure.
             worktreeReviewTickets.removeValue(forKey: token)
             let run = deletionRunner(host, sid, ticket.session.hostID)
             func validateSession() throws {
                 try validateOrigin()
-                let state = try loadDeletionSession?(host, sid) ?? Rex.deletionSessionState(host, sid)
-                guard state == ticket.session else { throw MessageError("Session changed; preview again") }
-            }
-            // Validate every selected plan before the first mutation.
-            try validateSession()
-            for plan in plans {
-                guard try WorktreeKit.inspectDeletion(cwd: plan.path, run: run) == plan else {
-                    throw MessageError("Worktree changed; preview again")
+                let removed = Set(deleted)
+                let state = try loadDeletionSession?(host, sid) ?? Rex.deletionSessionState(host, sid,
+                    allowingMissingDirectoriesForBlocks: ticket.session.blocksInWorktrees(removed))
+                guard ticket.session.matchesDeletionProgress(state, removed: removed) else {
+                    throw MessageError("Session changed; preview again")
                 }
             }
+            // All selected plans were compared above before any mutation.
+            // executeDeletion also checks each immutable plan immediately before removal.
+            try validateSession()
             for plan in plans {
                 try validateSession()
                 let adjusted = plan.accountingForDeletedWorktrees(Set(deleted))

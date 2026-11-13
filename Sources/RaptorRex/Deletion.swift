@@ -7,12 +7,34 @@ public struct DeletionSessionState: Equatable {
     public let sessionID: String
     public let directories: [String]
     public let blocks: [String]
+    public let blockDirectories: [String: String]
 
-    public init(hostID: String, sessionID: String, directories: [String], blocks: [String]) {
+    public init(hostID: String, sessionID: String, directories: [String], blocks: [String],
+                blockDirectories: [String: String] = [:]) {
         self.hostID = hostID
         self.sessionID = sessionID
         self.directories = directories
         self.blocks = blocks
+        self.blockDirectories = blockDirectories
+    }
+
+    public func blocksInWorktrees(_ paths: Set<String>) -> Set<String> {
+        Set(blockDirectories.compactMap { block, cwd in
+            paths.contains(where: { cwd == $0 || cwd.hasPrefix($0 + "/") }) ? block : nil
+        })
+    }
+
+    /// Worktrunk can move a removed cwd into its trash directory. Only panes
+    /// whose original worktrees were actually removed may change/lose cwd;
+    /// the host, session, block set and every other pane remain immutable.
+    public func matchesDeletionProgress(_ live: DeletionSessionState, removed: Set<String>) -> Bool {
+        guard hostID == live.hostID, sessionID == live.sessionID, blocks == live.blocks else { return false }
+        let removedBlocks = blocksInWorktrees(removed)
+        guard !removedBlocks.isEmpty else { return self == live }
+        guard Set(blockDirectories.keys) == Set(blocks), Set(live.blockDirectories.keys) == Set(blocks),
+              directories.sorted() == blockDirectories.values.sorted(),
+              live.directories.sorted() == live.blockDirectories.values.sorted() else { return false }
+        return blocks.allSatisfy { removedBlocks.contains($0) || blockDirectories[$0] == live.blockDirectories[$0] }
     }
 }
 
@@ -66,7 +88,8 @@ public extension Rex {
         return id
     }
 
-    static func deletionSessionState(_ host: String, _ sessionID: String) throws -> DeletionSessionState {
+    static func deletionSessionState(_ host: String, _ sessionID: String,
+                                     allowingMissingDirectoriesForBlocks removedBlocks: Set<String> = []) throws -> DeletionSessionState {
         guard sessionID.hasPrefix("session:") else { throw RexError("Delete requires a full session ID") }
         let hostID = try deletionHostID(host)
         let sessions = try deletionAPI(host, "session.list")["sessions"] as? [[String: Any]] ?? []
@@ -75,7 +98,7 @@ public extension Rex {
         }
         let reply = try deletionAPI(host, "session.list_blocks", ["session_id": sessionID])
         guard let blocks = reply["blocks"] as? [[String: Any]], !blocks.isEmpty else { throw RexError("session has no known directory") }
-        var directories: [String] = [], ids: [String] = []
+        var directories: [String] = [], ids: [String] = [], blockDirectories: [String: String] = [:]
         for block in blocks {
             guard let id = block["block_id"] as? String, id.hasPrefix("block:"),
                   block["host_id"] as? String == hostID,
@@ -85,15 +108,17 @@ public extension Rex {
             let process = try deletionAPI(host, "com.superlogical.terminal.process", [
                 "session_id": sessionID, "block_id": id, "args": [:] as [String: Any],
             ])
-            guard let foreground = process["foreground"] as? [String: Any],
-                  let cwd = foreground["cwd"] as? String, cwd.hasPrefix("/"), !cwd.contains("\0") else {
-                throw RexError("session block has an unknown process directory")
-            }
-            directories.append(cwd)
+            let foreground = process["foreground"] as? [String: Any]
+            let cwd = foreground?["cwd"] as? String ?? ""
+            let known = cwd.hasPrefix("/") && !cwd.contains("\0")
+            guard known || removedBlocks.contains(id) else { throw RexError("session block has an unknown process directory") }
+            guard blockDirectories[id] == nil else { throw RexError("session contains duplicate block identities") }
+            directories.append(known ? cwd : "")
+            blockDirectories[id] = known ? cwd : ""
             ids.append(id)
         }
         return DeletionSessionState(hostID: hostID, sessionID: sessionID,
-                                    directories: directories.sorted(), blocks: ids.sorted())
+                                    directories: directories.sorted(), blocks: ids.sorted(), blockDirectories: blockDirectories)
     }
 
     /// Execute through a detached Rex terminal on the selected server. A direct

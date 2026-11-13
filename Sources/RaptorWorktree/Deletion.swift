@@ -17,7 +17,25 @@ public struct DeletionPlan: Equatable {
     public let diff: String
     public let fileHashes: String
     public let unmerged: Bool
-    public var needsForce: Bool { !status.isEmpty || unmerged }
+    public var needsForce: Bool { hasChanges || unmerged }
+    public var hasChanges: Bool { statusKinds.changes }
+    public var hasIgnoredFiles: Bool { statusKinds.ignored }
+
+    private var statusKinds: (changes: Bool, ignored: Bool) {
+        let records = status.split(separator: "\0")
+        var changes = false, ignored = false, index = 0
+        while index < records.count {
+            let code = records[index].prefix(2)
+            index += 1
+            if code == "!!" { ignored = true }
+            else {
+                changes = true
+                // Porcelain -z includes a second path for renames/copies.
+                if code.contains("R") || code.contains("C") { index += 1 }
+            }
+        }
+        return (changes, ignored)
+    }
 
     /// Only registrations removed by this operation may differ from the preview.
     public func accountingForDeletedWorktrees(_ paths: Set<String>) -> DeletionPlan {
@@ -40,17 +58,53 @@ public struct DeletionOutcome {
 public extension WorktreeKit {
     static func inspectDeletion(cwd: String, run: DeletionCommand) throws -> DeletionPlan {
         guard cwd.hasPrefix("/"), !cwd.contains("\0") else { throw MessageError("unknown session directory") }
-        func command(_ dir: String, _ name: String, _ args: [String]) throws -> String {
-            let result = try run(dir, name, args)
-            guard result.ok else { throw MessageError("\(name): \(result.stderr) \(result.stdout)") }
-            return result.stdout
+        // Nine base64 lines, including empty fields. pipefail and errexit make
+        // producer failures fatal; stdout contains no diagnostics or shell data.
+        let snapshot = """
+        set -e
+        export GIT_OPTIONAL_LOCKS=0
+        emit() { "$@" | base64 | tr -d '\\n'; printf '\\n'; }
+        root=$(git rev-parse --show-toplevel && printf '.')
+        root=${root%.}
+        root=${root%$'\\n'}
+        cd -- "$root"
+        emit printf '%s' "$root"
+        emit git rev-parse --path-format=absolute --git-common-dir
+        emit git worktree list --porcelain -z
+        symbolic_ref() { git symbolic-ref --quiet HEAD || { code=$?; [ "$code" -eq 1 ]; }; }
+        emit symbolic_ref
+        emit git rev-parse --verify HEAD
+        local_refs() { git show-ref --heads || { code=$?; [ "$code" -eq 1 ]; }; }
+        emit local_refs
+        emit wt --config-set list.json-schema=2 --config-set list.full=false list --format=json
+        emit git status --porcelain=v1 -z --untracked-files=normal
+        emit find . -path ./.git -prune -o -name .git -print -quit
+        """
+        let result = try run(cwd, "/bin/bash", ["-o", "pipefail", "-c", snapshot])
+        guard result.ok else { throw MessageError("worktree snapshot: \(result.stderr) \(result.stdout)") }
+        var lines = result.stdout.components(separatedBy: "\n")
+        // Require the final terminator as well as all nine fields.
+        guard lines.count == 10, lines.removeLast().isEmpty else {
+            throw MessageError("incomplete worktree snapshot")
         }
-        func git(_ dir: String, _ args: [String]) throws -> String {
-            try command(dir, "git", args).trimmingCharacters(in: .newlines)
+        let fields = try lines.map { line -> String in
+            guard let data = Data(base64Encoded: line), data.base64EncodedString() == line,
+                  let value = String(data: data, encoding: .utf8) else {
+                throw MessageError("malformed worktree snapshot")
+            }
+            return value
         }
-        let path = try git(cwd, ["rev-parse", "--show-toplevel"])
-        let common = try git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        let registration = try command(path, "git", ["worktree", "list", "--porcelain", "-z"])
+        func scalar(_ index: Int) -> String {
+            fields[index].hasSuffix("\n") ? String(fields[index].dropLast()) : fields[index]
+        }
+        let path = fields[0]
+        let common = scalar(1)
+        guard path.hasPrefix("/"), common.hasPrefix("/"),
+              !path.contains("\0"), !common.contains("\0") else {
+            throw MessageError("invalid worktree snapshot paths")
+        }
+        let registration = fields[2]
+        guard registration.hasSuffix("\0\0") else { throw MessageError("incomplete worktree registration") }
         let records = registration.components(separatedBy: "\0\0").filter { !$0.isEmpty }
             .map { $0.components(separatedBy: "\0") }
         guard let primary = records.first?.first, primary.hasPrefix("worktree ") else {
@@ -69,7 +123,7 @@ public extension WorktreeKit {
               !record.contains(where: { $0 == "locked" || $0.hasPrefix("locked ") || $0.hasPrefix("prunable") }) else {
             throw MessageError("worktree is not uniquely registered or is locked/prunable")
         }
-        let ref = try git(path, ["symbolic-ref", "--quiet", "HEAD"])
+        let ref = scalar(3)
         guard ref.hasPrefix("refs/heads/"), record.contains("branch " + ref),
               records.filter({ $0.contains("branch " + ref) }).count == 1 else {
             throw MessageError("worktree has no unique local Git branch")
@@ -77,47 +131,44 @@ public extension WorktreeKit {
         let branch = String(ref.dropFirst(11))
         // A nested checkout may have no Rex pane and can belong to another
         // repository. Never let Force remove its Git metadata through a parent.
-        let nested = try command(path, "find", [".", "-path", "./.git", "-prune", "-o", "-name", ".git", "-print", "-quit"])
-            .trimmingCharacters(in: .newlines)
+        let nested = scalar(8)
         guard nested.isEmpty else {
             throw MessageError("Cannot delete this worktree: nested Git metadata found at `\(nested)`.")
         }
-        let head = try git(path, ["rev-parse", "--verify", "HEAD"])
-        guard record.contains("HEAD " + head), try git(repo, ["rev-parse", "--verify", ref]) == head else {
+        let head = scalar(4)
+        var refs: [String: String] = [:]
+        for line in fields[5].split(separator: "\n") {
+            let pair = line.split(separator: " ", omittingEmptySubsequences: false)
+            guard pair.count == 2, pair[1].hasPrefix("refs/heads/"), refs[String(pair[1])] == nil else {
+                throw MessageError("malformed local branch snapshot")
+            }
+            refs[String(pair[1])] = String(pair[0])
+        }
+        guard !head.isEmpty, record.contains("HEAD " + head), refs[ref] == head else {
             throw MessageError("worktree branch changed during inspection")
         }
-        let listing = try command(repo, "wt", ["--config-set", "list.json-schema=2", "--config-set", "list.full=false", "list", "--format=json"])
-        guard let object = try JSONSerialization.jsonObject(with: Data(listing.utf8)) as? [String: Any],
+        guard let object = try JSONSerialization.jsonObject(with: Data(fields[6].utf8)) as? [String: Any],
+              object["schema"] as? Int == 2,
               let info = object["repo"] as? [String: Any], let base = info["default_branch"] as? String,
-              !base.isEmpty else { throw MessageError("cannot determine Worktrunk default branch") }
-        let defaultHead = try git(repo, ["rev-parse", "--verify", "refs/heads/" + base])
-        let merged = try run(repo, "git", ["merge-base", "--is-ancestor", head, defaultHead])
-        guard merged.code == 0 || merged.code == 1 else { throw MessageError("cannot check unmerged commits") }
-        let status = try command(path, "git", ["status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignored=matching"])
-        let diff = try command(path, "git", ["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"])
-            + command(path, "git", ["diff", "--cached", "--no-ext-diff", "--no-textconv", "HEAD", "--"])
-        // Archive the listed entries without following symlinks, including
-        // ignored dependencies. NUL-delimited names support every Git filename.
-        // Stream SHA-256 on the host; never buffer a dependency tree in Git or
-        // send its contents through Rex. pipefail keeps producer errors fatal.
-        let fingerprint = """
-        export COPYFILE_DISABLE=1
-        if command -v sha256sum >/dev/null 2>&1; then
-          digest() { sha256sum; }
-        elif command -v shasum >/dev/null 2>&1; then
-          digest() { shasum -a 256; }
-        elif command -v openssl >/dev/null 2>&1; then
-          digest() { openssl dgst -sha256; }
-        else
-          printf '%s\\n' 'SHA-256 tool required: sha256sum, shasum, or openssl' >&2
-          exit 1
-        fi
-        git ls-files --others -z | tar --no-xattrs --no-acls -cf - --null -T - | digest
-        """
-        let hashes = try command(path, "/bin/bash", ["-o", "pipefail", "-c", fingerprint])
+              !base.isEmpty, let defaultHead = refs["refs/heads/" + base] else {
+            throw MessageError("cannot determine Worktrunk default branch")
+        }
+        let rows = (object["items"] as? [[String: Any]] ?? []).filter {
+            ($0["worktree"] as? [String: Any])?["path"] as? String == path
+        }
+        guard rows.count == 1, let row = rows.first, row["branch"] as? String == branch,
+              (row["head"] as? [String: Any])?["sha"] as? String == head else {
+            throw MessageError("Worktrunk worktree identity changed during inspection")
+        }
+        let relation = row["default_branch"] as? [String: Any]
+        let integration = relation?["integration"] as? [String: Any]
+        // Never infer integration from display.state: dirty trees can still
+        // have integrated commits. Missing/unknown checks require Force.
+        let reasons: Set<String> = ["same_commit", "ancestor", "no_added_changes", "trees_match", "merge_adds_nothing", "patch_id_match"]
+        let integrated = (integration?["reason"] as? String).map { reasons.contains($0) } ?? false
         return DeletionPlan(repo: repo, path: path, branch: branch, head: head, registration: registration,
                             commonDir: common, defaultBranch: base, defaultHead: defaultHead,
-                            status: status, diff: diff, fileHashes: hashes, unmerged: merged.code == 1)
+                            status: fields[7], diff: "", fileHashes: "", unmerged: !integrated)
     }
 
     /// Call only with a freshly revalidated plan. Worktrunk owns both removals;
@@ -133,7 +184,7 @@ public extension WorktreeKit {
         }
         guard force || !plan.needsForce else {
             return DeletionOutcome(worktreeRemoved: false, branchRemoved: false,
-                                   error: "worktree has dirty/ignored files or unmerged commits")
+                                   error: "worktree has uncommitted changes or unmerged commits")
         }
         var args = ["remove", "--foreground", "--format=json", "--no-hooks", "--yes"]
         if force { args += ["--force", "--force-delete"] }

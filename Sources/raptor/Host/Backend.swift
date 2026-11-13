@@ -253,6 +253,9 @@ struct DeletionWorktree: Codable, Sendable, Identifiable {
     var error: String? = nil
     var isPrimary: Bool? = nil
     var needsForce: Bool? = nil
+    var hasChanges: Bool? = nil
+    var hasIgnoredFiles: Bool? = nil
+    var hasUnmergedCommits: Bool? = nil
     var checked: Bool? = nil
     var prepared: Bool? = nil
     var id: String { path }
@@ -260,9 +263,17 @@ struct DeletionWorktree: Codable, Sendable, Identifiable {
     var isPrepared: Bool { prepared != false && error == nil }
     var deletable: Bool { isChecked && error == nil && isPrimary != true && !repo.isEmpty && !path.isEmpty && !branch.isEmpty }
     var retryable: Bool { error != nil && isPrimary != true && !path.isEmpty }
+    var forceWarning: String? {
+        guard isPrepared, needsForce == true else { return nil }
+        var reasons: [String] = []
+        if hasChanges == true { reasons.append("Uncommitted changes") }
+        if hasUnmergedCommits == true { reasons.append("Unmerged commits") }
+        return reasons.isEmpty ? "Force confirmation required" : reasons.joined(separator: " · ") + " — Force required"
+    }
     enum CodingKeys: String, CodingKey {
         case repo, path, branch, error, checked, prepared
         case isPrimary = "is_primary", needsForce = "needs_force"
+        case hasChanges = "has_changes", hasIgnoredFiles = "has_ignored_files", hasUnmergedCommits = "has_unmerged_commits"
     }
 }
 
@@ -284,6 +295,10 @@ struct AgentModelPayload: Codable, Equatable, Sendable {
         case isDefault = "is_default"
     }
     var displayLabel: String { label.flatMap { $0.isEmpty ? nil : $0 } ?? id }
+    var selectionID: String {
+        guard let provider, !provider.isEmpty else { return id }
+        return provider + "/" + id
+    }
 }
 
 struct APIResult: Codable, Sendable {

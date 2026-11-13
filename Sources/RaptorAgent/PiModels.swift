@@ -30,6 +30,20 @@ public enum PiModels {
         return nil
     }
 
+    /// A mise shim resolves to mise itself, not to Pi. Ask that exact manager
+    /// for the active installation; never guess an npm directory or version.
+    static func packageRoot(piPath: String, cwd: String = "") -> String? {
+        let real = URL(fileURLWithPath: piPath).resolvingSymlinksInPath()
+        if let root = packageRoot(realPath: real.path) { return root }
+        guard real.lastPathComponent == "mise",
+              let result = try? Execx.run(dir: cwd.isEmpty ? "/" : cwd, timeout: 5,
+                                         name: real.path, args: ["which", "pi"]), result.ok else { return nil }
+        let installed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard installed.hasPrefix("/"), !installed.contains("\n"),
+              FileManager.default.isExecutableFile(atPath: installed) else { return nil }
+        return packageRoot(realPath: URL(fileURLWithPath: installed).resolvingSymlinksInPath().path)
+    }
+
     /// The ESM helper. Resolves entries from the real installation (never a
     /// global module guess) and prints one JSON line to stdout.
     static let script = """
@@ -46,25 +60,45 @@ public enum PiModels {
     ]) { if (existsSync(cand)) { compatUrl = pathToFileURL(cand).href; break; } }
     if (!compatUrl) throw new Error("pi-ai compat not found near " + pkgRoot);
     const { getAgentDir, ModelRuntime, SettingsManager, resolveModelScopeWithDiagnostics } = await import(mainUrl);
-    const { getSupportedThinkingLevels } = await import(compatUrl);
+    const { getSupportedThinkingLevels, clampThinkingLevel } = await import(compatUrl);
+    const { DEFAULT_THINKING_LEVEL } = await import(pathToFileURL(pkgRoot + "/dist/core/defaults.js").href);
+    const { findInitialModel } = await import(pathToFileURL(pkgRoot + "/dist/core/model-resolver.js").href);
     const agentDir = getAgentDir();
-    const cwd = process.env.RAPTOR_CWD || process.cwd();
-    let settings;
-    try { settings = await SettingsManager.create(cwd, agentDir, { projectTrusted: false }); }
-    catch (e) { settings = await SettingsManager.create(cwd, agentDir); }
+    const cwd = process.cwd();
+    const settings = await SettingsManager.create(cwd, agentDir, { projectTrusted: false });
     const runtime = await ModelRuntime.create({ allowModelNetwork: false, signal: AbortSignal.timeout(15000) });
     const available = await runtime.getAvailable(undefined, { signal: AbortSignal.timeout(15000) });
     const patterns = settings.getEnabledModels();
     const result = patterns?.length
       ? await resolveModelScopeWithDiagnostics(patterns, runtime, { signal: AbortSignal.timeout(15000) })
       : { scopedModels: available.map(m => ({ model: m })), diagnostics: [] };
+    // Match the CLI's fresh-session selection: a saved model in scope wins;
+    // otherwise Pi selects from the scope. Without a scope, use its resolver.
+    const scoped = patterns?.length ? result.scopedModels : [];
+    const saved = scoped.find(e => e.model.provider === settings.getDefaultProvider()
+      && e.model.id === settings.getDefaultModel());
+    const initial = await findInitialModel({
+      scopedModels: saved ? [saved] : scoped,
+      isContinuing: false,
+      defaultProvider: settings.getDefaultProvider(),
+      defaultModelId: settings.getDefaultModel(),
+      defaultThinkingLevel: settings.getDefaultThinkingLevel(),
+      modelThinkingLevels: settings.getAllModelThinkingLevels(),
+      modelRuntime: runtime,
+    });
     const models = result.scopedModels.map((e) => {
       const m = e.model ?? e;
       let id; try { id = m.id ?? m.modelId ?? m.model ?? String(m); } catch { id = String(m); }
       let provider; try { provider = m.provider ?? ""; } catch { provider = ""; }
       let label; try { label = m.displayName ?? m.name ?? id; } catch { label = id; }
       let levels = []; try { levels = getSupportedThinkingLevels(m); } catch {}
-      return { id, provider, label, reasoning: Array.isArray(levels) ? levels : [], scopeDefault: e.thinkingLevel ?? "" };
+      const thinking = e.thinkingLevel
+        ?? settings.getModelThinkingLevel(provider, id)
+        ?? settings.getDefaultThinkingLevel()
+        ?? DEFAULT_THINKING_LEVEL;
+      return { id, provider, label, reasoning: Array.isArray(levels) ? levels : [],
+        defaultReasoning: clampThinkingLevel(m, thinking),
+        isDefault: initial.model?.id === id && initial.model?.provider === provider };
     });
     process.stdout.write(JSON.stringify({ models, warnings: (result.diagnostics ?? []).map(d => String(d?.message ?? d)).slice(0, 5) }));
     """
@@ -79,8 +113,7 @@ public enum PiModels {
         guard let node = locateNode() else {
             return AgentCatalog(agent: "pi", models: [], warning: "node not found on PATH; node is required to enumerate Pi models")
         }
-        let realPath = URL(fileURLWithPath: piPath).resolvingSymlinksInPath().path
-        guard let pkgRoot = packageRoot(realPath: realPath.isEmpty ? piPath : realPath) else {
+        guard let pkgRoot = packageRoot(piPath: piPath, cwd: cwd) else {
             return AgentCatalog(agent: "pi", models: [], warning: "could not locate the installed Pi package from " + piPath)
         }
         let scriptPath = scriptPath()
@@ -88,12 +121,6 @@ public enum PiModels {
             try Data(Self.script.utf8).write(to: URL(fileURLWithPath: scriptPath), options: .atomic)
         } catch {
             return AgentCatalog(agent: "pi", models: [], warning: "could not write Pi discovery helper: \(error)")
-        }
-        var environment = ProcessInfo.processInfo.environment
-        if !cwd.isEmpty { environment["RAPTOR_CWD"] = cwd }
-        setenv("RAPTOR_CWD", cwd, 1)
-        defer {
-            if cwd.isEmpty { unsetenv("RAPTOR_CWD") }
         }
         let result: ExecResult
         do {
@@ -123,7 +150,8 @@ public enum PiModels {
             if let provider = row["provider"] as? String { model.provider = provider }
             if let label = row["label"] as? String { model.label = label }
             if let reasoning = row["reasoning"] as? [String] { model.reasoning = reasoning }
-            if let scopeDefault = row["scopeDefault"] as? String { model.defaultReasoning = scopeDefault }
+            if let reasoning = row["defaultReasoning"] as? String { model.defaultReasoning = reasoning }
+            if let isDefault = row["isDefault"] as? Bool { model.isDefault = isDefault }
             return model
         }
         let warnings = (obj["warnings"] as? [String] ?? []).filter { !$0.isEmpty }

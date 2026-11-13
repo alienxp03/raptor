@@ -30,8 +30,12 @@ public enum AgentCatalogStore {
         }
     }
 
+    // v1 lacks resolved Pi defaults and Codex configured overrides. Reject it
+    // even as stale data, including entries decoded with field fallbacks.
+    static let cacheVersion = 2
+
     struct CacheFile: Codable {
-        var version: Int = 1
+        var version: Int = AgentCatalogStore.cacheVersion
         var entries: [String: CacheEntry] = [:]
     }
 
@@ -41,7 +45,8 @@ public enum AgentCatalogStore {
 
     static func loadCache() -> CacheFile {
         guard let data = FileManager.default.contents(atPath: cachePath()),
-              let file = try? JSONDecoder().decode(CacheFile.self, from: data) else { return CacheFile() }
+              let file = try? JSONDecoder().decode(CacheFile.self, from: data),
+              file.version == cacheVersion else { return CacheFile() }
         return file
     }
 

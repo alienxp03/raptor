@@ -79,7 +79,33 @@ final class DeletionRexTests: XCTestCase {
         setenvTemp("DELETE_BLOCK_HOST", "remote-id")
         setenvTemp("DELETE_CWD", "")
         XCTAssertThrowsError(try Rex.deletionSessionState("devbox", "session:target"))
+        XCTAssertThrowsError(try Rex.deletionSessionState("devbox", "session:target", allowingMissingDirectoriesForBlocks: ["block:other"]))
+        let removed = try Rex.deletionSessionState("devbox", "session:target", allowingMissingDirectoriesForBlocks: ["block:user"])
+        XCTAssertEqual(removed.blockDirectories, ["block:user": ""])
         XCTAssertThrowsError(try Rex.deletionSessionState("devbox", "target"))
+    }
+
+    func testDeletionProgressAllowsOnlyAlreadyRemovedPanesToChangeDirectory() {
+        let original = DeletionSessionState(hostID: "host", sessionID: "session:target",
+            directories: ["/trees/one/subdir", "/trees/two"], blocks: ["block:one", "block:two"],
+            blockDirectories: ["block:one": "/trees/one/subdir", "block:two": "/trees/two"])
+        func live(_ first: String, second: String = "/trees/two", host: String = "host",
+                  blocks: [String] = ["block:one", "block:two"]) -> DeletionSessionState {
+            DeletionSessionState(hostID: host, sessionID: "session:target", directories: [first, second].sorted(),
+                blocks: blocks, blockDirectories: ["block:one": first, "block:two": second])
+        }
+        let relocated = live("/repo/.git/wt/trash/one-1794588694/subdir")
+        XCTAssertFalse(original.matchesDeletionProgress(relocated, removed: []))
+        XCTAssertTrue(original.matchesDeletionProgress(relocated, removed: ["/trees/one"]))
+        XCTAssertTrue(original.matchesDeletionProgress(live(""), removed: ["/trees/one"]))
+        XCTAssertFalse(original.matchesDeletionProgress(relocated, removed: ["/trees/on"]))
+        XCTAssertFalse(original.matchesDeletionProgress(live("", second: "/different/project"), removed: ["/trees/one"]))
+        XCTAssertFalse(original.matchesDeletionProgress(live("", host: "another"), removed: ["/trees/one"]))
+        XCTAssertFalse(original.matchesDeletionProgress(live("", blocks: ["block:new", "block:two"]), removed: ["/trees/one"]))
+        XCTAssertTrue(original.matchesDeletionProgress(live("", second: ""), removed: ["/trees/one", "/trees/two"]))
+        let legacy = DeletionSessionState(hostID: "host", sessionID: "session:target",
+            directories: original.directories, blocks: original.blocks)
+        XCTAssertFalse(legacy.matchesDeletionProgress(relocated, removed: ["/trees/one"]), "Missing pane mappings must not relax validation")
     }
 
     func testRemoteFramingPreservesBinaryStdoutAndSeparateStderr() throws {

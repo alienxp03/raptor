@@ -26,8 +26,16 @@ private final class DeleteFixture {
         calls.append((dir, name, args))
         if transportError { throw MessageError("transport unavailable") }
         if name == "test" { return ExecResult(code: removed ? 1 : 0) }
-        if name == "find" { return ExecResult() }
-        if name == "/bin/bash" { return ExecResult(stdout: "fixture-file-digest") }
+        if name == "/bin/bash" {
+            let registration = "worktree /fixture/repo\0HEAD base\0branch refs/heads/main\0\0"
+                + (removed ? "" : "worktree /fixture/tree\0HEAD \(head)\0branch refs/heads/feat/task\0\0")
+            let reason = unmerged ? "{}" : "{\"reason\":\"ancestor\"}"
+            let json = "{\"schema\":2,\"repo\":{\"default_branch\":\"main\"},\"items\":[{\"branch\":\"feat/task\",\"head\":{\"sha\":\"\(head)\"},\"worktree\":{\"path\":\"/fixture/tree\"},\"default_branch\":{\"integration\":\(reason)}}]}"
+            let fields = [primary ? "/fixture/repo" : dir, "/fixture/repo/.git", registration,
+                detached ? "" : "refs/heads/feat/task", head,
+                "base refs/heads/main\n\(head) refs/heads/feat/task\n", json, dirty ? "?? dirty\0" : "", ""]
+            return ExecResult(stdout: fields.map { Data($0.utf8).base64EncodedString() }.joined(separator: "\n") + "\n")
+        }
         if name == "wt" {
             if args.first == "remove" {
                 if removalFails { return ExecResult(stderr: "arbitrary Worktrunk failure", code: 1) }
@@ -44,9 +52,6 @@ private final class DeleteFixture {
         }
         if args.first == "symbolic-ref" { return detached ? ExecResult(code: 1) : ExecResult(stdout: "refs/heads/feat/task\n") }
         if args.first == "rev-parse" { return ExecResult(stdout: args.last == "refs/heads/main" ? "base\n" : head + "\n") }
-        if args.first == "merge-base" { return ExecResult(code: unmerged ? 1 : 0) }
-        if args.first == "status" { return ExecResult(stdout: dirty ? "?? dirty\0" : "") }
-        if args.first == "diff" || args.first == "ls-files" { return ExecResult() }
         if args.first == "show-ref" { return ExecResult(code: removed && !retainedBranch ? 1 : 0) }
         XCTFail("unexpected command: \(name) \(args)")
         return ExecResult(code: 2)

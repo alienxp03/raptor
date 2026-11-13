@@ -43,13 +43,21 @@ struct AgentOptionPopover: View {
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ForEach(options) { option in
-                    row(option).id(option.id)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(options) { option in row(option).id(option.id) }
+                        }
+                    }
+                    .frame(height: min(options.reduce(CGFloat.zero) {
+                        $0 + PickerStyle.rowHeight + ($1.detail == nil ? 0 : 10)
+                    }, 300))
+                    .onChange(of: selected, initial: true) { _, id in proxy.scrollTo(id) }
                 }
             }
         }
         .padding(.vertical, 4)
-        .frame(width: 250)
+        .frame(width: 380)
         .pickerGlass()
         .focusable()
         .focused($keyboardFocused)
@@ -70,6 +78,8 @@ struct AgentOptionPopover: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(option.label)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(option.label)
                         .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                         .foregroundStyle(isSelected ? PickerStyle.selectionText : PickerStyle.foreground)
                     if let detail = option.detail, !detail.isEmpty {

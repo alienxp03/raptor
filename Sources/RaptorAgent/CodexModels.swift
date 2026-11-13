@@ -36,12 +36,53 @@ public enum CodexModels {
                 models += data.compactMap(Self.model(from:))
                 cursor = result["nextCursor"] as? String
             } while cursor != nil && page < 10
-            session.close()
-            return AgentCatalog(agent: "codex", models: models)
+            // model/list reports catalog defaults, not config.toml overrides.
+            // config/read asks Codex to resolve its own settings (including profiles).
+            var config: [String: Any]?
+            do {
+                let response = try session.request(id: 100, method: "config/read", params: ["includeLayers": false])
+                config = (response["result"] as? [String: Any])?["config"] as? [String: Any]
+                session.close()
+            } catch {
+                session.kill()
+            }
+            guard let config else {
+                // Older servers may not support config/read. Do not advertise a
+                // catalog recommendation as the user's effective default model.
+                models = models.map {
+                    var model = $0
+                    model.isDefault = false
+                    model.defaultReasoning = ""
+                    return model
+                }
+                return AgentCatalog(agent: "codex", models: models,
+                    warning: "Codex configured defaults unavailable: config/read did not return settings")
+            }
+            return AgentCatalog(agent: "codex", models: applying(config: config, to: models))
         } catch {
             session.kill()
             return AgentCatalog(agent: "codex", models: [], warning: "Codex model discovery failed: " + describe(error))
         }
+    }
+
+    /// Config overrides apply to explicit model launches too. Missing config
+    /// values preserve the server's model defaults; no model/effort is invented.
+    static func applying(config: [String: Any], to models: [AgentModel]) -> [AgentModel] {
+        let configuredModel = (config["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let effort = (config["model_reasoning_effort"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        var resolved = models.map { original in
+            var model = original
+            if let configuredModel { model.isDefault = model.id == configuredModel }
+            if let effort { model.defaultReasoning = effort }
+            return model
+        }
+        // Custom configured models need not appear in model/list. Keep the exact
+        // configured identity; do not manufacture supported reasoning levels.
+        if let configuredModel, !resolved.contains(where: { $0.id == configuredModel }) {
+            resolved.append(AgentModel(id: configuredModel, label: configuredModel,
+                defaultReasoning: effort ?? "", isDefault: true))
+        }
+        return resolved
     }
 
     struct MessageError: Error, CustomStringConvertible {

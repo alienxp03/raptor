@@ -3,7 +3,7 @@ import RaptorRex
 import RaptorWorktree
 
 /// Only the selected registration is frozen here. Full plans also freeze the
-/// complete registration list and content fingerprints before any mutation.
+/// complete registration list, status and branch heads before any mutation.
 struct WorktreeReviewIdentity: Equatable {
     var path: String
     var repo: String
@@ -23,6 +23,24 @@ struct WorktreeReviewIdentity: Equatable {
         let record = plan.registration.components(separatedBy: "\0\0")
             .first { $0.components(separatedBy: "\0").first == "worktree " + plan.path } ?? ""
         self.init(path: plan.path, repo: plan.repo, branch: plan.branch, head: plan.head, registration: record)
+    }
+}
+
+/// Workers publish rows here, never through a Handler or ticket reference.
+private final class PreparedWorktreeRows: @unchecked Sendable {
+    private let lock = NSLock()
+    private var rows: [String: WorktreeReviewRow] = [:]
+
+    func store(_ row: WorktreeReviewRow) {
+        lock.lock()
+        defer { lock.unlock() }
+        rows[row.path] = row
+    }
+
+    func snapshot() -> [String: WorktreeReviewRow] {
+        lock.lock()
+        defer { lock.unlock() }
+        return rows
     }
 }
 
@@ -95,8 +113,27 @@ extension Handler {
         if let frozen = ticket.frozenSelection, frozen != selection {
             throw MessageError("Preparation selection changed; preview again")
         }
-        let path = try Params.string(obj, "path")
-        guard selection.contains(path), let index = ticket.rows.firstIndex(where: { $0.path == path }) else {
+        let batch: [String]
+        if let node = obj.field("paths") {
+            guard case .array(let values) = node.value, (1...2).contains(values.count) else {
+                throw MessageError("paths must contain one or two unique strings")
+            }
+            batch = try values.map { node in
+                guard case .string(let path) = node.value else { throw MessageError("paths must contain strings") }
+                return path
+            }
+            guard Set(batch).count == batch.count else {
+                throw MessageError("paths must contain one or two unique strings")
+            }
+            if obj.field("path") != nil {
+                guard try Params.string(obj, "path") == batch.first else {
+                    throw MessageError("path must match the first paths entry")
+                }
+            }
+        } else {
+            batch = [try Params.string(obj, "path")]
+        }
+        guard batch.allSatisfy({ path in selection.contains(path) && ticket.rows.contains { $0.path == path } }) else {
             throw MessageError("Prepare path must be in the selected worktrees")
         }
         let state = try loadDeletionSession?(ticket.host, ticket.session.sessionID)
@@ -104,35 +141,52 @@ extension Handler {
         guard state == ticket.session else { throw MessageError("Session changed; preview again") }
         ticket.frozenSelection = selection
         ticket.metadataRows = baseline
-        // A successful plan is immutable. Failed scans retain the baseline and
-        // token so Retry uses the same identity and exact frozen selection.
-        if ticket.rows[index].prepared && ticket.rows[index].plan != nil { return }
-        var row = ticket.rows[index]
-        row.error = nil
-        do {
-            let run = deletionRunner(ticket.host, ticket.session.sessionID, ticket.session.hostID)
-            // Reject identity changes before spending time on content hashes.
-            let root = try run(path, "git", ["rev-parse", "--show-toplevel"])
-            guard root.ok, root.stdout.trimmingCharacters(in: .newlines) == path else {
-                throw MessageError("Worktree changed; preview again")
-            }
-            let fresh = inspectReviewMetadata(path, run: run)
-            if let error = fresh.error { throw MessageError(error) }
-            let identity = baseline.first { $0.path == path }?.metadata
-            guard fresh.metadata == identity else { throw MessageError("Worktree identity changed; preview again") }
-            let plan = try WorktreeKit.inspectDeletion(cwd: path, run: run)
-            guard WorktreeReviewIdentity(plan) == identity else {
-                throw MessageError("Worktree identity changed; preview again")
-            }
-            row.plan = plan
-            row.prepared = true
-        } catch {
-            row.error = String(describing: error)
-            row.prepared = false
+        // Copy all inputs and create independent runners on the request thread.
+        // Successful plans are immutable, including when a sibling needs Retry.
+        let jobs = batch.compactMap { path -> (WorktreeReviewRow, WorktreeReviewIdentity?, DeletionCommand)? in
+            guard let row = ticket.rows.first(where: { $0.path == path }),
+                  !(row.prepared && row.plan != nil) else { return nil }
+            return (row, baseline.first { $0.path == path }?.metadata,
+                    deletionRunner(ticket.host, ticket.session.sessionID, ticket.session.hostID))
         }
-        ticket.rows[index] = row
-        for source in ticket.sourceRows.keys where ticket.sourceRows[source]?.path == path {
-            ticket.sourceRows[source] = row
+        guard !jobs.isEmpty else { return }
+        let results = PreparedWorktreeRows()
+        let group = DispatchGroup()
+        // Validated batch size bounds concurrency to two, inside this serial request.
+        for (original, identity, run) in jobs {
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                defer { group.leave() }
+                var row = original
+                row.error = nil
+                do {
+                    let plan = try WorktreeKit.inspectDeletion(cwd: row.path, run: run)
+                    guard WorktreeReviewIdentity(plan) == identity else {
+                        throw MessageError("Worktree identity changed; preview again")
+                    }
+                    row.plan = plan
+                    row.prepared = true
+                } catch {
+                    row.error = String(describing: error)
+                    row.prepared = false
+                }
+                results.store(row)
+            }
+        }
+        group.wait()
+        // Helpers have closed now. Do not snapshot their temporary Rex blocks.
+        let after = try loadDeletionSession?(ticket.host, ticket.session.sessionID)
+            ?? Rex.deletionSessionState(ticket.host, ticket.session.sessionID)
+        guard after == ticket.session else { throw MessageError("Session changed; preview again") }
+        let prepared = results.snapshot()
+        // Merge by exact path, not completion order; keep row and source order.
+        for index in ticket.rows.indices {
+            if let row = prepared[ticket.rows[index].path] { ticket.rows[index] = row }
+        }
+        for source in ticket.sourceRows.keys {
+            if let path = ticket.sourceRows[source]?.path, let row = prepared[path] {
+                ticket.sourceRows[source] = row
+            }
         }
     }
 

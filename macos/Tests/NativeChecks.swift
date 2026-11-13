@@ -257,7 +257,7 @@ struct NativeChecks {
         require(!model.canPin, "Checkout confirmation must block pinning")
         model.prCommitConfirmationPresented = false
         await backend.hold("sessions.delete.preview")
-        model.beginDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
         try await pending("sessions.delete.preview", backend)
         require(!model.canPin, "Delete confirmation must block pinning")
         model.cancelDeleteSession()
@@ -469,7 +469,7 @@ struct NativeChecks {
     @MainActor private static func sessionDeletionChecks() async throws {
         for method in ["sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare"] {
             require(ProcessBackend.timeoutSeconds(for: method) == 180,
-                    "Worktree review must allow time to fingerprint large dependency trees")
+                    "Worktree review must tolerate slow remote hosts without treating its timeout as a performance target")
         }
         let backend = CachedListBackend()
         await backend.hold("sessions.delete.preview")
@@ -485,11 +485,11 @@ struct NativeChecks {
         await backend.reply("sessions", payload)
         try await wait { !model.refreshing }
         model.selectedID = "/repo/feature"
-        model.beginDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
         require(model.sessionDeletion == nil, "Directory rows must not delete sessions")
         model.selectedID = candidate.id
         let listHeight = PickerStyle.height(for: model)
-        model.beginDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
         try await pending("sessions.delete.preview", backend)
         model.escape()
         await backend.reply("sessions.delete.preview", plan)
@@ -498,7 +498,7 @@ struct NativeChecks {
                 "Cancel must restore the original list size and selection; stale previews must not reopen Delete")
 
         for attempt in 0..<3 {
-            model.beginDeleteSession()
+            model.beginDeleteSession(automaticallyVerify: false)
             try await pending("sessions.delete.preview", backend)
             await backend.reply("sessions.delete.preview", plan)
             try await wait { model.sessionDeletion?.phase == .confirm }
@@ -579,7 +579,7 @@ struct NativeChecks {
             try await pending("sessions", partialBackend)
             await partialBackend.reply("sessions", payload)
             try await wait { !partial.refreshing }
-            partial.beginDeleteSession()
+            partial.beginDeleteSession(automaticallyVerify: false)
             try await pending("sessions.delete.preview", partialBackend)
             await partialBackend.reply("sessions.delete.preview", plan)
             try await wait { partial.sessionDeletion?.phase == .confirm }
@@ -600,8 +600,12 @@ struct NativeChecks {
             partial.close()
         }
         try await multiWorktreeDeletionChecks()
+        try await deletionKeyboardChecks()
         try await progressiveWorktreeReviewChecks()
+        try deletionWarningChecks()
+        try await automaticDeletionChecks()
         try await fastPreparationChecks()
+        try await parallelPreparationChecks()
         print("PASS: worktree review, explicit session-close consent, protected rows, selected-only deletion, two-step Force, partial outcomes, and busy reopen")
     }
 
@@ -623,7 +627,7 @@ struct NativeChecks {
             try await pending("sessions", backend)
             await backend.reply("sessions", APIResult(items: rows, targets: ["session"], target: "session"))
             try await wait { !model.refreshing }
-            model.beginDeleteSession()
+            model.beginDeleteSession(automaticallyVerify: false)
             try await pending("sessions.delete.preview", backend)
             let previewParams = await backend.parameters("sessions.delete.preview")
             guard case .flag(true) = previewParams["review_worktrees"] else { testFailure("Preview must request multi-worktree review") }
@@ -640,6 +644,8 @@ struct NativeChecks {
             model.confirmDeleteSession()
             require(await backend.count("sessions.delete") == 0, "Empty selection must send no mutation")
             model.selectDeletionWorktree("/one/feature", selected: true)
+            require(!model.canConfirmSessionDeletion, "Changing checkboxes requires fresh close-session consent")
+            model.confirmDeletionSessionClose(true)
             require(model.canConfirmSessionDeletion)
             model.confirmDeleteSession()
             try await pending("sessions.delete", backend)
@@ -684,7 +690,7 @@ struct NativeChecks {
         try await wait { !model.refreshing }
         let one = DeletionWorktree(repo: "/one", path: "/one/feature", branch: "feature", checked: true)
         let two = DeletionWorktree(repo: "/two", path: "/two/fix", branch: "fix", checked: true)
-        model.beginDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
         try await pending("sessions.delete.preview", backend)
         guard case .flag(true) = await backend.parameters("sessions.delete.preview")["discover_only"] else {
             testFailure("Opening Delete must request only Rex directory discovery")
@@ -719,11 +725,13 @@ struct NativeChecks {
         }
         await backend.reply("sessions.delete.check", APIResult(deleteToken: "progress", worktrees: [one, two]))
         try await wait { model.sessionDeletion?.checkingPath == nil }
-        require(model.sessionDeletion?.selectedPaths == [two.path] && model.canConfirmSessionDeletion,
-                "Retry must select newly ready worktrees without resetting prior deselections")
+        require(model.sessionDeletion?.selectedPaths == [two.path] && !model.canConfirmSessionDeletion,
+                "Retry must preserve deselections, but consent given before verification must not carry forward")
+        model.confirmDeletionSessionClose(true)
+        require(model.canConfirmSessionDeletion)
         model.escape()
 
-        model.beginDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
         try await pending("sessions.delete.preview", backend)
         await backend.reply("sessions.delete.preview", APIResult(deleteToken: "transport", worktrees: [discovered[1], discovered[2]]))
         try await pending("sessions.delete.check", backend)
@@ -740,7 +748,7 @@ struct NativeChecks {
         require(model.sessionDeletion == nil && model.selectedID == candidate.id,
                 "Cancel must suppress late per-row replies and keep the original selection")
 
-        model.beginDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
         try await pending("sessions.delete.preview", backend)
         await backend.reply("sessions.delete.preview", APIResult(deleteToken: "stale", worktrees: [discovered[1]]))
         try await pending("sessions.delete.check", backend)
@@ -756,9 +764,246 @@ struct NativeChecks {
         model.close()
     }
 
-    @MainActor private static func fastPreparationChecks() async throws {
+    @MainActor private static func deletionKeyboardChecks() async throws {
+        let backend = CachedListBackend()
+        for method in ["sessions.delete.preview", "sessions.delete.prepare", "sessions.delete.check", "sessions.delete"] {
+            await backend.hold(method)
+        }
+        let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        let candidate = PickerItem(path: "session:keyboard", kind: "session", sessionID: "session:keyboard", host: "Mac")
+        model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: [candidate], targets: ["session"], target: "session"))
+        try await wait { !model.refreshing }
+        let one = DeletionWorktree(repo: "/one", path: "/one/feature", branch: "feature", checked: true, prepared: false)
+        let two = DeletionWorktree(repo: "/two", path: "/two/feature", branch: "feature", checked: true, prepared: false)
+        let locked = DeletionWorktree(repo: "/main", path: "/main", branch: "main", isPrimary: true, checked: true)
+        let preview = APIResult(deleteToken: "keyboard", worktrees: [one, locked, two])
+        func key(_ code: UInt16, _ text: String = "", _ flags: NSEvent.ModifierFlags = [], repeat repeated: Bool = false) {
+            require(model.handleDeletionKeyboard(code: code, characters: text, modifiers: flags, isRepeat: repeated))
+        }
+        model.beginDeleteSession(automaticallyVerify: false)
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", preview)
+        try await wait { model.sessionDeletion?.phase == .review }
+        require(model.deletionKeyboardFocus == .worktree(one.path))
+        model.focusDeletionControl(.worktree(locked.path))
+        require(model.deletionKeyboardFocus == .worktree(one.path), "Protected targets must reject focus")
+        key(125, repeat: true)
+        require(model.deletionKeyboardFocus == .worktree(two.path), "Arrows skip locked rows")
+        key(126)
+        require(model.deletionKeyboardFocus == .worktree(one.path))
+        key(125)
+        key(49, " ", [.capsLock, .function])
+        require(model.sessionDeletion?.selectedPaths == [one.path])
+        key(49, " ", repeat: true)
+        require(model.sessionDeletion?.selectedPaths == [one.path], "Repeated Space must not change selection")
+        key(48)
+        require(model.deletionKeyboardFocus == .action)
+        key(48)
+        require(model.deletionKeyboardFocus == .cancel)
+        key(125)
+        require(model.deletionKeyboardFocus == .worktree(one.path), "Down must wrap")
+        key(48, "\t", .shift)
+        require(model.deletionKeyboardFocus == .cancel, "BackTab must wrap")
+        key(0, "k", .control)
+        require(model.deletionKeyboardFocus == .action)
+        key(0, "j", .control)
+        require(model.deletionKeyboardFocus == .cancel)
+        require(!model.handleDeletionKeyboard(code: 8, characters: "c", modifiers: .command), "Copy must reach the text selection")
+        model.focusDeletionControl(.worktree(one.path))
+        key(36, "\r", repeat: true)
+        require(model.sessionDeletion?.phase == .review)
+        model.focusDeletionControl(.cancel)
+        key(36, "\r", .command, repeat: true)
+        require(model.sessionDeletion?.phase == .review)
+        key(36, "\r", .command)
+        try await pending("sessions.delete.prepare", backend)
+        require(model.sessionDeletion?.selectedPaths == [one.path], "Cmd+Enter prepares regardless of focus, without toggling")
+        require(model.deletionKeyboardFocus == .cancel)
+        model.focusDeletionControl(.worktree(two.path))
+        model.selectDeletionWorktree(two.path, selected: true)
+        require(model.sessionDeletion?.selectedPaths == [one.path])
+        var failed = one
+        failed.error = "Retry verification"
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "keyboard", worktrees: [failed, locked, two]))
+        try await wait { model.sessionDeletion?.checkingPath == nil }
+        model.focusDeletionControl(.retry(one.path))
+        require(model.deletionKeyboardFocus == .retry(one.path))
+        key(36)
+        try await pending("sessions.delete.prepare", backend)
+        var ready = one
+        ready.prepared = true
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "keyboard", worktrees: [ready, locked, two]))
+        try await wait { model.sessionDeletion?.phase == .confirm }
+        require(model.deletionKeyboardFocus == .closeSession, "Preparation must focus consent, never Delete")
+        model.focusDeletionControl(.worktree(two.path))
+        require(model.deletionKeyboardFocus == .closeSession, "Frozen confirmation has no worktree targets")
+        key(36, "\r")
+        key(76, "\r", .command)
+        require(model.sessionDeletion?.closeSessionConfirmed == false,
+                "Enter and Cmd+Enter must never grant close-session consent")
+        require(await backend.count("sessions.delete") == 0)
+        key(49, " ")
+        key(49, " ", repeat: true)
+        require(model.sessionDeletion?.closeSessionConfirmed == true)
+        require(await backend.count("sessions.delete") == 0, "Consent activation must never delete")
+        key(36, "\r", .command, repeat: true)
+        require(await backend.count("sessions.delete") == 0)
+        key(36)
+        try await pending("sessions.delete", backend)
+        require(model.sessionDeletion?.closeSessionConfirmed == true,
+                "Enter on checked consent must confirm, not untick it")
+        let params = await backend.parameters("sessions.delete")
+        guard case .texts(["/one/feature"]) = params["selected_paths"], case .flag(true) = params["close_session"] else {
+            testFailure("Keyboard Delete must send exact selection and explicit close consent")
+        }
+        require(model.deletionKeyboardFocus == .cancel)
+        key(36, "\r", .command)
+        require(await backend.count("sessions.delete") == 1, "Busy Cmd+Enter must not submit twice")
+        key(49, repeat: true)
+        model.confirmDeletionSessionClose(false)
+        model.selectDeletionWorktree(two.path, selected: true)
+        require(model.sessionDeletion?.selectedPaths == [one.path] && model.sessionDeletion?.closeSessionConfirmed == true)
+        await backend.reply("sessions.delete", APIResult(error: "Force required", deleteToken: "keyboard", forceAvailable: true, worktrees: [ready, locked, two]))
+        try await wait { !model.busy }
+        require(model.sessionDeletion?.phase == .forceOffered)
+        key(36, "\r", .command)
+        require(model.sessionDeletion?.phase == .forceOffered, "Cmd+Enter must not implicitly arm Force")
+        key(0, "x", [.command, .shift], repeat: true)
+        require(model.sessionDeletion?.phase == .forceOffered)
+        model.focusDeletionControl(.action)
+        key(36)
+        require(model.sessionDeletion?.phase == .forceConfirm && model.deletionKeyboardFocus == .cancel)
+        key(36, repeat: true)
+        require(await backend.count("sessions.delete") == 1, "Repeated Enter must never Force")
+        key(36, "\r", .command, repeat: true)
+        require(await backend.count("sessions.delete") == 1)
+        key(76, "\r", .command)
+        try await pending("sessions.delete", backend)
+        guard case .flag(true) = await backend.parameters("sessions.delete")["force"] else { testFailure("Explicit second activation must Force") }
+        await backend.fail("sessions.delete")
+        try await wait { !model.busy }
+        require(model.sessionDeletion?.phase == .failed)
+        model.focusDeletionControl(.action)
+        key(36)
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", preview)
+        try await wait { model.sessionDeletion?.phase == .review }
+        model.focusDeletionControl(.cancel)
+        key(36)
+        require(model.sessionDeletion == nil, "Enter on Cancel must cancel, not prepare")
+        require(await backend.count("sessions.delete.prepare") == 2)
+
+        model.beginDeleteSession(automaticallyVerify: false)
+        try await pending("sessions.delete.preview", backend)
+        let unresolved = DeletionWorktree(path: one.path, checked: false)
+        await backend.reply("sessions.delete.preview", APIResult(deleteToken: "retry", worktrees: [unresolved]))
+        try await pending("sessions.delete.check", backend)
+        require(model.deletionKeyboardFocus == .cancel, "Checking rows cannot take focus")
+        await backend.fail("sessions.delete.check")
+        try await wait { model.sessionDeletion?.checkingPath == nil }
+        model.focusDeletionControl(.retry(one.path))
+        require(model.deletionKeyboardFocus == .retry(one.path))
+        key(49)
+        try await pending("sessions.delete.check", backend)
+        require(model.deletionKeyboardFocus == .cancel, "Active Retry must lose effective focus safely")
+        await backend.reply("sessions.delete.check", APIResult(deleteToken: "retry", worktrees: [ready]))
+        try await wait { model.sessionDeletion?.phase == .confirm && model.sessionDeletion?.checkingPath == nil }
+        require(model.deletionKeyboardFocus == .closeSession, "A removed retry target must fall back to consent")
+        key(36)
+        require(model.sessionDeletion?.closeSessionConfirmed == false)
+        require(await backend.count("sessions.delete") == 2, "Unchecked consent must block Return")
+        key(49, " ")
+        model.focusDeletionControl(.cancel)
+        key(36, "\r", .command)
+        try await pending("sessions.delete", backend)
+        require(model.sessionDeletion?.closeSessionConfirmed == true, "Cmd+Enter must confirm without changing consent")
+        await backend.fail("sessions.delete")
+        try await wait { !model.busy }
+        model.focusDeletionControl(.cancel)
+        key(49)
+        require(model.sessionDeletion == nil)
+        model.beginDeleteSession(automaticallyVerify: false)
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", APIResult(deleteToken: "blocked", worktrees: [locked]))
+        try await wait { model.sessionDeletion?.phase == .confirm }
+        require(model.deletionKeyboardFocus == .cancel, "A protected-only page must not focus a hidden consent checkbox")
+        key(48)
+        require(model.deletionKeyboardFocus == .cancel)
+        key(36)
+        require(model.sessionDeletion == nil)
+        model.close()
+        print("PASS: deletion keyboard traversal, Cmd+Enter primary actions, explicit consent, Enter without unticking, repeat safety, exact payloads, retry, cancel and two-step Force")
+    }
+
+    @MainActor private static func automaticDeletionChecks() async throws {
         let backend = CachedListBackend()
         for method in ["sessions.delete.preview", "sessions.delete.prepare", "sessions.delete"] { await backend.hold(method) }
+        let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        defer { model.close() }
+        let candidate = PickerItem(path: "session:auto", kind: "session", sessionID: "session:auto")
+        model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: [candidate], targets: ["session"], target: "session"))
+        try await wait { !model.refreshing }
+        let one = DeletionWorktree(repo: "/one", path: "/one/feature", branch: "feature", checked: true, prepared: false)
+        let two = DeletionWorktree(repo: "/two", path: "/two/fix", branch: "fix", checked: true, prepared: false)
+        model.beginDeleteSession()
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", APIResult(deleteToken: "auto", worktrees: [one, two]))
+        // No Verify/Continue action: opening Delete starts both checks itself.
+        try await pending("sessions.delete.prepare", backend)
+        require(model.sessionDeletion?.automaticallyVerifies == true && model.sessionDeletion?.preparingPaths.count == 2)
+        model.selectDeletionWorktree(one.path, selected: false)
+        require(model.sessionDeletion?.selectedPaths == [two.path], "The actively checking row must remain editable")
+        model.selectDeletionWorktree(one.path, selected: true)
+        model.selectDeletionWorktree(two.path, selected: false)
+        model.confirmDeletionSessionClose(true)
+        require(model.sessionDeletion?.closeSessionConfirmed == false, "Consent waits for automatic results")
+        _ = model.handleDeletionKeyboard(code: 36, characters: "\r", modifiers: .command)
+        require(await backend.count("sessions.delete") == 0)
+        var readyOne = one, readyTwo = two
+        readyOne.prepared = true; readyOne.needsForce = true; readyOne.hasChanges = true
+        readyTwo.prepared = true; readyTwo.needsForce = false; readyTwo.hasIgnoredFiles = true
+        var failedTwo = two
+        failedTwo.error = "Safety check failed"
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "auto", worktrees: [readyOne, failedTwo]))
+        try await wait { model.sessionDeletion?.phase == .confirm }
+        require(model.sessionDeletion?.forceWarningCount == 1 && !model.canConfirmSessionDeletion)
+        model.confirmDeletionSessionClose(true)
+        require(model.canConfirmSessionDeletion, "An unselected failed row must not block verified selected rows")
+        model.retryDeletionWorktree(two.path)
+        try await pending("sessions.delete.prepare", backend)
+        guard case .texts(["/two/fix"]) = await backend.parameters("sessions.delete.prepare")["paths"] else {
+            testFailure("Retry must reuse the successful sibling, not verify it twice")
+        }
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "auto", worktrees: [readyOne, readyTwo]))
+        try await wait { model.sessionDeletion?.phase == .confirm }
+        model.selectDeletionWorktree(two.path, selected: true)
+        require(model.sessionDeletion?.forceWarningCount == 1, "Selecting an ignored-only worktree must not add a Force warning")
+        model.confirmDeletionSessionClose(true)
+        require(model.canConfirmSessionDeletion)
+        model.selectDeletionWorktree(two.path, selected: false)
+        require(model.sessionDeletion?.closeSessionConfirmed == false && !model.canConfirmSessionDeletion,
+                "Changing selection clears consent, not completed verification")
+        require(await backend.count("sessions.delete.prepare") == 2, "Only explicit Retry may run again; checkbox changes must not repeat verification")
+        model.focusDeletionControl(.closeSession)
+        _ = model.handleDeletionKeyboard(code: 49, characters: " ", modifiers: [])
+        _ = model.handleDeletionKeyboard(code: 36, characters: "\r", modifiers: .command)
+        try await pending("sessions.delete", backend)
+        guard case .texts(["/one/feature"]) = await backend.parameters("sessions.delete")["selected_paths"] else {
+            testFailure("Delete must use the final checkbox subset, not the entire verified pool")
+        }
+        await backend.reply("sessions.delete", APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true, deletedPaths: [one.path]))
+        try await wait { !model.busy }
+        require(model.sessionDeletion == nil)
+        print("PASS: opening Delete automatically verifies all rows; editable selection during/after checks, no Verify action or repeat scans, warning summary, fresh consent and final subset")
+    }
+
+    @MainActor private static func fastPreparationChecks() async throws {
+        let backend = CachedListBackend()
+        for method in ["sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare", "sessions.delete"] { await backend.hold(method) }
         let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
         let candidate = PickerItem(path: "session:fast", label: "fast review", kind: "session", sessionID: "session:fast", host: "Mac")
         model.start()
@@ -768,7 +1013,7 @@ struct NativeChecks {
         let one = DeletionWorktree(repo: "/one", path: "/one/feature", branch: "feature", checked: true, prepared: false)
         let two = DeletionWorktree(repo: "/two", path: "/two/fix", branch: "fix", checked: true, prepared: false)
         let preview = APIResult(deleteToken: "fast", worktrees: [one, two])
-        model.beginDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
         try await pending("sessions.delete.preview", backend)
         await backend.reply("sessions.delete.preview", preview)
         try await wait { model.sessionDeletion?.phase == .review }
@@ -792,7 +1037,7 @@ struct NativeChecks {
         try await Task.sleep(for: .milliseconds(20))
         require(model.sessionDeletion == nil, "Cancel must suppress late preparation replies")
 
-        model.beginDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
         try await pending("sessions.delete.preview", backend)
         await backend.reply("sessions.delete.preview", preview)
         try await wait { model.sessionDeletion?.phase == .review }
@@ -825,6 +1070,98 @@ struct NativeChecks {
         try await wait { !model.busy }
         require(model.sessionDeletion == nil && model.items.map(\.path) == [two.path], "Unselected files must remain after final deletion")
         model.close()
+    }
+
+    @MainActor private static func parallelPreparationChecks() async throws {
+        let backend = CachedListBackend()
+        for method in ["sessions.delete.preview", "sessions.delete.prepare"] { await backend.hold(method) }
+        let model = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: backend)
+        let candidate = PickerItem(path: "session:parallel", kind: "session", sessionID: "session:parallel")
+        model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", APIResult(items: [candidate], targets: ["session"], target: "session"))
+        try await wait { !model.refreshing }
+        let rows = (1...4).map { DeletionWorktree(repo: "/repo", path: "/repo/tree-\($0)", branch: "tree-\($0)", checked: true, prepared: false) }
+        let preview = APIResult(deleteToken: "parallel", worktrees: rows)
+        model.beginDeleteSession(automaticallyVerify: false)
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", preview)
+        try await wait { model.sessionDeletion?.phase == .review }
+        model.selectDeletionWorktree(rows[3].path, selected: false)
+        model.prepareSessionDeletion()
+        try await pending("sessions.delete.prepare", backend)
+        let first = await backend.parameters("sessions.delete.prepare")
+        guard case .texts([rows[0].path, rows[1].path]) = first["paths"] else { testFailure("Verification must request two rows in one batch") }
+        require(Set(model.sessionDeletion!.preparingPaths.keys) == Set(rows.prefix(2).map(\.path)))
+        require(model.sessionDeletion!.isChecking(rows[0].path) && model.sessionDeletion!.isChecking(rows[1].path)
+                && !model.sessionDeletion!.isChecking(rows[2].path), "Both active rows need their own progress state")
+        require(!model.canConfirmSessionDeletion)
+        var partial = rows
+        partial[0].prepared = true
+        partial[1].error = "Temporary check failure"
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "parallel", worktrees: partial))
+        try await wait { model.sessionDeletion?.checkingPath == nil }
+        require(model.sessionDeletion?.phase == .preparing && model.sessionDeletion?.preparingPaths.isEmpty == true)
+        require(model.sessionDeletion?.plan?.worktrees?[0].isPrepared == true, "One failed check must retain its successful sibling")
+        model.retryDeletionWorktree(rows[1].path)
+        try await pending("sessions.delete.prepare", backend)
+        let retry = await backend.parameters("sessions.delete.prepare")
+        guard case .texts([rows[1].path, rows[2].path]) = retry["paths"] else { testFailure("Retry must skip completed rows and keep a two-worker limit") }
+        var complete = rows
+        for index in 0..<3 { complete[index].prepared = true }
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "parallel", worktrees: complete))
+        try await wait { model.sessionDeletion?.phase == .confirm }
+        require(model.sessionDeletion?.preparingPaths.isEmpty == true && model.sessionDeletion?.selectedPaths == Set(rows.prefix(3).map(\.path)))
+        require(model.sessionDeletion?.plan?.worktrees?[3].isPrepared == false, "Unselected worktrees must not be checked")
+        let preparedCalls = await backend.count("sessions.delete.prepare")
+        let deleteCalls = await backend.count("sessions.delete")
+        require(preparedCalls == 2 && deleteCalls == 0)
+        model.cancelDeleteSession()
+        model.beginDeleteSession(automaticallyVerify: false)
+        try await pending("sessions.delete.preview", backend)
+        await backend.reply("sessions.delete.preview", preview)
+        try await wait { model.sessionDeletion?.phase == .review }
+        model.prepareSessionDeletion()
+        try await pending("sessions.delete.prepare", backend)
+        model.escape()
+        await backend.reply("sessions.delete.prepare", APIResult(deleteToken: "parallel", worktrees: complete))
+        try await Task.sleep(for: .milliseconds(20))
+        let finalCalls = await backend.count("sessions.delete.prepare")
+        require(model.sessionDeletion == nil && finalCalls == 3,
+                "Cancel must suppress the late batch and must not start another batch")
+        model.close()
+        print("PASS: bounded parallel verification batches, per-row progress, successful-sibling retention, retry, frozen selection and cancellation")
+    }
+
+    @MainActor private static func deletionWarningChecks() throws {
+        let ignored = try JSONDecoder().decode(DeletionWorktree.self, from: Data(#"{"repo":"/repo","path":"/repo/ignored","branch":"ignored","prepared":true,"needs_force":false,"has_changes":false,"has_ignored_files":true,"has_unmerged_commits":false}"#.utf8))
+        require(ignored.forceWarning == nil, "Intentional ignored files must not show a warning or require Force")
+        var dirty = ignored
+        dirty.path = "/repo/dirty"; dirty.hasChanges = true; dirty.needsForce = true
+        require(dirty.forceWarning == "Uncommitted changes — Force required")
+        var unmerged = ignored
+        unmerged.hasIgnoredFiles = false; unmerged.hasUnmergedCommits = true; unmerged.needsForce = true
+        require(unmerged.forceWarning == "Unmerged commits — Force required")
+        var pending = ignored
+        pending.path = "/repo/pending"; pending.prepared = false
+        require(pending.forceWarning == nil, "Pending verification must not claim a completed force assessment")
+        var deletion = PickerModel.SessionDeletion(candidate: PickerItem(path: "session:warning", kind: "session"))
+        deletion.phase = .preparing
+        deletion.selectedPaths = [ignored.path, dirty.path, pending.path]
+        deletion.preparationSelection = deletion.selectedPaths
+        deletion.plan = APIResult(worktrees: [ignored, dirty, pending])
+        require(deletion.forceWarningCount == 1, "Only actual changes require Force; ignored files must not add a warning")
+        let warningHeight = PickerStyle.deletionHeight(deletion)
+        deletion.selectedPaths.remove(dirty.path)
+        require(deletion.forceWarningCount == 0, "Ignored-only worktrees must not keep a Force warning after changes are deselected")
+        deletion.deletedPaths.insert(ignored.path)
+        require(deletion.forceWarningCount == 0, "Removed worktrees must not keep a stale warning")
+        require(warningHeight > PickerStyle.deletionHeight(deletion), "Reserve space for the warning before confirmation")
+        var legacy = ignored
+        legacy.needsForce = true
+        legacy.hasChanges = nil; legacy.hasIgnoredFiles = nil; legacy.hasUnmergedCommits = nil
+        require(legacy.forceWarning == "Force confirmation required", "Older replies must retain a conservative warning")
+        print("PASS: ignored files do not warn or require Force; real changes/unmerged commits still warn before Delete; selected-only summary and layout")
     }
 
     @MainActor private static func textEditingChecks() {
@@ -980,21 +1317,27 @@ struct NativeChecks {
         try await wait { !model.busy && !model.loading }
         require(model.items.count == 2)
         model.beginCreate()
-        require(PickerStyle.height(for: model) == 270, "Creation form grew beyond the compact layout")
-        // beginCreate reuses the list context: no form metadata fetch, so the
-        // agent starts at none until the user picks one.
-        require(model.agentControlsShown == false && model.agent == "none",
-                     "Agent controls must start collapsed with no agent")
+        require(PickerStyle.height(for: model) == 382, "Creation must reserve a separate agent section")
+        require(model.agent == "none", "Reused list context must not invent an agent default")
+        model.cycleAgent()
+        require(model.agent == "pi" && model.agentDisplayLabel == "Pi",
+                     "Cycling must change the agent, not only its capitalization")
+        try await wait { !model.busy }
+        require(model.selectedModelLabel == "zai/glm-5.3" && model.selectedReasoningLabel == "high",
+                     "The form must show exact resolved defaults without expanding controls")
         model.selectAgent("pi")
-        require(model.agent == "pi" && model.agentModel == "",
-                     "Picking an agent without a catalog must keep the model unset")
-        try await wait { !model.busy } // per-agent catalog fetch settles
-        model.toggleAgentControls()
-        require(model.agentControlsShown && PickerStyle.height(for: model) == 340,
-                     "⌃⌥O expansion must add the model and reasoning rows")
-        model.toggleAgentControls()
-        require(!model.agentControlsShown && PickerStyle.height(for: model) == 270,
-                     "Collapsing the agent controls must restore the compact form")
+        require(model.agentModel == "glm-5.3", "Selecting the same agent must not reset the model")
+        model.cycleAgent()
+        try await wait { !model.busy }
+        require(model.agent == "codex" && model.agentDisplayLabel == "Codex"
+                && model.selectedModelLabel == "gpt-6-luna" && model.selectedReasoningLabel == "high",
+                     "Cycling must switch to the next agent and its actual defaults")
+        model.cycleAgent()
+        require(model.agent == "none" && model.selectedModelLabel == "—", "Cycling must include No agent")
+        model.cycleAgent()
+        require(model.agent == "pi" && model.agentModel == "glm-5.3" && !model.busy,
+                     "Returning to an agent must use its cached catalog immediately")
+        require(PickerStyle.height(for: model) == 382, "Agent changes must not resize the section")
         model.branch = "feat/test"
         try await wait { model.previewReady }
         require(model.canCreate && model.destination == "/Users/demo/Projects/example-kit-worktrees/feat-test")
@@ -1084,6 +1427,7 @@ struct NativeChecks {
         require(!compactList.shortcutsPresented, "Dismiss must not leave help open for the next launch")
         compactList.close()
 
+        try await agentDefaultsChecks()
         try await directCreateChecks()
         try await fastCreateMetadataChecks()
         try await suggestedBranchChecks()
@@ -1208,6 +1552,72 @@ struct NativeChecks {
             try await transportChecks()
         }
         print("PASS: launch flags, decoding, launcher fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
+    }
+
+    @MainActor private static func agentDefaultsChecks() async throws {
+        let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/demo"])
+        for explicit in [false, true] {
+            let backend = CachedListBackend()
+            await backend.hold("agents.catalog")
+            let model = PickerModel(options: options, backend: backend)
+            model.start()
+            try await pending("worktrees.form", backend)
+            await backend.reply("worktrees.form", APIResult(
+                targets: ["tab"], target: "tab", repo: "/demo", branches: ["main"], baseBranch: "main",
+                agent: "Pi", agentModel: explicit ? "one/shared" : "",
+                agentReasoning: explicit ? "low" : "default", agents: ["pi", "Pi", "codex"]))
+            try await pending("agents.catalog", backend)
+            let models = [
+                AgentModelPayload(id: "shared", provider: "one", label: "Friendly name", reasoning: ["low", "high"], defaultReasoning: "high"),
+                AgentModelPayload(id: "shared", provider: "two", label: "Friendly name", reasoning: ["high", "max"], defaultReasoning: "max", isDefault: true),
+            ]
+            await backend.reply("agents.catalog", APIResult(agentModels: models))
+            try await wait { !model.loading && !model.busy }
+            require(model.agentDisplayLabel == "Pi" && model.agentChoices == ["pi", "codex"],
+                    "Agent IDs must normalize and deduplicate without showing pi/Pi as different agents")
+            require(model.selectedModelLabel == (explicit ? "one/shared" : "two/shared"),
+                    "Exact model defaults must honor configured provider, not the first matching ID")
+            require(model.selectedReasoningLabel == (explicit ? "low" : "max"),
+                    "Reasoning must resolve concrete defaults without replacing explicit effort")
+            require(!model.agentReasoningChoices.contains("default"), "Reasoning choices must contain concrete values only")
+            model.selectAgentModel(models[0])
+            require(model.selectedModelLabel == "one/shared" && model.selectedReasoningLabel == "high")
+            model.selectAgentReasoning("low")
+            model.selectAgent("pi")
+            require(model.selectedReasoningLabel == "low", "Re-selecting the agent must preserve edited values")
+            model.cycleAgentModel()
+            require(model.selectedModelLabel == "two/shared" && model.selectedReasoningLabel == "max",
+                    "Model cycling must distinguish providers and apply the next model's reasoning default")
+            model.cycleAgentModel()
+            require(model.selectedModelLabel == "one/shared" && model.selectedReasoningLabel == "high",
+                    "Model cycling must wrap without changing the selected agent")
+            model.cycleAgentReasoning()
+            require(model.agentReasoning == "low", "Reasoning cycling must wrap through supported levels")
+            model.cycleAgentReasoning()
+            require(model.agentReasoning == "high")
+            model.agentModelPickerPresented = true
+            model.cycleAgentModel()
+            model.cycleAgentReasoning()
+            require(model.selectedModelLabel == "one/shared" && model.agentReasoning == "high",
+                    "Cycle shortcuts must not change values behind an open popover")
+            model.closeAgentPopovers()
+            model.selectAgent("none")
+            model.cycleAgentModel()
+            model.cycleAgentReasoning()
+            require(model.agent == "none" && model.agentModel.isEmpty && model.agentReasoning.isEmpty,
+                    "Model/reasoning shortcuts must not enable an agent")
+            model.selectAgent("pi")
+            model.selectAgentModel(AgentModelPayload(id: "no-reasoning", reasoning: []))
+            model.cycleAgentReasoning()
+            require(model.agentReasoning.isEmpty, "Unsupported reasoning must stay unset")
+            let formModel = model.agentModel
+            model.page = .directories
+            model.cycleAgentModel()
+            model.cycleAgentReasoning()
+            require(model.agentModel == formModel, "Cycle shortcuts must be limited to the worktree form")
+            model.close()
+        }
+        print("PASS: separate agent section, normalized agents, exact defaults, model/reasoning cycling, wraparound, provider identity and no-agent/popover/page guards")
     }
 
     @MainActor private static func currentSessionSelectionChecks() async throws {
@@ -3360,11 +3770,11 @@ struct NativeChecks {
         let origin = await backend.requestedRepo()
         require(origin == "/origin" && direct.repo == "/resolved" && direct.items.isEmpty)
         require(direct.branch == "feat/typed-early" && direct.base == "main")
-        require(PickerStyle.height(for: direct) == 270)
+        require(PickerStyle.height(for: direct) == 382)
         direct.validationError = "Branch already exists"
-        require(!direct.canSubmitForm && PickerStyle.height(for: direct) == 294)
+        require(!direct.canSubmitForm && PickerStyle.height(for: direct) == 406)
         direct.error = "Backend error"
-        require(PickerStyle.height(for: direct) == 326)
+        require(PickerStyle.height(for: direct) == 438)
         direct.validationError = nil
         direct.error = nil
         let targets = ["tab", "session", "here", "pane_right", "pane_below"]

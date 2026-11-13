@@ -43,6 +43,7 @@ struct PickerView: View {
     @State private var selectedInitialDefault = false
     @State private var errorDetailsPresented = false
     @State private var shortcutsReturnFocus: Field?
+    @State private var hoveredAgentControl: String?
     private enum Field { case search, branch, base, target, agent, agentModel, agentReasoning, submit, pullRequest, shortcuts }
 
     var body: some View {
@@ -344,6 +345,9 @@ struct PickerView: View {
     private func rowContent(_ item: PickerItem, position: Int, selected: Bool, isAgent: Bool, isSessionRow: Bool, isLauncherDir: Bool) -> some View {
             if position >= 1, position <= 9 {
                 cmdBadge(position, selected: selected)
+            } else if isSessionRow || isLauncherDir {
+                // Keep launcher icons aligned with rows that show a shortcut.
+                cmdBadge(9, selected: selected).hidden()
             }
             if item.kind == "pr" {
                 Text(item.label ?? item.path).lineLimit(1).truncationMode(.middle)
@@ -651,12 +655,12 @@ struct PickerView: View {
                 }
             }
             openTargetControl
-            if model.createdPath == nil { agentControls }
             pathRow("Destination", value: destinationLabel, path: model.createdPath ?? model.destination ?? model.destinationRoot)
             if !model.branch.isEmpty, model.previewReady, let validation = model.validationError {
                 Text(validation).font(.system(size: 12)).foregroundStyle(.orange).lineLimit(2)
                     .accessibilityIdentifier("create-validation")
             }
+            if model.createdPath == nil { agentControls }
         }
         .padding(.horizontal, PickerStyle.horizontalInset).padding(.vertical, 8)
         .disabled(model.busy).frame(maxHeight: .infinity, alignment: .top)
@@ -667,47 +671,30 @@ struct PickerView: View {
             .frame(width: 90, alignment: .leading)
     }
 
-    // MARK: Agent launch controls (⌃⌥O)
+    // MARK: Agent launch section (⌃⌥O cycles agents)
 
-    @ViewBuilder private var agentControls: some View {
-        if model.agentControlsShown {
+    private var agentControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider().overlay(PickerStyle.foreground.opacity(0.08)).padding(.vertical, 3)
+            HStack {
+                Text("Agent launch").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(PickerStyle.secondaryText)
+                Spacer()
+                Button("Save as default") { model.saveAgentDefaults() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10))
+                    .foregroundStyle(PickerStyle.secondaryText)
+                    .disabled(model.busy || model.agentCatalogLoading)
+                    .help("Save these agent, model, and reasoning values for new worktrees.")
+                    .accessibilityIdentifier("save-agent-defaults")
+            }
             agentPickerRow
             agentModelRow
             agentReasoningRow
-        } else {
-            agentSummaryRow
         }
-    }
-
-    private var agentSummaryRow: some View {
-        HStack(spacing: 10) {
-            formLabel("Agent")
-            Button { model.toggleAgentControls() } label: {
-                HStack(spacing: 6) {
-                    Text(model.agentSummary).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
-                }
-                .font(.system(size: PickerStyle.bodyFontSize, weight: .medium))
-                .foregroundStyle(PickerStyle.foreground.opacity(0.85))
-                .padding(.horizontal, 8)
-                .frame(height: 22)
-                .background(PickerStyle.foreground.opacity(0.06), in: Capsule())
-                .overlay(Capsule().strokeBorder(field == .agent ? PickerStyle.selection : Color.clear))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focusable().focused($field, equals: .agent)
-            .focusEffectDisabled()
-            .onKeyPress(keys: [.return, .space], phases: .down) { _ in
-                model.toggleAgentControls()
-                return .handled
-            }
-            .help("Launch an agent in the new worktree. Press Ctrl+Option+O to show model and reasoning fields.")
-            .accessibilityLabel("Agent: \(model.agentSummary)")
-            .accessibilityIdentifier("agent-summary")
-            Spacer(minLength: 0)
-            Text("⌃⌥O").font(.system(size: 10)).foregroundStyle(PickerStyle.foreground.opacity(0.65))
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Agent launch")
+        .accessibilityIdentifier("create-agent-section")
     }
 
     private var agentPickerRow: some View {
@@ -717,6 +704,7 @@ struct PickerView: View {
                          focused: field == .agent, identifier: "create-agent") {
                 model.agentPickerPresented = true
             }
+            .focused($field, equals: .agent)
             .popover(isPresented: $model.agentPickerPresented, arrowEdge: .bottom) {
                 AgentOptionPopover(
                     options: [AgentOptionPopover.Option(id: "none", label: "No agent")]
@@ -733,19 +721,22 @@ struct PickerView: View {
         HStack(spacing: 10) {
             formLabel("Model")
             optionButton(model.selectedModelLabel, presented: model.agentModelPickerPresented,
-                         focused: field == .agentModel, identifier: "create-agent-model") {
+                         focused: field == .agentModel, identifier: "create-agent-model", monospaced: true) {
                 model.agentModelPickerPresented = true
             }
+            .focused($field, equals: .agentModel)
+            .disabled(model.agent == "none" || model.agentCatalogModels.isEmpty)
+            .help(model.selectedModelLabel)
             .popover(isPresented: $model.agentModelPickerPresented, arrowEdge: .bottom) {
                 AgentOptionPopover(
                     options: model.agentCatalogModels.map { row in
                         AgentOptionPopover.Option(
-                            id: row.id, label: row.displayLabel,
+                            id: row.selectionID, label: row.selectionID,
                             detail: agentModelDetail(row))
                     },
-                    current: model.agentModel,
+                    current: model.selectedModelOptionID,
                     emptyMessage: model.agentCatalogLoading ? "Discovering models…" : (model.agentCatalogWarning ?? "No models found")) { value in
-                        if let row = model.agentCatalogModels.first(where: { $0.id == value }) {
+                        if let row = model.agentCatalogModels.first(where: { $0.selectionID == value }) {
                             model.selectAgentModel(row)
                         }
                     }
@@ -764,55 +755,57 @@ struct PickerView: View {
     private var agentReasoningRow: some View {
         HStack(spacing: 10) {
             formLabel("Reasoning")
-            optionButton(model.agentReasoning.isEmpty || model.agentReasoning == agentReasoningDefault
-                ? "Tool default" : model.agentReasoning,
+            optionButton(model.selectedReasoningLabel,
                 presented: model.agentReasoningPickerPresented,
                 focused: field == .agentReasoning, identifier: "create-agent-reasoning") {
                 model.agentReasoningPickerPresented = true
             }
+            .focused($field, equals: .agentReasoning)
+            .disabled(model.agent == "none" || model.agentReasoningChoices.isEmpty)
             .popover(isPresented: $model.agentReasoningPickerPresented, arrowEdge: .bottom) {
                 AgentOptionPopover(
                     options: model.agentReasoningChoices.map { level in
-                        AgentOptionPopover.Option(id: level, label: level == agentReasoningDefault ? "Tool default" : level)
+                        AgentOptionPopover.Option(id: level)
                     },
-                    current: model.agentReasoning.isEmpty ? agentReasoningDefault : model.agentReasoning) { value in
+                    current: model.selectedReasoningLabel) { value in
                         model.selectAgentReasoning(value)
                     }
             }
             Spacer(minLength: 0)
-            Button("Save as default") { model.saveAgentDefaults() }
-                .buttonStyle(.plain)
-                .font(.system(size: 10))
-                .foregroundStyle(PickerStyle.foreground.opacity(0.7))
-                .disabled(model.busy)
-                .help("Persist agent, model, and reasoning as the config default.")
-                .accessibilityIdentifier("save-agent-defaults")
         }
     }
 
     private func agentModelDetail(_ row: AgentModelPayload) -> String {
         var parts: [String] = []
-        if let provider = row.provider, !provider.isEmpty { parts.append(provider) }
+        if row.displayLabel != row.id { parts.append(row.displayLabel) }
         if let reasoning = row.defaultReasoning, !reasoning.isEmpty { parts.append("default " + reasoning) }
         return parts.joined(separator: " · ")
     }
 
     private func optionButton(_ title: String, presented: Bool, focused: Bool, identifier: String,
-                              action: @escaping () -> Void) -> some View {
-        Button {
+                              monospaced: Bool = false, action: @escaping () -> Void) -> some View {
+        let highlighted = focused || presented
+        let hovered = hoveredAgentControl == identifier
+        return Button {
             guard !presented else { return }
             action()
         } label: {
-            HStack(spacing: 6) {
-                Text(title).lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+            HStack(spacing: 9) {
+                Text(title)
+                    .font(.system(size: 12, weight: .regular, design: monospaced ? .monospaced : .default))
+                    .lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(PickerStyle.foreground.opacity(highlighted || hovered ? 0.7 : 0.4))
             }
-            .font(.system(size: PickerStyle.bodyFontSize, weight: .medium))
-            .foregroundStyle(PickerStyle.foreground.opacity(0.85))
-            .padding(.horizontal, 9)
+            .foregroundStyle(PickerStyle.foreground.opacity(0.9))
+            .padding(.horizontal, 8)
             .frame(height: PickerStyle.controlHeight)
-            .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(focused ? PickerStyle.selection : Color.clear))
+            .background(PickerStyle.foreground.opacity(highlighted || hovered ? 0.06 : 0.025),
+                        in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(
+                highlighted ? PickerStyle.selection.opacity(0.8) : PickerStyle.foreground.opacity(hovered ? 0.25 : 0.13),
+                lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -822,6 +815,11 @@ struct PickerView: View {
             action()
             return .handled
         }
+        .onHover { hovering in
+            if hovering { hoveredAgentControl = identifier }
+            else if hoveredAgentControl == identifier { hoveredAgentControl = nil }
+        }
+        .help(title)
         .accessibilityIdentifier(identifier)
     }
 
@@ -914,7 +912,10 @@ struct PickerView: View {
         if !model.targets.isEmpty { fields.append(.target) }
         if model.createdPath == nil {
             fields.append(.agent)
-            if model.agentControlsShown { fields.append(contentsOf: [.agentModel, .agentReasoning]) }
+            if model.agent != "none" {
+                if !model.agentCatalogModels.isEmpty { fields.append(.agentModel) }
+                if !model.agentReasoningChoices.isEmpty { fields.append(.agentReasoning) }
+            }
         }
         if model.canSubmitForm { fields.append(.submit) }
         let current = fields.firstIndex(of: field ?? .branch) ?? (backward ? 0 : -1)
@@ -980,7 +981,7 @@ struct PickerView: View {
                             .help("Keep the worktree, but forget Retry opening and dismiss the picker.")
                             .accessibilityIdentifier("discard-created-recovery")
                     } else {
-                        Text("⌃O target · ⌃⌥O agent").accessibilityIdentifier("keyboard-hint")
+                        Text("⌃O target · ⌃⌥O agent · ⌃⌥M model · ⌃⌥R reasoning").accessibilityIdentifier("keyboard-hint")
                     }
                 } else {
                     openTargetControl

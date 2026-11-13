@@ -132,6 +132,10 @@ enum PickerStyle {
             || !deletion.selectedPaths.isEmpty || deletion.preparationSelection?.isEmpty == false
     }
 
+    static func deletionPendingStatus(_ deletion: PickerModel.SessionDeletion) -> String {
+        deletion.automaticallyVerifies ? "Queued for automatic checks…" : "Waiting for verification…"
+    }
+
     static func deletionHeight(_ deletion: PickerModel.SessionDeletion) -> CGFloat {
         let rows = Array((deletion.plan?.worktrees ?? []).prefix(5))
         let hasSelection = hasDeletionSelection(deletion)
@@ -145,18 +149,17 @@ enum PickerStyle {
                     content += deletionErrorSummary(error) == "Not a Git repository." ? 17 : 31
                 } else if deletion.checkingPath == row.path || !row.isChecked || row.needsForce == true
                     || deletion.deletedPaths.contains(row.path)
-                    || (deletion.phase == .preparing && deletion.preparationSelection?.contains(row.path) == true) {
+                    || row.deletable {
                     content += 17
                 }
             }
             content += CGFloat(rows.count - 1)
         }
         if deletion.plan != nil {
-            if hasSelection && [.confirm, .forceOffered, .forceConfirm, .deleting].contains(deletion.phase) {
-                content += 30
-            }
+            if hasSelection { content += 30 }
             content += 24
         }
+        if deletion.forceWarningCount > 0 { content += 40 }
         if deletion.phase == .forceConfirm { content += 38 }
         if deletion.error != nil { content += 52 }
         if (deletion.plan == nil && deletion.phase == .loading) || deletion.phase == .deleting { content += 30 }
@@ -179,8 +182,8 @@ enum PickerStyle {
         }
         if model.page == .create {
             let validation: CGFloat = !model.branch.isEmpty && model.previewReady && model.validationError != nil ? 24 : 0
-            // One collapsed agent row; ⌃⌥O expansion adds model and reasoning.
-            let agent: CGFloat = model.createdPath == nil ? (model.agentControlsShown ? 100 : 30) : 0
+            // A separate, always-visible agent section: heading and three rows.
+            let agent: CGFloat = model.createdPath == nil ? 142 : 0
             return createHeight + agent + validation + (model.error == nil && model.notice == nil ? 0 : 32)
         }
         let rowHeight = model.view == .agents ? Self.agentRowHeight : (model.page == .worktrees ? Self.worktreeRowHeight : Self.rowHeight)

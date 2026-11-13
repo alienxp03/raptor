@@ -8,6 +8,12 @@ import XCTest
 @testable import RaptorAPI
 
 private final class ReviewFixture {
+    private let commandLock = NSRecursiveLock()
+    // Set before dispatch; never change while workers run. Outside commandLock
+    // so tests can hold both scans at a barrier without serializing them.
+    var beforeScan: ((String) -> Void)?
+    var afterScan: ((String) -> Void)?
+    var scanFailedPaths: Set<String> = []
     var directories = ["/a/one", "/b/two"]
     var trees = ["/a/one": "/a", "/a/other": "/a", "/b/two": "/b"]
     var removed: [String] = []
@@ -16,11 +22,15 @@ private final class ReviewFixture {
     var failedPath = ""
     var retainedBranch = ""
     var branchVerificationFails = false
-    var fingerprintFails = false
+    var scanFails = false
+    var statusFails = false
+    var headFails = false
+    var integrationFails = false
+    var nestedFails = false
+    var ignored: Set<String> = []
     var nestedGitMetadata: [String: String] = [:]
     var head = "tip"
     var branches: [String: String] = [:]
-    var fingerprints: [String: String] = [:]
     var recordFields: [String: String] = [:]
     var duplicateRegistration = false
     var blocks = ["block:one", "block:two"]
@@ -36,11 +46,35 @@ private final class ReviewFixture {
     }
 
     func command(_ dir: String, _ name: String, _ args: [String]) throws -> ExecResult {
+        if name == "/bin/bash" { beforeScan?(dir) }
+        defer { if name == "/bin/bash" { afterScan?(dir) } }
+        commandLock.lock()
+        defer { commandLock.unlock() }
         commands.append((dir, name, args))
         if name == "test" { return ExecResult(code: removed.contains(args.last!) ? 1 : 0) }
-        if name == "find" { return ExecResult(stdout: nestedGitMetadata[dir] ?? "") }
         if name == "/bin/bash" {
-            return fingerprintFails ? ExecResult(stderr: "fingerprint failed: unreadable dependency", code: 1) : ExecResult(stdout: fingerprints[dir] ?? "digest")
+            if scanFails || scanFailedPaths.contains(dir) || statusFails || headFails || integrationFails || nestedFails {
+                let stage = statusFails ? "status" : headFails ? "HEAD" : integrationFails ? "integration" : nestedFails ? "nested" : "batch"
+                return ExecResult(stderr: "\(stage) scan failed", code: 1)
+            }
+            guard let path = root(dir), !removed.contains(path) else { return ExecResult(stderr: "Unknown worktree", code: 1) }
+            let repo = trees[path] ?? path
+            let branch = path == repo ? "main" : branches[path] ?? "feat/" + URL(fileURLWithPath: path).lastPathComponent
+            var registration = "worktree \(repo)\0HEAD base\0branch refs/heads/main\0\0"
+            var refs = "base refs/heads/main\n"
+            for tree in trees.keys.sorted() where trees[tree] == repo && tree != repo && !removed.contains(tree) {
+                let name = branches[tree] ?? "feat/" + URL(fileURLWithPath: tree).lastPathComponent
+                let record = "worktree \(tree)\0HEAD \(head)\0branch refs/heads/\(name)\0" + (recordFields[tree].map { $0 + "\0" } ?? "") + "\0"
+                registration += record
+                if duplicateRegistration { registration += record }
+                refs += "\(head) refs/heads/\(name)\n"
+            }
+            let reason = unmerged.contains(path) || unmerged.contains(repo) ? "{}" : "{\"reason\":\"ancestor\"}"
+            let json = "{\"schema\":2,\"repo\":{\"default_branch\":\"main\"},\"items\":[{\"branch\":\"\(branch)\",\"head\":{\"sha\":\"\(head)\"},\"worktree\":{\"path\":\"\(path)\"},\"default_branch\":{\"integration\":\(reason)}}]}"
+            let status = dirty.contains(path) ? "?? file\0" : ignored.contains(path) ? "!! ignored\0" : ""
+            let fields = [path, repo + "/.git", registration, "refs/heads/" + branch, head, refs,
+                json, status, nestedGitMetadata[path] ?? ""]
+            return ExecResult(stdout: fields.map { Data($0.utf8).base64EncodedString() }.joined(separator: "\n") + "\n")
         }
         if name == "wt" {
             if args.first != "remove" { return ExecResult(stdout: "{\"repo\":{\"default_branch\":\"main\"}}") }
@@ -67,9 +101,6 @@ private final class ReviewFixture {
         }
         if args.first == "symbolic-ref" { return ExecResult(stdout: "refs/heads/" + (branches[dir] ?? "feat/" + URL(fileURLWithPath: dir).lastPathComponent) + "\n") }
         if args.first == "rev-parse" { return ExecResult(stdout: args.last == "refs/heads/main" ? "base\n" : head + "\n") }
-        if args.first == "merge-base" { return ExecResult(code: unmerged.contains(dir) ? 1 : 0) }
-        if args.first == "status" { return ExecResult(stdout: dirty.contains(dir) ? "?? file\0" : "") }
-        if args.first == "diff" { return ExecResult() }
         if args.first == "show-ref" {
             if branchVerificationFails { throw MessageError("Branch verification failed") }
             let path = trees.keys.first { "refs/heads/feat/" + URL(fileURLWithPath: $0).lastPathComponent == args.last }
@@ -77,6 +108,42 @@ private final class ReviewFixture {
         }
         XCTFail("Unexpected command \(dir) \(name) \(args)")
         return ExecResult(code: 2)
+    }
+}
+
+/// Both scans must enter before either can finish. Then /b/two finishes
+/// first, so completion order is the reverse of the ticket's row order.
+private final class PreparationBarrier {
+    private let condition = NSCondition()
+    private var entered = 0
+    private var active = 0
+    private var secondFinished = false
+    private(set) var peak = 0
+    private(set) var completed: [String] = []
+
+    func enter(_ path: String) {
+        condition.lock()
+        defer { condition.unlock() }
+        entered += 1
+        active += 1
+        peak = max(peak, active)
+        condition.broadcast()
+        let deadline = Date().addingTimeInterval(5)
+        while entered < 2 || (path == "/a/one" && !secondFinished) {
+            guard condition.wait(until: deadline) else {
+                XCTFail("Preparation scans did not overlap or finish")
+                return
+            }
+        }
+    }
+
+    func leave(_ path: String) {
+        condition.lock()
+        defer { condition.unlock() }
+        active -= 1
+        completed.append(path)
+        if path == "/b/two" { secondFinished = true }
+        condition.broadcast()
     }
 }
 
@@ -135,10 +202,12 @@ final class WorktreeReviewTests: APITestCase {
         return token
     }
 
-    private func prepare(_ h: Handler, _ token: String, path: String = "/a/one",
-                         paths: Any = ["/a/one"]) throws -> [String: Any] {
-        let params: [String: Any] = ["kind": "session", "session_id": "session:target", "host": "",
-            "review_worktrees": true, "delete_token": token, "path": path, "selected_paths": paths]
+    private func prepare(_ h: Handler, _ token: String, path: String? = "/a/one",
+                         paths: Any = ["/a/one"], batch: Any? = nil) throws -> [String: Any] {
+        var params: [String: Any] = ["kind": "session", "session_id": "session:target", "host": "",
+            "review_worktrees": true, "delete_token": token, "selected_paths": paths]
+        if let path { params["path"] = path }
+        if let batch { params["paths"] = batch }
         let (result, error) = h.call(CancelToken(), "sessions.delete.prepare",
                                     Array(try JSONSerialization.data(withJSONObject: params)))
         XCTAssertNil(error)
@@ -147,6 +216,105 @@ final class WorktreeReviewTests: APITestCase {
 
     private func heavyweight(_ command: (String, String, [String])) -> Bool {
         command.1 != "git" || !["rev-parse", "worktree"].contains(command.2.first ?? "")
+    }
+
+    func testParallelPreparationOverlapsAndRetainsSuccessfulSiblingOnRetry() throws {
+        let f = ReviewFixture()
+        f.directories = ["/a/one/subdir", "/a/one/another", "/b/two"]
+        let h = handler(f), token = try metadataPreview(h)
+        let original = try XCTUnwrap(h.worktreeReviewTickets[token])
+        let selected = ["/a/one", "/b/two"]
+        let barrier = PreparationBarrier()
+        let requestThread = Thread.current
+        var factories = 0
+        h.runDeletionCommand = { _, _, _ in
+            XCTAssertEqual(Thread.current, requestThread)
+            factories += 1
+            return f.command
+        }
+        var snapshots = 0
+        h.loadDeletionSession = { _, sid in
+            XCTAssertEqual(Thread.current, requestThread)
+            snapshots += 1
+            // Initial state is captured before helpers; final state after join.
+            XCTAssertTrue(barrier.completed.isEmpty || barrier.completed.count == 2)
+            return DeletionSessionState(hostID: f.hostID, sessionID: sid, directories: f.directories, blocks: f.blocks)
+        }
+        f.beforeScan = { path in
+            XCTAssertEqual(factories, 2, "Create all runners before dispatch")
+            XCTAssertNotEqual(Thread.current, requestThread)
+            barrier.enter(path)
+        }
+        f.afterScan = barrier.leave
+        f.scanFailedPaths = ["/a/one"]
+        f.commands.removeAll()
+        let result = try prepare(h, token, paths: selected, batch: selected)
+        XCTAssertNil(result["error"])
+        XCTAssertEqual(snapshots, 2)
+        XCTAssertEqual(barrier.peak, 2)
+        XCTAssertEqual(barrier.completed, ["/b/two", "/a/one"])
+        let failed = try XCTUnwrap(h.worktreeReviewTickets[token])
+        XCTAssertEqual(failed.rows.map(\.path), original.rows.map(\.path))
+        XCTAssertEqual(Set(failed.sourceRows.keys), Set(original.sourceRows.keys))
+        XCTAssertEqual(failed.metadataRows, original.rows)
+        XCTAssertEqual(failed.frozenSelection, Set(selected))
+        XCTAssertEqual(failed.rows.map(\.prepared), [false, true])
+        XCTAssertTrue(failed.rows[0].error?.contains("scan failed") == true)
+        XCTAssertEqual(failed.sourceRows["/a/one/another"], failed.rows[0])
+        XCTAssertEqual(failed.sourceRows["/b/two"], failed.rows[1])
+
+        f.beforeScan = nil
+        f.afterScan = nil
+        f.scanFailedPaths = []
+        f.dirty.insert("/b/two")
+        f.commands.removeAll()
+        XCTAssertNil(try prepare(h, token, paths: selected, batch: selected)["error"])
+        let retried = try XCTUnwrap(h.worktreeReviewTickets[token])
+        XCTAssertTrue(retried.rows.allSatisfy { $0.prepared && $0.error == nil })
+        XCTAssertEqual(retried.rows[1], failed.rows[1], "Successful sibling must be immutable")
+        XCTAssertEqual(f.commands.map { $0.0 }, ["/a/one"])
+        XCTAssertEqual(factories, 3)
+        XCTAssertTrue(f.removed.isEmpty)
+        XCTAssertFalse(f.closed)
+    }
+
+    func testParallelPreparationValidatesWholeBatchBeforeScanningOrFreezing() throws {
+        let f = ReviewFixture(), h = handler(f), token = try metadataPreview(h)
+        let selected = ["/a/one", "/b/two"]
+        f.commands.removeAll()
+        var factories = 0
+        h.runDeletionCommand = { _, _, _ in factories += 1; return f.command }
+        for invalid: Any in [[], selected + ["/a/other"], ["/a/one", "/a/one"],
+                             ["/a/one", "/unknown"], ["/a/one", 1], "bad", NSNull()] {
+            XCTAssertNotNil(try prepare(h, token, paths: selected, batch: invalid)["error"])
+        }
+        XCTAssertNotNil(try prepare(h, token, path: "/b/two", paths: selected, batch: selected)["error"])
+        XCTAssertNotNil(try prepare(h, token, paths: ["/a/one"], batch: selected)["error"])
+        XCTAssertTrue(f.commands.isEmpty)
+        XCTAssertEqual(factories, 0)
+        XCTAssertNil(h.worktreeReviewTickets[token]?.frozenSelection)
+        // Batch-only requests are supported; frozen selection remains exact.
+        XCTAssertNil(try prepare(h, token, path: nil, paths: selected, batch: ["/a/one"])["error"])
+        let before = f.commands.count
+        XCTAssertNotNil(try prepare(h, token, path: "/b/two", paths: ["/b/two"], batch: ["/b/two"])["error"])
+        XCTAssertEqual(f.commands.count, before)
+        XCTAssertTrue(f.removed.isEmpty)
+    }
+
+    func testParallelPreparationDiscardsResultsWhenSessionChangesAfterScans() throws {
+        let f = ReviewFixture(), h = handler(f), token = try metadataPreview(h)
+        let original = h.worktreeReviewTickets[token]
+        var snapshots = 0
+        h.loadDeletionSession = { _, sid in
+            snapshots += 1
+            return DeletionSessionState(hostID: snapshots == 1 ? "identity" : "changed",
+                sessionID: sid, directories: f.directories, blocks: f.blocks)
+        }
+        XCTAssertNotNil(try prepare(h, token, paths: f.directories, batch: f.directories)["error"])
+        XCTAssertEqual(f.commands.filter { $0.1 == "/bin/bash" }.count, 2)
+        XCTAssertEqual(h.worktreeReviewTickets[token]?.rows, original?.rows)
+        XCTAssertNil(h.worktreeReviewTickets[token]?.frozenSelection)
+        XCTAssertTrue(f.removed.isEmpty)
     }
 
     func testMetadataDiscoveryAndChecksNeverRunHeavyweightCommands() throws {
@@ -212,15 +380,79 @@ final class WorktreeReviewTests: APITestCase {
         XCTAssertNil(result["error"])
         let rows = result["worktrees"] as! [[String: Any]]
         XCTAssertEqual(rows.map { $0["prepared"] as? Bool }, [true, false])
+        XCTAssertEqual(f.commands.count, 1)
         XCTAssertEqual(f.commands.filter { $0.1 == "/bin/bash" }.map { $0.0 }, ["/a/one"])
+        let plan = try XCTUnwrap(h.worktreeReviewTickets[token]?.rows.first?.plan)
+        XCTAssertTrue(plan.diff.isEmpty)
+        XCTAssertTrue(plan.fileHashes.isEmpty)
         XCTAssertFalse(f.commands.contains { $0.0 == "/b/two" })
         XCTAssertTrue(f.removed.isEmpty)
         XCTAssertFalse(f.closed)
         XCTAssertNotNil(try request(h, token: token, paths: ["/a/one"], consent: false)["error"])
         XCTAssertTrue(f.removed.isEmpty)
+        f.commands.removeAll()
         XCTAssertNil(try request(h, token: token, paths: ["/a/one"])["error"])
+        XCTAssertEqual(f.commands.filter { $0.1 == "/bin/bash" }.map { $0.0 }, ["/a/one", "/a/one"])
         XCTAssertEqual(f.removed, ["/a/one"])
         XCTAssertTrue(f.closed)
+    }
+
+    func testBatchStageErrorsNeverOfferForceOrRemoveWorktrees() throws {
+        for stage in 0..<4 {
+            let f = ReviewFixture(), h = handler(f), token = try metadataPreview(h)
+            switch stage {
+            case 0: f.statusFails = true
+            case 1: f.headFails = true
+            case 2: f.integrationFails = true
+            default: f.nestedFails = true
+            }
+            f.commands.removeAll()
+            let result = try prepare(h, token)
+            let row = try XCTUnwrap((result["worktrees"] as? [[String: Any]])?.first)
+            XCTAssertTrue((row["error"] as? String ?? "").contains("scan failed"))
+            XCTAssertEqual(row["prepared"] as? Bool, false)
+            XCTAssertEqual(f.commands.count, 1)
+            XCTAssertNotNil(try request(h, token: token, paths: ["/a/one"], force: true)["error"])
+            XCTAssertTrue(f.removed.isEmpty)
+            XCTAssertFalse(f.closed)
+        }
+    }
+
+    func testPreparationReportsSpecificForceReasonsBeforeDelete() throws {
+        for reason in ["changes", "ignored", "unmerged"] {
+            let f = ReviewFixture()
+            if reason == "changes" { f.dirty = ["/a/one"] }
+            if reason == "ignored" { f.ignored = ["/a/one"] }
+            if reason == "unmerged" { f.unmerged = ["/a/one"] }
+            let h = handler(f), token = try metadataPreview(h)
+            let result = try prepare(h, token)
+            let rows = try XCTUnwrap(result["worktrees"] as? [[String: Any]])
+            let row = try XCTUnwrap(rows.first { $0["path"] as? String == "/a/one" })
+            XCTAssertEqual(row["prepared"] as? Bool, true)
+            XCTAssertEqual(row["needs_force"] as? Bool, reason != "ignored")
+            XCTAssertEqual(row["has_changes"] as? Bool, reason == "changes")
+            XCTAssertEqual(row["has_ignored_files"] as? Bool, reason == "ignored")
+            XCTAssertEqual(row["has_unmerged_commits"] as? Bool, reason == "unmerged")
+            XCTAssertNil(h.worktreeReviewTickets[token]?.forceSelection, "Verification must not arm Force")
+            XCTAssertTrue(f.removed.isEmpty)
+            XCTAssertFalse(f.closed)
+        }
+    }
+
+    func testIgnoredFilesDoNotRequireForce() throws {
+        let f = ReviewFixture(), h = handler(f)
+        f.ignored = ["/a/one"]
+        let token = try metadataPreview(h)
+        _ = try prepare(h, token)
+        let result = try request(h, token: token, paths: ["/a/one"])
+        XCTAssertNil(result["error"])
+        XCTAssertNotEqual(result["force_available"] as? Bool, true)
+        XCTAssertEqual(f.removed, ["/a/one"])
+        XCTAssertTrue(f.closed)
+        let removals = f.commands.filter { $0.1 == "wt" && $0.2.first == "remove" }
+        XCTAssertEqual(removals.count, 1)
+        XCTAssertFalse(removals[0].2.contains("--force"))
+        XCTAssertFalse(removals[0].2.contains("--force-delete"))
     }
 
     func testPreparationFreezesExactSelectionAndSuccessfulPlan() throws {
@@ -229,7 +461,7 @@ final class WorktreeReviewTests: APITestCase {
         XCTAssertNil(try prepare(h, token, paths: selected)["error"])
         let before = f.commands.count
         let plan = h.worktreeReviewTickets[token]?.rows.first?.plan
-        f.fingerprints["/a/one"] = "changed"
+        f.dirty.insert("/a/one")
         XCTAssertNil(try prepare(h, token, paths: selected.reversed().map { $0 })["error"])
         XCTAssertEqual(f.commands.count, before)
         XCTAssertEqual(h.worktreeReviewTickets[token]?.rows.first?.plan, plan)
@@ -240,7 +472,7 @@ final class WorktreeReviewTests: APITestCase {
         XCTAssertTrue(f.removed.isEmpty)
     }
 
-    func testPreparationRejectsBranchHeadAndRegistrationChangesBeforeHashing() throws {
+    func testPreparationRejectsBranchHeadAndRegistrationChangesWithOneBatch() throws {
         for change in 0..<3 {
             let f = ReviewFixture(), h = handler(f), token = try metadataPreview(h)
             switch change {
@@ -253,7 +485,8 @@ final class WorktreeReviewTests: APITestCase {
             let rows = result["worktrees"] as! [[String: Any]]
             XCTAssertNotNil(rows.first?["error"])
             XCTAssertEqual(rows.first?["prepared"] as? Bool, false)
-            XCTAssertFalse(f.commands.contains(where: heavyweight))
+            XCTAssertEqual(f.commands.count, 1)
+            XCTAssertEqual(f.commands.first?.1, "/bin/bash")
             XCTAssertNotNil(h.worktreeReviewTickets[token])
             XCTAssertTrue(f.removed.isEmpty)
         }
@@ -261,12 +494,12 @@ final class WorktreeReviewTests: APITestCase {
 
     func testPreparationFailureRetainsBaselineTokenAndExactSelectionForRetry() throws {
         let f = ReviewFixture(), h = handler(f), token = try metadataPreview(h)
-        f.fingerprintFails = true
+        f.scanFails = true
         let failed = try prepare(h, token)
-        XCTAssertTrue(((failed["worktrees"] as! [[String: Any]]).first?["error"] as? String ?? "").contains("fingerprint failed: unreadable dependency"))
+        XCTAssertTrue(((failed["worktrees"] as! [[String: Any]]).first?["error"] as? String ?? "").contains("batch scan failed"))
         XCTAssertEqual(h.worktreeReviewTickets[token]?.frozenSelection, ["/a/one"])
         XCTAssertNotNil(try prepare(h, token, path: "/b/two", paths: ["/b/two"])["error"])
-        f.fingerprintFails = false
+        f.scanFails = false
         h.worktreeReviewTickets[token]?.expires = Date().addingTimeInterval(1)
         let retry = try prepare(h, token)
         XCTAssertNil((retry["worktrees"] as! [[String: Any]]).first?["error"])
@@ -275,12 +508,12 @@ final class WorktreeReviewTests: APITestCase {
         XCTAssertEqual(f.removed, ["/a/one"])
     }
 
-    func testUnselectedContentChangesNeverCauseContentScansButSelectedChangesBlockDelete() throws {
+    func testUnselectedStatusChangesNeverCauseFullScansButSelectedChangesBlockDelete() throws {
         for selectedChanged in [false, true] {
             let f = ReviewFixture(), h = handler(f), token = try metadataPreview(h)
             _ = try prepare(h, token)
             f.commands.removeAll()
-            f.fingerprints[selectedChanged ? "/a/one" : "/b/two"] = "new content"
+            f.dirty.insert(selectedChanged ? "/a/one" : "/b/two")
             let result = try request(h, token: token, paths: ["/a/one"])
             XCTAssertEqual(result["error"] != nil, selectedChanged)
             XCTAssertFalse(f.commands.contains { $0.0 == "/b/two" && heavyweight($0) })
@@ -305,6 +538,58 @@ final class WorktreeReviewTests: APITestCase {
         }
     }
 
+    func testRemovalCwdRelocationDoesNotBlockLaterWorktreesButOtherChangesDo() throws {
+        for change in ["removed-cwd", "other-cwd", "blocks", "host"] {
+            let f = ReviewFixture(), h = handler(f)
+            h.loadDeletionSession = { _, sid in
+                var mapping = ["block:one": f.removed.contains("/a/one") ? "/a/.git/wt/trash/one-123" : "/a/one",
+                               "block:two": f.removed.contains("/b/two") ? "" : "/b/two"]
+                var blocks = f.blocks
+                var host = f.hostID
+                if f.removed.count == 1 {
+                    if change == "other-cwd" { mapping["block:two"] = "/unreviewed" }
+                    if change == "blocks" { blocks.append("block:new"); mapping["block:new"] = "/unreviewed" }
+                    if change == "host" { host = "changed" }
+                }
+                return DeletionSessionState(hostID: host, sessionID: sid,
+                    directories: mapping.values.sorted(), blocks: blocks.sorted(), blockDirectories: mapping)
+            }
+            let token = try metadataPreview(h)
+            _ = try prepare(h, token, paths: ["/a/one", "/b/two"], batch: ["/a/one", "/b/two"])
+            let result = try request(h, token: token)
+            if change == "removed-cwd" {
+                XCTAssertNil(result["error"])
+                XCTAssertEqual(f.removed, ["/a/one", "/b/two"])
+                XCTAssertTrue(f.closed)
+            } else {
+                XCTAssertNotNil(result["error"], change)
+                XCTAssertEqual(f.removed, ["/a/one"], change)
+                XCTAssertFalse(f.closed, change)
+            }
+        }
+    }
+
+    func testVerifiedPoolDeletesOnlyFinalCheckboxSubset() throws {
+        let f = ReviewFixture(), h = handler(f), token = try metadataPreview(h)
+        _ = try prepare(h, token, paths: ["/a/one", "/b/two"], batch: ["/a/one", "/b/two"])
+        XCTAssertEqual(h.worktreeReviewTickets[token]?.frozenSelection, ["/a/one", "/b/two"])
+        XCTAssertNil(try request(h, token: token, paths: ["/b/two"])["error"])
+        XCTAssertEqual(f.removed, ["/b/two"], "Verification must not decide what gets deleted")
+    }
+
+    func testVerifiedPoolForceOfferStillLocksExactFinalSelection() throws {
+        let f = ReviewFixture()
+        f.dirty = ["/a/one"]
+        let h = handler(f), token = try metadataPreview(h)
+        _ = try prepare(h, token, paths: ["/a/one", "/b/two"], batch: ["/a/one", "/b/two"])
+        XCTAssertEqual(try request(h, token: token, paths: ["/a/one"])["force_available"] as? Bool, true)
+        XCTAssertTrue(f.removed.isEmpty)
+        XCTAssertNotNil(try request(h, token: token, paths: ["/b/two"], force: true)["error"])
+        XCTAssertTrue(f.removed.isEmpty)
+        XCTAssertNil(try request(h, token: token, paths: ["/a/one"], force: true)["error"])
+        XCTAssertEqual(f.removed, ["/a/one"])
+    }
+
     func testPreparedSubsetKeepsUnknownRowsAndDeduplicatedAliasesSafe() throws {
         let f = ReviewFixture()
         f.directories = ["/a/one/subdir", "/a/one/another", "/unknown"]
@@ -322,10 +607,10 @@ final class WorktreeReviewTests: APITestCase {
         let f = ReviewFixture(), h = handler(f), token = try metadataPreview(h)
         f.head = "changed"
         _ = try prepare(h, token)
-        f.fingerprintFails = false
+        f.scanFails = false
         _ = try prepare(h, token)
         XCTAssertFalse(h.worktreeReviewTickets[token]?.rows.first?.prepared ?? true)
-        XCTAssertFalse(f.commands.contains(where: heavyweight))
+        XCTAssertEqual(f.commands.filter { $0.1 == "/bin/bash" }.count, 2)
         f.head = "tip"
         _ = try prepare(h, token)
         XCTAssertTrue(h.worktreeReviewTickets[token]?.rows.first?.prepared == true)
@@ -450,7 +735,7 @@ final class WorktreeReviewTests: APITestCase {
         XCTAssertTrue(f.closed)
     }
 
-    func testProgressiveSubdirectoriesReuseFingerprintAndKeepNestedRepositories() throws {
+    func testProgressiveSubdirectoriesReusePlanAndKeepNestedRepositories() throws {
         let f = ReviewFixture()
         f.directories = ["/a/one/subdir", "/a/one/another", "/a/one/nested"]
         f.trees["/a/one/nested"] = "/b"
@@ -471,14 +756,14 @@ final class WorktreeReviewTests: APITestCase {
     func testProgressiveErrorRetryByResolvedRoot() throws {
         let f = ReviewFixture()
         f.directories = ["/a/one/subdir"]
-        f.fingerprintFails = true
+        f.scanFails = true
         let h = handler(f)
         let token = try XCTUnwrap(progressive(h)["delete_token"] as? String)
         let failed = try progressive(h, token: token, path: f.directories[0])
         let rows = try XCTUnwrap(failed["worktrees"] as? [[String: Any]])
         XCTAssertEqual(rows.first?["checked"] as? Bool, true)
-        XCTAssertTrue((rows.first?["error"] as? String ?? "").contains("fingerprint failed: unreadable dependency"))
-        f.fingerprintFails = false
+        XCTAssertTrue((rows.first?["error"] as? String ?? "").contains("batch scan failed"))
+        f.scanFails = false
         let retried = try progressive(h, token: token, path: "/a/one")
         XCTAssertNil((retried["worktrees"] as? [[String: Any]])?.first?["error"])
         XCTAssertNil(try request(h, token: token, paths: ["/a/one"])["error"])
@@ -647,12 +932,12 @@ final class WorktreeReviewTests: APITestCase {
     func testReviewPreservesTheActualSafetyScanError() throws {
         let f = ReviewFixture()
         f.directories = ["/a/one"]
-        f.fingerprintFails = true
+        f.scanFails = true
         let h = handler(f)
         let p = try request(h)
         let rows = try XCTUnwrap(p["worktrees"] as? [[String: Any]])
         let error = try XCTUnwrap(rows.first?["error"] as? String)
-        XCTAssertTrue(error.contains("fingerprint failed: unreadable dependency"), error)
+        XCTAssertTrue(error.contains("batch scan failed"), error)
         XCTAssertFalse(error.contains("Worktree cannot be safely deleted"))
         let token = try XCTUnwrap(p["delete_token"] as? String)
         XCTAssertNotNil(try request(h, token: token, paths: ["/a/one"])["error"])
