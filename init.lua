@@ -239,6 +239,30 @@ function M.setup(options)
 		end,
 	})
 
+	-- Register actions only; user config owns the Rex-wide shortcuts.
+	for index = 1, 9 do
+		local slot = index
+		rex.action({
+			name = "raptor_pin_" .. slot,
+			title = "Raptor: Pinned Session " .. slot,
+			description = "Jump directly to pinned session slot " .. slot .. ".",
+			category = "Navigate",
+			run = function(ctx)
+				ctx = resolve_context(ctx)
+				if ctx.client_id == nil or ctx.client_id == "" or ctx.session_id == nil or ctx.session_id == "" then
+					error("raptor: no client or session context", 0)
+				end
+				local command = base_cmd(ctx)
+				table.insert(command, "pinned-session")
+				table.insert(command, tostring(slot))
+				local result, err = rex.exec(command, { timeout = 30 })
+				if result == nil then error("raptor: " .. tostring(err), 0) end
+				if not result.ok then error("raptor: " .. (result.stdout or "") .. (result.stderr or ""), 0) end
+				return { selected = result.stdout:match("^%s*(.-)%s*$") }
+			end,
+		})
+	end
+
 	-- Use the Go backend so shortcuts and both pickers share validated history.
 	rex.action({
 		name = "raptor_session_last",

@@ -113,7 +113,7 @@ let ctx = Ctx(
 )
 
 guard let command = rest.first else {
-    FileHandle.standardError.write(Data(("usage: raptor [context flags] <init|task|setup|api|direct|last-session|panel|service> [command flags]\n").utf8))
+    FileHandle.standardError.write(Data(("usage: raptor [context flags] <init|task|setup|api|direct|last-session|pinned-session|panel|service> [command flags]\n").utf8))
     exit(2)
 }
 fixPath()
@@ -199,6 +199,7 @@ case "init":
         out("Bindings: shift+cmd+o opens Raptor; shift+cmd+c opens Checkout pull request;")
         out("shift+cmd+n opens the worktree form;")
         out("ctrl+shift+n starts an instant agent worktree (pi).")
+        out("ctrl+cmd+1..9 jumps directly to pinned session slots.")
         out("Finish with: rex config reload")
     } catch {
         fail(String(describing: error))
@@ -227,6 +228,15 @@ case "panel":
     } catch {
         fail(String(describing: error))
     }
+case "pinned-session":
+    guard sub.count == 1, let slot = Int(sub[0]), (1...9).contains(slot) else {
+        fail("usage: raptor [context flags] pinned-session <1..9>")
+    }
+    do {
+        out(try Handler(ctx: ctx, cfg: cfg).selectPinnedSession(slot: slot))
+    } catch {
+        fail(String(describing: error))
+    }
 case "last", "last-session":
     do {
         out(try Rex.selectLast(ctx))
@@ -236,6 +246,6 @@ case "last", "last-session":
 case "version":
     out(raptorVersion)
 default:
-    FileHandle.standardError.write(Data(("usage: raptor [context flags] <init|task|setup|api|direct|last-session|panel|serve> [command flags]\n").utf8))
+    FileHandle.standardError.write(Data(("usage: raptor [context flags] <init|task|setup|api|direct|last-session|pinned-session|panel|serve> [command flags]\n").utf8))
     exit(2)
 }

@@ -29,6 +29,13 @@ enum PickerStyle {
     static let unreadIndicatorSize: CGFloat = 5
     static let pinReorderDuration = 0.24
     static let pinGlyphDuration = 0.16
+    static let sessionRemovalDuration = pinReorderDuration
+
+    static func animatesSessionRemoval(reduceMotion: Bool, visible: Bool, candidate: PickerItem,
+                                       previous: [PickerItem], updated: [PickerItem]) -> Bool {
+        guard !reduceMotion, visible, candidate.kind == "session", previous.count == updated.count + 1 else { return false }
+        return previous.filter { $0.id != candidate.id || $0.host != candidate.host } == updated
+    }
 
     static func animatesPinChanges(reduceMotion: Bool, previous: [PickerItem], updated: [PickerItem]) -> Bool {
         !reduceMotion && !previous.isEmpty && previous.count == updated.count

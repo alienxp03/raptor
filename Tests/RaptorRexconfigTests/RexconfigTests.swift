@@ -56,7 +56,7 @@ final class RexconfigTests: XCTestCase {
 
     func testApplyPreservesUnmanagedPRBinding() throws {
         let path = tempDir() + "/init.lua"
-        let userBinding = "rex.bind(\"shift+cmd+p\", \"raptor_pr_open\")\n"
+        let userBinding = "rex.bind(\"shift+cmd+p\", \"raptor_pr_open\")\nrex.bind(\"cmd+1\", \"session.select\")\nrex.bind(\"ctrl+cmd+2\", \"custom_action\")\n"
         try write(path, userBinding + Rexconfig.block(plugin: "/old/plugin.lua", options: Options()))
         try Rexconfig.apply(configPath: path, plugin: "/new/plugin.lua", options: Rexconfig.defaultOptions(), force: false)
         let text = try String(contentsOfFile: path, encoding: .utf8)
@@ -135,6 +135,15 @@ final class RexconfigTests: XCTestCase {
         rex.bind("shift+cmd+c", "raptor_pr_open")
         rex.bind("shift+cmd+n", "raptor_worktree_new")
         rex.bind("ctrl+shift+n", "raptor_worktree_agent")
+        rex.bind("ctrl+cmd+1", "raptor_pin_1")
+        rex.bind("ctrl+cmd+2", "raptor_pin_2")
+        rex.bind("ctrl+cmd+3", "raptor_pin_3")
+        rex.bind("ctrl+cmd+4", "raptor_pin_4")
+        rex.bind("ctrl+cmd+5", "raptor_pin_5")
+        rex.bind("ctrl+cmd+6", "raptor_pin_6")
+        rex.bind("ctrl+cmd+7", "raptor_pin_7")
+        rex.bind("ctrl+cmd+8", "raptor_pin_8")
+        rex.bind("ctrl+cmd+9", "raptor_pin_9")
         -- <<< raptor <<<
 
         """

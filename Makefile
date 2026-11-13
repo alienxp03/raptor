@@ -30,6 +30,7 @@ test:
 	lua Tests/homebrew_routing_test.lua
 	lua Tests/task_action_test.lua
 	lua Tests/pr_action_test.lua
+	lua Tests/pinned_session_action_test.lua
 
 test-macos:
 	./scripts/test-macos.sh

@@ -256,6 +256,9 @@ struct PickerView: View {
                     } else {
                         ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
                             row(item, position: index + 1).id(item.id)
+                                // Remove outgoing ink immediately; animate only the gap.
+                                // A fading title overlaps the row sliding into its slot.
+                                .transition(.identity)
                         }
                     }
                 }
@@ -413,6 +416,14 @@ struct PickerView: View {
             }
             if !isAgent && item.isPinned == true {
                 pinnedIcon(selected: selected, id: item.id)
+                if let shortcut = item.pinnedSessionShortcut {
+                    Text(shortcut)
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(selected ? PickerStyle.selectionText.opacity(0.75) : PickerStyle.secondaryText)
+                        .fixedSize()
+                        .help("Jump to this pinned session from any Rex pane: \(shortcut)")
+                        .accessibilityIdentifier("pin-shortcut:\(item.path)")
+                }
             }
             if !isAgent {
                 ActivityIndicator(activity: item.activity,
@@ -453,7 +464,11 @@ struct PickerView: View {
         let activity = item.activityAccessibility.isEmpty ? "" : ", " + item.activityAccessibility
         let close = model.sessionCloseCandidate?.id == item.id
             ? ", Close session? Return confirms. Escape cancels. Worktree and branch kept." : ""
-        return primary + active + pinned + activity + close
+        let shortcut: String
+        if let slot = item.pinSlot, item.pinnedSessionShortcut != nil {
+            shortcut = ", Control Command \(slot) jumps to this pinned session"
+        } else { shortcut = "" }
+        return primary + active + pinned + shortcut + activity + close
     }
 
     private func row(_ item: PickerItem, position: Int = 0) -> some View {
@@ -802,7 +817,7 @@ struct PickerView: View {
                             .help("Keep the worktree, but forget Retry opening and dismiss the picker.")
                             .accessibilityIdentifier("discard-created-recovery")
                     } else {
-                        Text("Tab fields · ⌃O target").accessibilityIdentifier("keyboard-hint")
+                        Text("⌃O target").accessibilityIdentifier("keyboard-hint")
                     }
                 } else {
                     openTargetControl
@@ -935,6 +950,7 @@ struct PickerView: View {
             return item.path
         }
         var parts: [String] = []
+        if let shortcut = item.pinnedSessionShortcut { parts.append("\(shortcut) jumps here from Rex") }
         if item.kind == "session" {
             parts.append("Session")
             if item.active == true { parts.append("Current session") }

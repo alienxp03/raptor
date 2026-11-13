@@ -43,8 +43,13 @@ rex config reload
 | `⇧⌘C` | Checkout pull request |
 | `⇧⌘N` | Create a worktree (form) |
 | `⌃⇧N` | Instant agent worktree (pi, no form) |
+| `⌃⌘1`–`⌃⌘9` | Jump directly to pinned session slot 1–9, Rex-wide (no picker) |
+
+The plugin registers `raptor_pin_1` through `raptor_pin_9`; bindings live in your Rex config, not plugin setup. `raptor init` adds these defaults to its managed block; custom bindings outside that block stay untouched. Plain `⌘1`–`⌘9` are unchanged.
 
 ## Usage
+
+Pinned session slots are persisted independently of picker order and search. New session pins take the lowest free slot from 1–9; unpinning frees that slot without renumbering others. Additional pins remain pinned without a shortcut. Legacy session pins receive available slots in saved order. Only session pins use slots; directory pins do not. Each jump validates the exact stored session ID on its stored host using a fresh host-native listing. Empty slots, closed sessions, or offline hosts report an error: no picker, replacement session, or automatic repinning. The equivalent CLI is `raptor [context flags] pinned-session <1..9>`; context flags (such as `-client`) precede the command.
 
 Session activity: working `...`, unread result marked by a tiny themed icon dot, seen result no completion indicator. Working and unread can show together. Rex owns seen receipts; Raptor does not mark results seen. The local Mac preference adapter is client-specific; unavailable receipt data hides the dot.
 

@@ -18,6 +18,7 @@ public struct LauncherItem: Equatable, Encodable {
     public var active: Bool
     public var local: Bool
     public var pinned: Bool
+    public var pinSlot: Int?
     public var state: String
     public var working: Bool
     public var unreadDone: Bool
@@ -26,7 +27,7 @@ public struct LauncherItem: Equatable, Encodable {
     public init(
         kind: String = "", id: String = "", path: String = "", sessionID: String = "",
         label: String = "", sessionLabel: String = "", host: String = "", active: Bool = false,
-        local: Bool = false, pinned: Bool = false, state: String = "", working: Bool = false,
+        local: Bool = false, pinned: Bool = false, pinSlot: Int? = nil, state: String = "", working: Bool = false,
         unreadDone: Bool = false, completionSources: [CompletionSource] = []
     ) {
         self.kind = kind
@@ -39,6 +40,7 @@ public struct LauncherItem: Equatable, Encodable {
         self.active = active
         self.local = local
         self.pinned = pinned
+        self.pinSlot = pinSlot
         self.state = state
         self.working = working
         self.unreadDone = unreadDone
@@ -53,6 +55,7 @@ public struct LauncherItem: Equatable, Encodable {
         case host, active
         case local = "is_local"
         case pinned = "is_pinned"
+        case pinSlot = "pin_slot"
         case state, working
         case unreadDone = "unread_done"
         case completionSources = "_completion_sources"
@@ -79,6 +82,9 @@ public struct LauncherItem: Equatable, Encodable {
         try c.encode(local, forKey: .local)
         if pinned {
             try c.encode(pinned, forKey: .pinned)
+        }
+        if let pinSlot, (1...9).contains(pinSlot) {
+            try c.encode(pinSlot, forKey: .pinSlot)
         }
         if !state.isEmpty {
             try c.encode(state, forKey: .state)
@@ -116,11 +122,12 @@ public extension Catalog {
             if host.isEmpty || host == Rex.localHostLabel {
                 host = localDisplay
             }
+            let pin = sessionPins.first { $0 == SessionPin(sessionID: entry.sessionID, host: host) }
             return LauncherItem(
                 kind: "session", id: entry.id, path: entry.id,
                 sessionID: entry.sessionID, label: entry.label, sessionLabel: entry.sessionLabel,
                 host: host, active: entry.active, local: local,
-                pinned: sessionPins.contains(SessionPin(sessionID: entry.sessionID, host: host)),
+                pinned: pin != nil, pinSlot: pin?.slot,
                 state: entry.state, working: entry.working,
                 unreadDone: entry.unreadDone, completionSources: entry.completionSources
             )
@@ -237,9 +244,13 @@ public extension Catalog {
         let paths = Set(RaptorConfig.loadPins().map { canonicalPath($0) })
         for i in items.indices {
             let item = items[i]
+            let pin = item.kind == "session"
+                ? sessions.first { $0 == SessionPin(sessionID: item.sessionID, host: item.host) }
+                : nil
             items[i].pinned = item.kind == "session"
-                ? sessions.contains(SessionPin(sessionID: item.sessionID, host: item.host))
+                ? pin != nil
                 : item.kind == "dir" && item.local && paths.contains(canonicalPath(item.path))
+            items[i].pinSlot = pin?.slot
         }
     }
 

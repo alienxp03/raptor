@@ -404,6 +404,68 @@ struct NativeChecks {
         print("PASS: session/directory pin payloads, eligibility, mounted rows, selection/target, failures, hidden completion and manual-only Reduce Motion animation")
     }
 
+    @MainActor private static func pinnedShortcutChecks() async throws {
+        let decoded = try JSONDecoder().decode(PickerItem.self, from: Data(#"{"path":"session:one","kind":"session","is_pinned":true,"pin_slot":3}"#.utf8))
+        require(decoded.pinSlot == 3 && decoded.pinnedSessionShortcut == "⌃⌘3",
+                "Pinned sessions must display the stored shortcut slot, not row position")
+        var invalid = decoded
+        for slot in [-1, 0, 10] {
+            invalid.pinSlot = slot
+            require(invalid.pinnedSessionShortcut == nil, "Only slots 1–9 have global shortcuts")
+        }
+        invalid.pinSlot = 3
+        invalid.kind = "dir"
+        require(invalid.pinnedSessionShortcut == nil, "Directory pins must not claim session shortcut slots")
+        invalid.kind = "session"
+        invalid.isPinned = false
+        require(invalid.pinnedSessionShortcut == nil, "Unpinned sessions must not show a stale shortcut")
+        let legacy = try JSONDecoder().decode(PickerItem.self, from: Data(#"{"path":"session:old","kind":"session","is_pinned":true}"#.utf8))
+        require(legacy.pinSlot == nil && legacy.pinnedSessionShortcut == nil)
+
+        let backend = DemoBackend()
+        func pin(_ id: String, _ host: String = "This Mac") async throws {
+            _ = try await backend.request("pins.toggle", params: ["session_id": .text(id), "host": .text(host)])
+        }
+        try await pin("session:demo-1")
+        try await pin("session:demo-2")
+        try await pin("session:demo-1")
+        try await pin("session:demo-3", "Demo Host")
+        let rows = try await backend.request("sessions", params: [:]).items ?? []
+        require(rows.first(where: { $0.path == "session:demo-2" })?.pinnedSessionShortcut == "⌃⌘2",
+                "Unpinning slot 1 must not renumber slot 2")
+        require(rows.first(where: { $0.path == "session:demo-3" })?.pinnedSessionShortcut == "⌃⌘1",
+                "A new pin gets the first free slot, independent of its row or host")
+        require(rows.first(where: { $0.path == "session:demo-1" })?.pinnedSessionShortcut == nil)
+        print("PASS: pinned-session shortcut decoding/display, valid slot gates, legacy/directory safety and stable demo slots")
+    }
+
+    @MainActor private static func sessionRemovalAnimationChecks() {
+        let closed = PickerItem(path: "session:closed", kind: "session", host: "local")
+        let peer = PickerItem(path: closed.path, kind: "session", host: "remote")
+        let folder = PickerItem(path: "/repo", kind: "dir", host: "local")
+        let next = PickerItem(path: "session:next", kind: "session", host: "local")
+        let previous = [closed, folder, peer, next]
+        let updated = [folder, peer, next]
+        require(PickerStyle.sessionRemovalDuration == PickerStyle.pinReorderDuration,
+                "Session close must share Pin's list-motion timing")
+        require(PickerStyle.animatesSessionRemoval(reduceMotion: false, visible: true, candidate: closed,
+                                                   previous: previous, updated: updated),
+                "Only the confirmed session on its host is removed; remaining rows move together")
+        require(!PickerStyle.animatesSessionRemoval(reduceMotion: true, visible: true, candidate: closed,
+                                                    previous: previous, updated: updated), "Reduce Motion must skip close animation")
+        require(!PickerStyle.animatesSessionRemoval(reduceMotion: false, visible: false, candidate: closed,
+                                                    previous: previous, updated: updated), "Hidden closes must not animate")
+        for changed in [previous, [folder, next], [next, peer, folder], []] {
+            require(!PickerStyle.animatesSessionRemoval(reduceMotion: false, visible: true, candidate: closed,
+                                                        previous: previous, updated: changed),
+                    "Unrelated refreshes, reorders and bulk removals must not gain close animation")
+        }
+        require(!PickerStyle.animatesSessionRemoval(reduceMotion: false, visible: true, candidate: folder,
+                                                    previous: previous, updated: [closed, peer, next]),
+                "Closing sessions must not animate unrelated directory removals")
+        print("PASS: manual session-close animation gates, Pin timing, host identity, Reduce Motion and hidden/refresh isolation")
+    }
+
     @MainActor private static func sessionDeletionChecks() async throws {
         for method in ["sessions.delete.preview", "sessions.delete.check", "sessions.delete.prepare"] {
             require(ProcessBackend.timeoutSeconds(for: method) == 180,
@@ -827,6 +889,8 @@ struct NativeChecks {
         textEditingChecks()
         try await sessionDeletionChecks()
         try await sessionPinChecks()
+        try await pinnedShortcutChecks()
+        sessionRemovalAnimationChecks()
         outsideClickChecks()
         try await pullRequestClipboardChecks()
         try await pullRequestChecks()
@@ -1013,6 +1077,7 @@ struct NativeChecks {
         try launcherEscapeChecks()
         try await agentsChecks()
         try await nativeSimplificationChecks()
+        try await currentSessionSelectionChecks()
         try await stableAgentsChecks()
         try await sessionsChecks()
         try await groupedActivityChecks()
@@ -1129,6 +1194,69 @@ struct NativeChecks {
             try await transportChecks()
         }
         print("PASS: launch flags, decoding, launcher fallback, query generations, selection, target cycle, split cancel, confirmation, main protection, create-and-open, retry without recreation, untouched validation, backend branch search, popover isolation, duplicate submission")
+    }
+
+    @MainActor private static func currentSessionSelectionChecks() async throws {
+        let backend = CachedListBackend()
+        func options(_ session: String) throws -> LaunchOptions {
+            try LaunchOptions(arguments: ["--mode", "sessions", "--session", session])
+        }
+        let directory = PickerItem(path: "/pinned", kind: "dir", isPinned: true)
+        let a = PickerItem(path: "row:a", kind: "session", sessionID: "session:A", active: false)
+        let b = PickerItem(path: "row:b", kind: "session", sessionID: "session:B", active: true)
+        let snapshot = APIResult(items: [directory, a, b], selectedID: b.id, targets: ["tab"], target: "tab")
+        require(PickerModel.preferredSelection(in: snapshot, currentSession: "session:A") == a.id,
+                "Invocation session ID must beat stale active flags and row position")
+        require(PickerModel.preferredSelection(in: snapshot, query: "ranked", currentSession: "session:A") == directory.id,
+                "Search must retain backend match ranking")
+        require(PickerModel.preferredSelection(in: snapshot, currentSession: "session:missing") == directory.id,
+                "An absent origin must not promote another origin's stale active flag")
+        let model = PickerModel(options: try options("session:A"), backend: backend)
+        model.start()
+        try await pending("sessions", backend)
+        await backend.reply("sessions", snapshot)
+        try await wait { !model.refreshing }
+        require(model.selectedID == a.id)
+        model.selectedID = directory.id
+        model.dismiss()
+        let changed = model.prepareReconfigure(try options("session:B"))
+        require(model.selectedID == b.id && !model.contextReady,
+                "Changed-origin cached rows must select the invoking session before the context RPC")
+        await model.completeReconfigure(changed)
+        try await pending("sessions", backend)
+        require(model.selectedID == b.id, "Remembered selection from the prior context must not return during refresh")
+        var staleFlags = snapshot
+        staleFlags.items?[1].active = true
+        staleFlags.items?[2].active = false
+        await backend.reply("sessions", staleFlags)
+        try await wait { !model.refreshing }
+        require(model.selectedID == b.id)
+        model.selectedID = directory.id
+        model.dismiss()
+        _ = model.prepareReconfigure(try options("session:B"))
+        require(model.selectedID == b.id, "Warm reopen must use current session ID, not cached active flags")
+
+        let c = PickerItem(path: "session:C", kind: "session", sessionID: "session:C")
+        let coldOrigin = model.prepareReconfigure(try options("session:C"))
+        await model.completeReconfigure(coldOrigin)
+        try await pending("sessions", backend)
+        var fresh = staleFlags
+        fresh.items?.append(c)
+        await backend.reply("sessions", fresh)
+        try await wait { !model.refreshing }
+        require(model.selectedID == c.id, "A current session absent from cache must become selected when its fresh row arrives")
+
+        let d = PickerItem(path: "session:D", kind: "session", sessionID: "session:D")
+        let manual = model.prepareReconfigure(try options("session:D"))
+        await model.completeReconfigure(manual)
+        try await pending("sessions", backend)
+        model.selectedID = a.id
+        fresh.items?.append(d)
+        await backend.reply("sessions", fresh)
+        try await wait { !model.refreshing }
+        require(model.selectedID == a.id, "Fresh default selection must not override navigation during refresh")
+        model.close()
+        print("PASS: current-session ID selection across cold/warm/changed-origin opens, stale active flags, late rows, search and manual navigation")
     }
 
     @MainActor private static func nativeSimplificationChecks() async throws {
@@ -2043,7 +2171,9 @@ struct NativeChecks {
                     && !model.items.isEmpty && !model.loading,
                 "Failed saves must restore both original labels without clearing the list")
 
-        // Close flow mirrors removal: confirm first, then sessions.close + refresh.
+        // Close keeps Pin-like motion local to the confirmed optimistic removal.
+        // Failure restoration and background refresh must remain immediate.
+        model.setPresented(true)
         model.selectedID = "session:x"
         model.askCloseSession()
         require(model.removalCandidate?.id == "session:x", "Close must confirm like removal")
@@ -2066,6 +2196,7 @@ struct NativeChecks {
         require(model.removalCandidate == nil && model.error != nil && model.selectedID == "session:x"
                     && model.items.first?.id == "session:x",
                      "A failed close must restore the row and surface the error without refreshing")
+        model.setPresented(false)
         model.askCloseSession()
         model.confirmCloseSession(model.removalCandidate!)
         try await pending("sessions.close", backend)

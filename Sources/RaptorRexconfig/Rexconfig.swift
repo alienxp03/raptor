@@ -31,7 +31,7 @@ public enum Rexconfig {
             ["shift+cmd+c", "raptor_pr_open"],
             ["shift+cmd+n", "raptor_worktree_new"],
             ["ctrl+shift+n", "raptor_worktree_agent"],
-        ])
+        ] + (1...9).map { ["ctrl+cmd+\($0)", "raptor_pin_\($0)"] })
     }
 
     /// Locates the packaged init.lua for the running executable: Homebrew opt

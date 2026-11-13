@@ -389,7 +389,7 @@ final class PickerModel: ObservableObject {
                     // Rows only. Do not replay target, form, popover or busy state.
                     self.items = self.orderedAgents(result.items ?? [], key: key)
                     if !self.items.contains(where: { $0.id == self.selectedID }) {
-                        self.selectedID = Self.preferredSelection(in: result, query: key.query)
+                        self.selectedID = self.preferredSelection(in: result, query: key.query)
                     }
                     if !self.items.contains(where: { $0.id == self.scrollID }) { self.scrollID = nil }
                     if key.view == .sessions, key.page == .directories {
@@ -568,11 +568,22 @@ final class PickerModel: ObservableObject {
 
     /// Current-session selection also applies to cached and legacy replies.
     /// Search results retain their backend rank.
-    static func preferredSelection(in result: APIResult, query: String = "") -> String? {
-        if query.isEmpty, let current = result.items?.first(where: { $0.kind == "session" && $0.active == true }) {
-            return current.id
+    static func preferredSelection(in result: APIResult, query: String = "", currentSession: String = "") -> String? {
+        if query.isEmpty {
+            if !currentSession.isEmpty {
+                // Cached active flags belong to the previous presentation.
+                if let current = result.items?.first(where: {
+                    $0.kind == "session" && ($0.sessionID == currentSession || $0.path == currentSession)
+                }) { return current.id }
+            } else if let current = result.items?.first(where: { $0.kind == "session" && $0.active == true }) {
+                return current.id
+            }
         }
         return result.items?.first?.id
+    }
+
+    private func preferredSelection(in result: APIResult, query: String = "") -> String? {
+        Self.preferredSelection(in: result, query: query, currentSession: options.session)
     }
 
 
@@ -661,8 +672,8 @@ final class PickerModel: ObservableObject {
         // targets belong to the previous origin and are stripped.
         cache = cache.filter { $0.key.view == .sessions && $0.key.page == .directories && $0.key.repo == nil }
             .mapValues { entry in
-                CachedList(result: APIResult(items: entry.result.items), selectedID: entry.selectedID,
-                           scrollID: entry.scrollID, target: "")
+                CachedList(result: APIResult(items: entry.result.items), selectedID: nil,
+                           scrollID: nil, target: "")
             }
         activeKey = nil
         displayedKey = nil
@@ -707,7 +718,7 @@ final class PickerModel: ObservableObject {
             activeKey = cacheKey
             displayedKey = cacheKey
             items = cached.result.items ?? []
-            selectedID = Self.preferredSelection(in: cached.result, query: query)
+            selectedID = preferredSelection(in: cached.result, query: query)
             scrollID = nil
             // Targets belong to the new origin, not the cached directory rows.
             loading = false
@@ -739,7 +750,7 @@ final class PickerModel: ObservableObject {
             contextReady = true
             if presented { renewSubscription() }
             started = true
-            scheduleQuery(immediate: true)
+            scheduleQuery(immediate: true, freshQuery: page == .directories)
             loadTheme(after: queryTask)
         } catch {
             guard context == reconfigureGeneration, !closed else { return }
@@ -824,6 +835,9 @@ final class PickerModel: ObservableObject {
                 // Publish its confirmed flag, but leave ordering to the backend.
                 if let pinned = pin.pinned, let index = self.items.firstIndex(where: { $0.id == selected.id }) {
                     self.items[index].isPinned = pinned
+                    // The toggle response confirms membership, not its newly
+                    // allocated shortcut slot. Never display an old assignment.
+                    self.items[index].pinSlot = nil
                     self.cacheSessionSnapshot()
                     self.cache[key]?.refreshedAt = .distantPast
                 }
@@ -847,7 +861,7 @@ final class PickerModel: ObservableObject {
             }
             // Follow the same row, never the row now occupying its old index.
             self.selectedID = rows.contains { $0.id == selected.id } ? selected.id
-                : Self.preferredSelection(in: result, query: key.query)
+                : self.preferredSelection(in: result, query: key.query)
             if !rows.contains(where: { $0.id == self.scrollID }) { self.scrollID = nil }
             self.sessionHosts = result.hosts ?? []
             self.displayedKey = key
@@ -916,7 +930,7 @@ final class PickerModel: ObservableObject {
         let key = cacheKey
         // A warm reopen must not cancel and requeue the same pipe request.
         if reuseFresh, refreshing, queryKey == key, activeKey == key {
-            selectedID = Self.preferredSelection(in: cache[key]?.result ?? APIResult(items: items), query: query)
+            selectedID = preferredSelection(in: cache[key]?.result ?? APIResult(items: items), query: query)
             reopenedSelection = (generation, selectedID)
             return
         }
@@ -933,8 +947,8 @@ final class PickerModel: ObservableObject {
             activeKey = key
             displayedKey = key
             items = orderedAgents(cached.result.items ?? [], key: key, capture: !freshQuery)
-            selectedID = freshQuery ? Self.preferredSelection(in: cached.result, query: query)
-                : (cached.selectedID ?? Self.preferredSelection(in: cached.result, query: query))
+            selectedID = freshQuery ? preferredSelection(in: cached.result, query: query)
+                : (cached.selectedID ?? preferredSelection(in: cached.result, query: query))
             scrollID = freshQuery ? nil : cached.scrollID
         } else if !retainRows {
             activeKey = nil
@@ -1001,7 +1015,7 @@ final class PickerModel: ObservableObject {
                 let preserve = !reopenedDefault && !(freshQuery && previous == initialSelection)
                     && self.items.contains { $0.id == previous }
                 self.reopenedSelection = nil
-                self.selectedID = preserve ? previous : Self.preferredSelection(in: result, query: currentQuery)
+                self.selectedID = preserve ? previous : self.preferredSelection(in: result, query: currentQuery)
                 if currentView == .sessions, case .directories = currentPage {
                     self.sessionHosts = result.hosts ?? []
                 }
@@ -1460,17 +1474,27 @@ final class PickerModel: ObservableObject {
         refreshing = false
     }
 
-    private func removeSessionRow(_ candidate: PickerItem, worktreePath: String? = nil) {
-        let index = items.firstIndex { $0.id == candidate.id && $0.host == candidate.host } ?? 0
+    private func removeSessionRow(_ candidate: PickerItem, worktreePath: String? = nil, animated: Bool = false) {
+        let previous = items
+        let index = previous.firstIndex { $0.id == candidate.id && $0.host == candidate.host } ?? 0
+        let updated = previous.filter { item in
+            !(item.host == candidate.host && (item.id == candidate.id
+                || (item.kind == "dir" && item.path == worktreePath)))
+        }
+        let animate = animated && PickerStyle.animatesSessionRemoval(
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+            visible: presented, candidate: candidate, previous: previous, updated: updated)
         invalidateLists()
-        items.removeAll { item in
-            item.host == candidate.host && (item.id == candidate.id
-                || (item.kind == "dir" && item.path == worktreePath))
+        // Match Pin's explicit transaction: only this manual close animates.
+        // Background refreshes and failure rollback remain immediate.
+        let transaction = Transaction(animation: animate ? .easeInOut(duration: PickerStyle.sessionRemovalDuration) : nil)
+        withTransaction(transaction) {
+            items = updated
+            if !items.contains(where: { $0.id == selectedID }) {
+                selectedID = items.isEmpty ? nil : items[min(index, items.count - 1)].id
+            }
+            cacheSessionSnapshot()
         }
-        if !items.contains(where: { $0.id == selectedID }) {
-            selectedID = items.isEmpty ? nil : items[min(index, items.count - 1)].id
-        }
-        cacheSessionSnapshot()
     }
 
     func confirmCloseSession(_ candidate: PickerItem) {
@@ -1481,7 +1505,7 @@ final class PickerModel: ObservableObject {
         let index = items.firstIndex { $0.id == candidate.id && $0.host == candidate.host } ?? 0
         removalCandidate = nil
         pendingSessionRemoval = (context, candidate)
-        removeSessionRow(candidate)
+        removeSessionRow(candidate, animated: true)
         perform {
             do {
                 _ = try await self.request("sessions.close", params: [

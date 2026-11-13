@@ -9,6 +9,7 @@ actor DemoBackend: BackendClient {
     ]
     private var pinned: Set<String> = ["/Users/demo/Workspace/Projects/raptor"]
     private var pinnedSessions: Set<String> = []
+    private var pinSlots: [String: Int] = [:]
     private var contextUpdates = 0
     private var deletionReview: [DeletionWorktree] = []
     private var deletionPreparation: Set<String>?
@@ -72,7 +73,9 @@ actor DemoBackend: BackendClient {
             ]
             let sessions = sessionEntries.map { item in
                 var item = item
-                item.isPinned = pinnedSessions.contains((item.host ?? "") + "\u{0}" + (item.sessionID ?? ""))
+                let key = (item.host ?? "") + "\u{0}" + (item.sessionID ?? "")
+                item.isPinned = pinnedSessions.contains(key)
+                item.pinSlot = pinSlots[key]
                 return item
             }
             let rows = sessions + localDirs + remoteDirs
@@ -106,7 +109,13 @@ actor DemoBackend: BackendClient {
         case "pins.toggle":
             if !text("session_id").isEmpty {
                 let key = text("host") + "\u{0}" + text("session_id")
-                if pinnedSessions.contains(key) { pinnedSessions.remove(key) } else { pinnedSessions.insert(key) }
+                if pinnedSessions.contains(key) {
+                    pinnedSessions.remove(key)
+                    pinSlots.removeValue(forKey: key)
+                } else {
+                    pinnedSessions.insert(key)
+                    pinSlots[key] = (1...9).first { !pinSlots.values.contains($0) }
+                }
                 return APIResult(pinned: pinnedSessions.contains(key))
             } else {
                 if pinned.contains(text("path")) { pinned.remove(text("path")) } else { pinned.insert(text("path")) }

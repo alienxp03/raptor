@@ -280,6 +280,11 @@ func decodeLauncherItem(_ value: JSONValue) -> LauncherItem? {
         if let node = fields.first(where: { $0.0 == key })?.1, case .bool(let b) = node.value { return b }
         return false
     }
+    var pinSlot: Int?
+    if let node = fields.first(where: { $0.0 == "pin_slot" })?.1,
+       case .number(let raw) = node.value, let slot = Int(raw), (1...9).contains(slot) {
+        pinSlot = slot
+    }
     var sources: [CompletionSource] = []
     if let node = fields.first(where: { $0.0 == "_completion_sources" })?.1,
        case .array(let rows) = node.value {
@@ -299,7 +304,7 @@ func decodeLauncherItem(_ value: JSONValue) -> LauncherItem? {
     return LauncherItem(
         kind: str("kind"), id: str("id"), path: str("path"), sessionID: str("session_id"),
         label: str("label"), sessionLabel: str("session_label"), host: str("host"), active: bool("active"),
-        local: bool("is_local"), pinned: bool("is_pinned"), state: str("state"), working: bool("working"),
+        local: bool("is_local"), pinned: bool("is_pinned"), pinSlot: pinSlot, state: str("state"), working: bool("working"),
         completionSources: sources)
 }
 

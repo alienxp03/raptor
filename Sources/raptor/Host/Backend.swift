@@ -149,10 +149,15 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
     var active: Bool? = nil
     var isLocal: Bool? = nil
     var isPinned: Bool? = nil
+    var pinSlot: Int? = nil
     var host: String? = nil
     var unreadDone: Bool? = nil
     var id: String { path }
     var isSessionEntry: Bool { kind == "session" || kind == "window" }
+    var pinnedSessionShortcut: String? {
+        guard kind == "session", isPinned == true, let pinSlot, (1...9).contains(pinSlot) else { return nil }
+        return "⌃⌘\(pinSlot)"
+    }
 
     var agentContext: String {
         // Leading dots are presentation only: .dotfiles and dotfiles name the same tab.
@@ -226,6 +231,7 @@ struct PickerItem: Codable, Identifiable, Equatable, Sendable {
         case sessionID = "session_id"
         case sessionLabel = "session_label"
         case isPinned = "is_pinned"
+        case pinSlot = "pin_slot"
         case unreadDone = "unread_done"
         case host
     }
