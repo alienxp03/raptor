@@ -25,7 +25,8 @@ struct ShowcaseCapture {
 
         let worktree = makeModel(mode: "wt-create", repo: "/Users/demo/Projects/orbit-web")
         worktree.start()
-        try await wait { !worktree.loading && worktree.previewReady }
+        try await wait { !worktree.loading && worktree.previewReady && worktree.agent == "pi"
+            && worktree.agentModel == "glm-5.3" && !worktree.agentCatalogLoading }
         try await capture(worktree, name: "worktree-create.png", in: output)
         worktree.close()
 
@@ -37,9 +38,6 @@ struct ShowcaseCapture {
             list.showWorktrees()
             try await wait { !list.loading && list.page == .worktrees && !list.items.isEmpty }
             try await capture(list, name: "worktrees.png", in: output)
-            list.beginCreate()
-            try await wait { list.page == .create && list.previewReady }
-            try await capture(list, name: "worktree-create.png", in: output)
         }
         list.close()
 
@@ -105,19 +103,19 @@ struct ShowcaseCapture {
         surface.addSubview(hosting)
         window.contentView = surface
         window.orderFrontRegardless()
-        try await Task.sleep(for: .milliseconds(350))
+        try await Task.sleep(for: .milliseconds(700))
         window.displayIfNeeded()
-        let path = URL(fileURLWithPath: directory).appendingPathComponent(name).path
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-x", "-l", String(window.windowNumber), path]
-        process.standardInput = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "ShowcaseCapture", code: Int(process.terminationStatus),
-                          userInfo: [NSLocalizedDescriptionKey: "Screenshot failed: \(path)"])
+        let path = URL(fileURLWithPath: directory).appendingPathComponent(name)
+        guard let image = surface.bitmapImageRepForCachingDisplay(in: surface.bounds) else {
+            throw NSError(domain: "ShowcaseCapture", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Could not allocate screenshot bitmap"])
         }
+        surface.cacheDisplay(in: surface.bounds, to: image)
+        guard let data = image.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "ShowcaseCapture", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Could not encode screenshot: \(path.path)"])
+        }
+        try data.write(to: path)
         window.close()
     }
 }
