@@ -16,6 +16,7 @@ enum PickerStyle {
     static let rowFontSize: CGFloat = 13
     static let titleFontSize: CGFloat = 14
     static let controlHeight: CGFloat = 26
+    static let formControlRadius: CGFloat = 10
     static let horizontalInset: CGFloat = 10
     static let listInset: CGFloat = 6
     static let rowInset: CGFloat = 12
