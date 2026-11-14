@@ -2,6 +2,8 @@
 
 A keyboard-first launcher for [Rex](https://www.superlogical.com/rex/docs). Find a session or project, then switch to it or open it where you want to work.
 
+https://github.com/user-attachments/assets/75dc5da1-8e06-4c9d-a917-6723bc4f7aec
+
 | Search and switch | Pinned sessions |
 | --- | --- |
 | ![Search sessions and projects](docs/screenshots/search.png) | ![Pinned session shortcuts](docs/screenshots/sessions.png) |
@@ -10,7 +12,7 @@ A keyboard-first launcher for [Rex](https://www.superlogical.com/rex/docs). Find
 | --- | --- |
 | ![Pull request checkout form](docs/screenshots/pull-request.png) | ![Create a Worktrunk worktree](docs/screenshots/worktree-create.png) |
 
-[28-second tour](docs/raptor-tour.mp4) · [More screenshots](docs/screenshots/README.md) · [Usage and design notes](docs/native-app.md) · [Session behavior](docs/sessions.md)
+[More screenshots](docs/screenshots/README.md)
 
 ## Why Raptor
 

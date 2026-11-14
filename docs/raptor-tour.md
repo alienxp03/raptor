@@ -1,6 +1,6 @@
 # Raptor tour
 
-[Watch the 28-second tour](raptor-tour.mp4). It uses a fictional Rex workspace and the synthetic demo backend only—no live sessions, repos, or personal data.
+The repository [README](../README.md) embeds this 28-second tour inline. It uses a fictional Rex workspace and the synthetic demo backend only—no live sessions, repos, or personal data.
 
 On-screen flow:
 
