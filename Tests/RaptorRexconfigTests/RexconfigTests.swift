@@ -153,7 +153,9 @@ final class RexconfigTests: XCTestCase {
     }
 }
 
-func testStabilizeOptRewritesCellarPaths() {
+func testStabilizeOptRewritesCellarPaths() throws {
+    XCTAssertEqual(Rexconfig.stabilizeOpt("/opt/homebrew/Cellar/raptor/0.1.1/bin/raptor"),
+                   "/opt/homebrew/opt/raptor/bin/raptor")
     XCTAssertEqual(Rexconfig.stabilizeOpt("/opt/homebrew/Cellar/raptor/HEAD-1234/share/raptor/init.lua"),
                    "/opt/homebrew/opt/raptor/share/raptor/init.lua")
     XCTAssertEqual(Rexconfig.stabilizeOpt("/opt/homebrew/Cellar/raptor/0.1.0/libexec/Raptor.app/Contents/Resources/rex/init.lua"),
@@ -162,4 +164,16 @@ func testStabilizeOptRewritesCellarPaths() {
                    "/usr/local/opt/raptor/share/raptor/init.lua")
     XCTAssertEqual(Rexconfig.stabilizeOpt("/Users/x/.local/bin/raptor"), "/Users/x/.local/bin/raptor")
     XCTAssertEqual(Rexconfig.stabilizeOpt("/opt/homebrew/Cellar/raptor/"), "/opt/homebrew/Cellar/raptor/")
+
+    let root = NSTemporaryDirectory() + "raptor-opt-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    let keg = root + "/Cellar/raptor/0.1.1"
+    let plugin = keg + "/share/raptor/init.lua"
+    try FileManager.default.createDirectory(atPath: (plugin as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    try "-- fixture".write(toFile: plugin, atomically: true, encoding: .utf8)
+    try FileManager.default.createDirectory(atPath: root + "/opt", withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: root + "/opt/raptor", withDestinationPath: keg)
+    let candidate = root + "/opt/raptor/bin/../share/raptor/init.lua"
+    let resolved = Rexconfig.clean(candidate)
+    XCTAssertEqual(Rexconfig.stabilizeOpt(resolved), root + "/opt/raptor/share/raptor/init.lua")
 }

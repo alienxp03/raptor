@@ -6,7 +6,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/macos-common.sh"
 usage() {
   printf '%s\n' 'Usage: scripts/package-macos.sh [--arch arm64|x86_64 | --universal] [--skip-build]' \
     'Build and ZIP the bare raptor binary with the Rex plugin; write a SHA-256 checksum beside the ZIP.' \
-    'Environment: VERSION=0.0.1, DIST_DIR.' \
+    'Environment: VERSION=0.1.0, DIST_DIR.' \
     '--skip-build uses DIST_DIR/raptor; VERSION only names the archive.'
 }
 build_args=()
@@ -34,6 +34,8 @@ binary="$DIST_DIR/raptor"
 [[ -f $binary && ! -L $binary ]] || fail "Missing binary or binary is a symlink: $binary"
 [[ -x $binary ]] || fail "Binary is not executable: $binary"
 [[ -f $DIST_DIR/init.lua ]] || fail "Missing plugin beside the binary: $DIST_DIR/init.lua"
+actual_version=$("$binary" version)
+[[ $actual_version == "$CLI_VERSION" ]] || fail "Binary version $actual_version does not match CLI_VERSION $CLI_VERSION"
 binary_architecture "$binary"
 mkdir -p "$SCRIPT_ROOT/aux"
 work=$(mktemp -d "$SCRIPT_ROOT/aux/macos-package.XXXXXX")

@@ -13,7 +13,7 @@ struct LaunchOptions: Sendable {
 
     init(arguments: [String]) throws {
         var values: [String: String] = [:]
-        var demo = false
+        var demo = ProcessInfo.processInfo.environment["RAPTOR_DEMO"] == "1"
         var index = 0
         let supported = ["--mode", "--session", "--block", "--client", "--title", "--repo"]
         while index < arguments.count {

@@ -29,20 +29,27 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // scan inherits Rex's file-access grants instead of facing TCC alone.
     private var panelHost: PanelHost?
     private var focusTracker: RexFocusTracker?
+    private var demoMode: Bool { ProcessInfo.processInfo.environment["RAPTOR_DEMO"] == "1" }
     private lazy var receiptMonitor = RexReceiptMonitor { [weak self] in
         self?.model?.readReceiptsChanged()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installKeyboardMonitor()
-        let tracker = RexFocusTracker { [weak self] observation in
-            guard let model = self?.model else { return false }
-            return await model.observeRexFocus(observation)
+        if !demoMode {
+            let tracker = RexFocusTracker { [weak self] observation in
+                guard let model = self?.model else { return false }
+                return await model.observeRexFocus(observation)
+            }
+            focusTracker = tracker
+            tracker.start()
         }
-        focusTracker = tracker
-        tracker.start()
         ready = true
         startResident()
+    }
+
+    private func makeBackend(for options: LaunchOptions) -> any BackendClient {
+        demoMode ? DemoBackend(showcase: true) : ProcessBackend(options: options)
     }
 
     private func startResident() {
@@ -51,8 +58,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let options = try? LaunchOptions(arguments: []) else {
             fatalError("LaunchOptions must accept empty arguments")
         }
-        let backend: any BackendClient = ProcessBackend(options: options)
-        let next = PickerModel(options: options, backend: backend,
+        let next = PickerModel(options: options, backend: makeBackend(for: options),
                                pullRequestClipboard: { NSPasteboard.general.string(forType: .string) })
         model = next
         bindDismissal(next)
@@ -64,11 +70,18 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // standalone (scripts/test-macos.sh) without the package modules.
         let cacheBase = ProcessInfo.processInfo.environment["XDG_CACHE_HOME"]
             .flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory() + "/Library/Caches"
-        let host = PanelHost(path: cacheBase + "/raptor/panel.sock") { [weak self] request in
-            self?.handlePanelOpen(request) ?? PanelReply(ok: false, error: "host unavailable")
+        let socketDirectory = cacheBase + "/raptor"
+        do {
+            try FileManager.default.createDirectory(atPath: socketDirectory, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            let host = PanelHost(path: socketDirectory + "/panel.sock") { [weak self] request in
+                self?.handlePanelOpen(request) ?? PanelReply(ok: false, error: "host unavailable")
+            }
+            try host.start()
+            panelHost = host
+        } catch {
+            report(error)
         }
-        panelHost = host
-        do { try host.start() } catch { report(error) }
         // Queue backend and global directory warmup now. All pipe I/O is off
         // the main actor; no delayed start can reset the first open.
         next.start()
@@ -103,7 +116,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if current.backendIsClosed {
             // A closed connection cannot finish more work. Recover before the
             // busy gate, but never replace a live pending mutation.
-            attach(PickerModel(options: options, backend: ProcessBackend(options: options)))
+            attach(PickerModel(options: options, backend: makeBackend(for: options)))
         }
         guard let current = model else { return }
         guard !current.busy, current.removalCandidate == nil else {

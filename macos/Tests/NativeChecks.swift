@@ -3585,6 +3585,10 @@ struct NativeChecks {
         let decoded = try JSONDecoder().decode(APIResult.self, from: Data(#"{"suggested_branch":"amber-falcon"}"#.utf8))
         require(decoded.suggestedBranch == "amber-falcon")
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt-create", "--repo", "/demo"])
+        let noOpEdit = PickerModel(options: options, backend: DemoBackend())
+        noOpEdit.editBranch("") // SwiftUI may write the untouched empty binding on mount.
+        require(!noOpEdit.branchWasEdited, "A no-op binding write must not suppress the suggested branch")
+        noOpEdit.close()
         let demo = DemoBackend()
         let direct = PickerModel(options: options, backend: demo)
         direct.start()
@@ -3613,7 +3617,12 @@ struct NativeChecks {
             let model = PickerModel(options: options, backend: backend)
             model.start()
             try await pending("worktrees.form", backend)
-            if let edit { model.editBranch(edit) }
+            if edit == "" {
+                model.editBranch("feat/early")
+                model.editBranch("")
+            } else if let edit {
+                model.editBranch(edit)
+            }
             model.submitBranch()
             await backend.reply("worktrees.form", APIResult(targets: ["tab"], target: "tab", repo: "/demo",
                 branches: ["main"], baseBranch: "main", suggestedBranch: "quiet-otter"))

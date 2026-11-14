@@ -6,7 +6,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/macos-common.sh"
 usage() {
   printf '%s\n' 'Usage: scripts/build-macos.sh [--arch arm64|x86_64 | --universal]' \
     'Build dist/raptor (bare host/CLI binary; the resh model has no app bundle).' \
-    'Environment: VERSION=0.0.1, DIST_DIR. No install or publishing.'
+    'Environment: VERSION=0.1.0, CLI_VERSION defaults to VERSION, DIST_DIR. No install or publishing.'
 }
 ARCH=${ARCH:-$(uname -m)}
 while [[ $# -gt 0 ]]; do
@@ -26,7 +26,11 @@ need swift
 output_directory
 mkdir -p "$DIST_DIR"
 work=$(mktemp -d "$SCRIPT_ROOT/aux/macos-build.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+version_source="$SCRIPT_ROOT/Sources/raptor/VersionGenerated.swift"
+[[ -f $version_source ]] || fail 'Missing generated version source.'
+cp -p "$version_source" "$work/VersionGenerated.swift.original"
+trap 'cp -p "$work/VersionGenerated.swift.original" "$version_source"; rm -rf "$work"' EXIT
+printf '// Generated for this build; direct SwiftPM builds use the fallback.\nlet raptorVersion = "%s"\n' "$CLI_VERSION" > "$version_source"
 export CLANG_MODULE_CACHE_PATH="$work/clang-cache"
 export SWIFT_MODULECACHE_PATH="$work/swift-cache"
 

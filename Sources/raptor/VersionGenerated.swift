@@ -1,3 +1,3 @@
-// swift-tools-version-free generated file: rewritten by scripts/build-macos.sh
-// and Makefile with the release version at build time (Go's -ldflags -X).
-let raptorVersion = "0.0.1"
+// Development fallback for direct SwiftPM builds.
+// scripts/build-macos.sh temporarily injects the packaged CLI version here.
+let raptorVersion = "0.1.0"

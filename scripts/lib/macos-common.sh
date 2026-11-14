@@ -7,8 +7,10 @@ fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "Required tool not found: $1"; }
 macos_only() { [[ $(uname -s) == Darwin ]] || fail 'This command requires macOS.'; }
 version_value() {
-  VERSION=${VERSION:-0.0.1}
-  [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'VERSION must use numeric major.minor.patch format.'
+  VERSION=${VERSION:-0.1.0}
+  [[ $VERSION =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail 'VERSION must use numeric major.minor.patch format.'
+  CLI_VERSION=${CLI_VERSION:-$VERSION}
+  [[ $CLI_VERSION =~ ^[A-Za-z0-9][A-Za-z0-9.+_-]*$ ]] || fail 'CLI_VERSION must contain only letters, numbers, dots, plus, underscores, or hyphens.'
 }
 output_directory() {
   DIST_DIR=${DIST_DIR:-"$SCRIPT_ROOT/dist"}

@@ -21,6 +21,7 @@ done
 # The resh-model formula installs the bare binary and the Rex plugin.
 grep -Fq 'bin.install buildpath/"raptor"' "$work/raptor.rb"
 grep -Fq 'pkgshare.install buildpath/"init.lua"' "$work/raptor.rb"
+grep -Fq 'downloads/*Raptor-#{version}-universal.zip' "$work/raptor.rb"
 grep -Fq 'license "MIT"' "$work/raptor.rb"
 grep -Fq 'depends_on "fd"' "$work/raptor.rb"
 grep -Fq 'raptor init' "$work/raptor.rb"

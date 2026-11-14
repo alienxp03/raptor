@@ -1313,8 +1313,10 @@ final class PickerModel: ObservableObject {
         splitMode.toggle()
     }
 
-    // Record even an explicit empty edit before metadata arrives.
+    // SwiftUI can write the unchanged empty value when the field mounts. Treat
+    // that no-op as untouched, but preserve real edits (including clearing text).
     func editBranch(_ value: String) {
+        guard value != branch else { return }
         branchWasEdited = true
         branch = value
     }

@@ -52,6 +52,7 @@ public enum Rexconfig {
             var exe = executable
             let real = URL(fileURLWithPath: exe).resolvingSymlinksInPath().path
             if !real.isEmpty { exe = real }
+            exe = stabilizeOpt(exe)
             let dir = (exe as NSString).deletingLastPathComponent
             // Homebrew: …/opt/raptor/bin/raptor → …/opt/raptor/share/raptor/init.lua
             var candidates = [join(dir, "..", "share", "raptor", "init.lua")]
@@ -60,8 +61,11 @@ public enum Rexconfig {
             candidates.append(join(bundle, "Resources", "rex", "init.lua"))
             // macOS app next to a standalone CLI installation.
             candidates.append(join(bundle, "..", "..", "Resources", "rex", "init.lua"))
-            for candidate in candidates where isFile(clean(stabilizeOpt(candidate))) {
-                return clean(stabilizeOpt(candidate))
+            for candidate in candidates {
+                // Standardize first, because resolving an `opt` symlink can
+                // expose the Cellar path that must then be rewritten back to opt.
+                let stableCandidate = stabilizeOpt(clean(candidate))
+                if isFile(stableCandidate) { return stableCandidate }
             }
         }
         let home = homeDir()

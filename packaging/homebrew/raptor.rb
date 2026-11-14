@@ -21,6 +21,8 @@ class Raptor < Formula
       # Homebrew stages url downloads as bare files in HOMEBREW_CACHE;
       # unzip the release archive into the buildpath ourselves.
       patterns = [
+        HOMEBREW_CACHE.join("downloads/*Raptor-#{version}-universal.zip"),
+        HOMEBREW_CACHE.join("*Raptor-#{version}-universal.zip"),
         HOMEBREW_CACHE.join("downloads/*raptor-#{version}-universal.zip"),
         HOMEBREW_CACHE.join("*raptor-#{version}-universal.zip"),
         HOMEBREW_CACHE.join("raptor--#{version}.zip"),
@@ -34,7 +36,8 @@ class Raptor < Formula
       return
     end
 
-    ENV["VERSION"] = "0.0.1"
+    ENV["VERSION"] = "0.1.0"
+    ENV["CLI_VERSION"] = version.to_s
     ENV["DIST_DIR"] = buildpath/"dist"
 
     arch = Hardware::CPU.arm? ? "arm64" : "x86_64"
