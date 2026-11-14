@@ -10,7 +10,7 @@ A keyboard-first launcher for [Rex](https://www.superlogical.com/rex/docs). Find
 | --- | --- |
 | ![Pull request checkout form](docs/screenshots/pull-request.png) | ![Create a Worktrunk worktree](docs/screenshots/worktree-create.png) |
 
-[More screenshots](docs/screenshots/README.md) · [Usage and design notes](docs/native-app.md) · [Session behavior](docs/sessions.md)
+[28-second tour](docs/raptor-tour.mp4) · [More screenshots](docs/screenshots/README.md) · [Usage and design notes](docs/native-app.md) · [Session behavior](docs/sessions.md)
 
 ## Why Raptor
 

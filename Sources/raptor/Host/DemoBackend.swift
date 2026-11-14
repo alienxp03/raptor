@@ -111,6 +111,14 @@ actor DemoBackend: BackendClient {
             return APIResult()
         case "sessions.create":
             return APIResult()
+        case "sessions.rename":
+            let sessionID = text("session_id")
+            guard let index = sessionEntries.firstIndex(where: { $0.sessionID == sessionID }) else {
+                throw APIError.message("Session not found in demo data.")
+            }
+            sessionEntries[index].label = text("label")
+            sessionEntries[index].sessionLabel = text("label")
+            return APIResult()
         case "sessions.close":
             sessionEntries.removeAll { $0.path == text("session_id") }
             return APIResult()
