@@ -42,8 +42,8 @@ build_target() {
   local scratch="$work/spm-$target_arch"
   swift build -c release --product raptor --scratch-path "$scratch" \
     --arch "$target_arch" 2>&1 | { grep -Ev '^\[[0-9]+/[0-9]+\]' || true; }
-  cp "$(swift build -c release --product raptor --scratch-path "$scratch" --show-bin-path)/raptor" \
-    "$work/raptor-$target_arch"
+  cp "$(swift build -c release --product raptor --scratch-path "$scratch" \
+    --arch "$target_arch" --show-bin-path)/raptor" "$work/raptor-$target_arch"
 }
 
 if [[ $ARCH == universal ]]; then
