@@ -16,7 +16,7 @@ final class SessionPinSlotTests: XCTestCase {
         return path + "/session-pins.json"
     }
 
-    func testLegacyMigrationIsReadOnlyAndOverflowNeverPromoted() throws {
+    func testLegacyMigrationPreservesSlotsAndOverflowNeverPromoted() throws {
         let path = try isolate()
         let legacy = try JSONSerialization.data(withJSONObject: (1...11).map {
             ["sessionID": "s\($0)", "host": "h"]
@@ -24,11 +24,12 @@ final class SessionPinSlotTests: XCTestCase {
         try legacy.write(to: URL(fileURLWithPath: path))
         let pins = RaptorConfig.loadSessionPins()
         XCTAssertEqual(pins.map(\.slot), (1...9).map { Optional($0) } + [nil, nil])
-        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), legacy, "reads must not migrate disk")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path), "legacy pin file should be removed after migration")
         XCTAssertFalse(try RaptorConfig.toggleSessionPin(sessionID: "s3", host: "h"))
         let reloaded = RaptorConfig.loadSessionPins()
         XCTAssertEqual(reloaded.map(\.slot), [1, 2, 4, 5, 6, 7, 8, 9, nil, nil])
-        let disk = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [[String: Any]])
+        let state = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: RaptorConfig.sessionStatePath()))) as? [String: Any])
+        let disk = try XCTUnwrap(state["session_pins"] as? [[String: Any]])
         XCTAssertEqual(disk.suffix(2).compactMap { $0["slot"] as? Int }, [0, 0])
         XCTAssertTrue(try RaptorConfig.toggleSessionPin(sessionID: "new", host: "h"))
         XCTAssertEqual(RaptorConfig.loadSessionPins().last?.slot, 3)

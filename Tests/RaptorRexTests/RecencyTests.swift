@@ -93,20 +93,24 @@ final class RecencyTests: XCTestCase {
     }
 
     func testRecencyDamagedHistoryPreserved() throws {
-        let inputs = ["{", "", "{\"version\":99,\"visits\":[]}", "{\"version\":1,\"visits\":[{\"session_id\":\"short\"}]}", "null"]
+        let inputs: [Any] = ["{", "", ["version": 99, "visits": []],
+                             ["version": 1, "visits": [["session_id": "short"]]], NSNull()]
         for input in inputs {
             isolateRecency()
             let path = Rex.recencyPath()
-            try Data(input.utf8).write(to: URL(fileURLWithPath: path))
+            try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
+                                                    withIntermediateDirectories: true)
+            let state: [String: Any] = ["version": 1, "session_pins": [Any](), "session_recency": input]
+            let originalData = try JSONSerialization.data(withJSONObject: state, options: [.sortedKeys])
+            try originalData.write(to: URL(fileURLWithPath: path))
             XCTAssertEqual(Rex.loadSessionRecency().count, 0, "damaged history loaded")
-            let unchanged = readTextFile(path)
-            XCTAssertEqual(unchanged, input, "read changed input")
+            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), originalData, "read changed input")
             try Rex.recordSessionUse("", "session:new")
             let backups = (try? FileManager.default.contentsOfDirectory(atPath: (path as NSString).deletingLastPathComponent))?
-                .filter { $0.hasSuffix(".json.backup-") || $0.contains(".json.backup-") } ?? []
+                .filter { $0.contains("state.json.backup-") } ?? []
             XCTAssertEqual(backups.count, 1, "backups: \(backups)")
-            let original = readTextFile(((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(backups[0]))
-            XCTAssertEqual(original, input, "backup")
+            let original = try Data(contentsOf: URL(fileURLWithPath: (path as NSString).deletingLastPathComponent + "/" + backups[0]))
+            XCTAssertEqual(original, originalData, "backup")
             XCTAssertEqual(Rex.loadSessionRecency().rank("", "session:new"), 0, "did not recover")
         }
     }

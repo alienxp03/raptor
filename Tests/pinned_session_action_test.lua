@@ -5,7 +5,7 @@ local source, live, listingFailure = "pins-v1", true, false
 local scans = 0
 local real_open = io.open
 io.open = function(path, mode)
- if path == os.getenv("HOME") .. "/.config/raptor/session-pins.json" then
+ if path == os.getenv("HOME") .. "/Library/Application Support/raptor/state.json" then
   if not source then return nil end
   return { read = function() return source end, close = function() end }
  end
@@ -25,8 +25,9 @@ rex = {
   return { block = { owner = owner } }
  end },
  json = { decode = function(value)
-  assert(value == "resolved-pin")
-  return { sessionID = "session:target", host = host }
+  if value == "resolved-pin" then return { sessionID = "session:target", host = host } end
+  local slot = tonumber(value:match("pins%-v(%d+)")) or 1
+  return { session_pins = { { sessionID = "session:target", host = "", slot = slot } } }
  end },
  client = { queue = function(action, args)
   assert(action == "session.select")
@@ -71,7 +72,10 @@ fails("server unavailable")
 live, listingFailure = true, false
 assert(#executions == 9, "liveness failures must not spawn a replacement or picker")
 
--- Any edit, including removal, invalidates cached identities.
+-- Recency edits preserve the cache; changes to pins invalidate it.
+source = "recency-only"
+run(ctx)
+assert(#executions == 9, "recency changes must not invalidate pinned-session identities")
 source = "pins-v2"
 run(ctx)
 assert(#executions == 10)
@@ -103,4 +107,4 @@ owner = nil
 assert(not pcall(run, { session_id = "session", block_id = "origin" }))
 assert(#executions == count)
 io.open = real_open
-print("Pinned session actions: passed (9 slots, zero-process warm jumps, fresh liveness, pin-file invalidation, remote routing, failures)")
+print("Pinned session actions: passed (9 slots, zero-process warm jumps, fresh liveness, pin-only invalidation, remote routing, failures)")

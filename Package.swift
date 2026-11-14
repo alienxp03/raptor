@@ -7,14 +7,15 @@ let settings: [SwiftSetting] = [.swiftLanguageMode(.v5)]
 
 let packages: [(name: String, deps: [String])] = [
     ("RaptorPaths", []),
+    ("RaptorState", ["RaptorPaths"]),
     ("RaptorExecx", ["RaptorPaths"]),
     ("RaptorAgent", ["RaptorExecx", "RaptorPaths"]),
-    ("RaptorConfig", ["RaptorPaths"]),
+    ("RaptorConfig", ["RaptorPaths", "RaptorState"]),
     ("RaptorRexconfig", ["RaptorPaths"]),
     ("RaptorLauncherupdate", ["RaptorPaths"]),
     ("RaptorTheme", ["RaptorPaths"]),
     ("RaptorPanel", ["RaptorPaths"]),
-    ("RaptorRex", ["RaptorExecx", "RaptorPaths", "RaptorLauncherupdate"]),
+    ("RaptorRex", ["RaptorExecx", "RaptorPaths", "RaptorLauncherupdate", "RaptorState"]),
     ("RaptorWorktree", ["RaptorConfig", "RaptorExecx", "RaptorPaths"]),
     ("RaptorCatalog", ["RaptorConfig", "RaptorPaths", "RaptorRex", "RaptorWorktree"]),
     ("RaptorPullrequest", ["RaptorPaths", "RaptorRex", "RaptorWorktree"]),

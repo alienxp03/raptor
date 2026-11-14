@@ -1,4 +1,5 @@
 import Foundation
+import RaptorState
 
 /// A session ID is unique only within its host. Store the launcher's host verbatim.
 public struct SessionPin: Codable, Hashable {
@@ -43,13 +44,40 @@ public struct SessionPin: Codable, Hashable {
 }
 
 public extension RaptorConfig {
-    private static var sessionPinsPath: String {
-        (configPath() as NSString).deletingLastPathComponent + "/session-pins.json"
-    }
+    static func sessionStatePath() -> String { RaptorStateStore.statePath() }
 
     static func loadSessionPins() -> [SessionPin] {
-        guard let data = FileManager.default.contents(atPath: sessionPinsPath),
+        guard let state = try? RaptorStateStore.read() else { return [] }
+        return normalizedSessionPins(decodeSessionPins(state[RaptorStateStore.sessionPinsKey]))
+    }
+
+    /// Does not change legacy directory pins or other config settings.
+    @discardableResult
+    static func toggleSessionPin(sessionID: String, host: String) throws -> Bool {
+        try RaptorStateStore.update { state, _, _ in
+            let pin = SessionPin(sessionID: sessionID, host: host)
+            var pins = normalizedSessionPins(decodeSessionPins(state[RaptorStateStore.sessionPinsKey]))
+            let found = pins.contains(pin)
+            pins.removeAll { $0 == pin }
+            if !found {
+                let used = Set(pins.compactMap(\.slot))
+                pins.append(SessionPin(sessionID: sessionID, host: host,
+                                       slot: (1...9).first { !used.contains($0) }))
+            }
+            let data = try JSONEncoder().encode(pins)
+            state[RaptorStateStore.sessionPinsKey] = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+            return !found
+        }
+    }
+
+    private static func decodeSessionPins(_ value: Any?) -> [SessionPin] {
+        guard let value,
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]),
               let pins = try? JSONDecoder().decode([SessionPin].self, from: data) else { return [] }
+        return pins
+    }
+
+    private static func normalizedSessionPins(_ pins: [SessionPin]) -> [SessionPin] {
         var seen = Set<SessionPin>()
         var normalized = pins.filter { seen.insert($0).inserted }
         var used = Set<Int>()
@@ -66,24 +94,5 @@ public extension RaptorConfig {
             if let slot { used.insert(slot) }
         }
         return normalized
-    }
-
-    /// Does not change legacy directory pins or other config settings.
-    @discardableResult
-    static func toggleSessionPin(sessionID: String, host: String) throws -> Bool {
-        let pin = SessionPin(sessionID: sessionID, host: host)
-        var pins = loadSessionPins()
-        let found = pins.contains(pin)
-        pins.removeAll { $0 == pin }
-        if !found {
-            let used = Set(pins.compactMap(\.slot))
-            pins.append(SessionPin(sessionID: sessionID, host: host,
-                                   slot: (1...9).first { !used.contains($0) }))
-        }
-        let path = sessionPinsPath
-        try FileManager.default.createDirectory(
-            atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try JSONEncoder().encode(pins).write(to: URL(fileURLWithPath: path), options: .atomic)
-        return !found
     }
 }

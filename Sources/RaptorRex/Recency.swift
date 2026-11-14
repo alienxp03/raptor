@@ -1,11 +1,11 @@
 import Foundation
 import RaptorExecx
-import RaptorPaths
+import RaptorState
 
 public extension Rex {
     static let recencyLimit = 256
-    static let recencyLockTimeout: TimeInterval = 0.25
-    static let recencyLockRetry: TimeInterval = 0.001
+    static let recencyLockTimeout: TimeInterval = RaptorStateStore.lockTimeout
+    static let recencyLockRetry: TimeInterval = RaptorStateStore.lockRetry
 
     /// Process start time, mirroring Go's package var captured at init.
     static let recencyStartedAt = Date()
@@ -90,54 +90,63 @@ public extension Rex {
     /// LoadSessionRecency reads history only. It never calls Rex or changes history.
     static func loadSessionRecency() -> SessionRecency {
         let (doc, _, error) = readRecency(recencyPath(), Date())
+        guard error == nil else { return SessionRecency() }
         var ranks: [String: Int] = [:]
-        if error != nil {
-            return SessionRecency(ranks)
-        }
         for (i, visit) in doc.visits.enumerated() {
             ranks[recencyKey(visit.host, visit.sessionID)] = i
         }
         return SessionRecency(ranks)
     }
 
-    /// Returns (document, damaged original bytes, error). A nil error with a nil
-    /// damaged payload means the file did not exist yet.
+    /// Returns the recency section and the full state bytes when that section is
+    /// damaged, so a later repair can preserve the original state as a backup.
     static func readRecency(_ path: String, _ now: Date) -> (RecencyDocument, Data?, Error?) {
-        var doc = RecencyDocument(version: 1)
-        guard let data = FileManager.default.contents(atPath: path) else {
-            return (doc, nil, nil)
+        let original = FileManager.default.contents(atPath: path)
+        do {
+            let state = try RaptorStateStore.read()
+            return readRecencySection(state[RaptorStateStore.sessionRecencyKey], now, original)
+        } catch {
+            return (RecencyDocument(version: 1), original, RexError("invalid Raptor state: \(error.localizedDescription)"))
         }
-        // Go's json.Unmarshal treats the literal `null` as a zero document, so
-        // version 0 fails the version check below rather than parse failing.
+    }
+
+    private static func readRecencySection(_ value: Any?, _ now: Date, _ damaged: Data?)
+        -> (RecencyDocument, Data?, Error?) {
+        guard let dict = value as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: dict) else {
+            return (RecencyDocument(version: 1), damaged, RexError("invalid session history document"))
+        }
+        let (doc, _, error) = readRecencyDocument(data, now)
+        return (doc, error == nil ? nil : damaged, error)
+    }
+
+    private static func readRecencyDocument(_ data: Data, _ now: Date) -> (RecencyDocument, Data?, Error?) {
+        var doc = RecencyDocument(version: 1)
         let trimmed = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == "null" {
             doc = RecencyDocument(version: 0)
             return (doc, data, RexError("unsupported session history version 0"))
         }
-        if trimmed != "null" {
-            guard let obj = try? JSONSerialization.jsonObject(with: data) else {
-                return (doc, data, RexError("invalid JSON"))
-            }
-            guard let dict = obj as? [String: Any] else {
-                return (doc, data, RexError("invalid document"))
-            }
-            doc = RecencyDocument(
-                version: dict["version"] as? Int ?? 0,
-                visits: [])
-            if let visits = dict["visits"] as? [[String: Any]] {
-                for visit in visits {
-                    let atRaw = visit["at"] as? String ?? ""
-                    let at = parseRFC3339(atRaw) ?? zeroTime
-                    doc.visits.append(RecencyVisit(
-                        host: visit["host"] as? String ?? "",
-                        sessionID: visit["session_id"] as? String ?? "",
-                        at: at))
-                }
-            } else if dict["visits"] != nil {
-                return (doc, data, RexError("invalid visits"))
-            }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) else {
+            return (doc, data, RexError("invalid JSON"))
         }
-        if doc.version != 1 {
+        guard let dict = obj as? [String: Any] else {
+            return (doc, data, RexError("invalid document"))
+        }
+        doc = RecencyDocument(version: dict["version"] as? Int ?? 0, visits: [])
+        if let visits = dict["visits"] as? [[String: Any]] {
+            for visit in visits {
+                let atRaw = visit["at"] as? String ?? ""
+                let at = parseRFC3339(atRaw) ?? zeroTime
+                doc.visits.append(RecencyVisit(
+                    host: visit["host"] as? String ?? "",
+                    sessionID: visit["session_id"] as? String ?? "",
+                    at: at))
+            }
+        } else if dict["visits"] != nil {
+            return (doc, data, RexError("invalid visits"))
+        }
+        guard doc.version == 1 else {
             return (doc, data, RexError("unsupported session history version \(doc.version)"))
         }
         var seen = Set<String>()
@@ -170,7 +179,7 @@ public extension Rex {
     }
 
     static func recencyPath() -> String {
-        RaptorPaths.cacheDir() + "/session-recency.json"
+        RaptorStateStore.statePath()
     }
 
     /// RecordSessionVisit merges a validated focus observation. Times must describe
@@ -193,99 +202,28 @@ public extension Rex {
         let (host, sessionID, ok) = recencyTarget(host, sessionID)
         // Short fixture IDs must never enter the user's real history.
         guard ok, validRecencyTime(at, now) else { return }
-        let path = recencyPath()
-        let fd = open(path + ".lock", O_CREAT | O_RDWR, mode_t(0o600))
-        guard fd >= 0 else {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EPERM)
-        }
-        defer { close(fd) }
-        try lockRecency(fd)
-        defer { flock(fd, LOCK_UN) }
-        // Other writers may have committed after this call captured its timestamp.
-        // Validate disk timestamps against the clock after acquiring the lock.
-        var readNow = Date()
-        if now > readNow {
-            readNow = now
-        }
-        var (doc, damaged, error) = readRecency(path, readNow)
-        if let error {
-            guard let damaged else { throw error }
-            // Preserve the exact original, including unsupported future documents.
-            try saveRecencyFile(path + ".backup-", data: damaged, replace: false)
-            doc = RecencyDocument(version: 1)
-        }
-        for visit in doc.visits where visit.host == host {
-            if (visit.sessionID == sessionID && at <= visit.at) || (initial && visit.at >= startedAt) {
-                return
+        try RaptorStateStore.update { state, original, statePath in
+            // Validate the snapshot against the clock after acquiring the shared lock;
+            // another writer may have committed a later observation while we waited.
+            var readNow = Date()
+            if now > readNow { readNow = now }
+            var (doc, damaged, error) = readRecencySection(
+                state[RaptorStateStore.sessionRecencyKey], readNow, original)
+            if let error {
+                guard let damaged else { throw error }
+                try RaptorStateStore.backup(damaged, beside: statePath, suffix: "backup")
+                doc = RecencyDocument(version: 1)
             }
-        }
-        doc.visits = doc.visits.filter { $0.host != host || $0.sessionID != sessionID }
-        doc.visits.append(RecencyVisit(host: host, sessionID: sessionID, at: at))
-        sortRecency(&doc)
-        let data = encodeRecency(doc)
-        try saveRecencyFile(path, data: data, replace: true)
-    }
-
-    /// Keep the same lock inode across writers, including after a timeout. The lock
-    /// covers the complete read/merge/rename so concurrent updates remain atomic.
-    static func lockRecency(_ fd: Int32) throws {
-        let deadline = Date().addingTimeInterval(recencyLockTimeout)
-        while true {
-            if flock(fd, LOCK_EX | LOCK_NB) == 0 {
-                return
+            for visit in doc.visits where visit.host == host {
+                if (visit.sessionID == sessionID && at <= visit.at) || (initial && visit.at >= startedAt) {
+                    return
+                }
             }
-            let e = errno
-            if e != EWOULDBLOCK && e != EINTR {
-                throw POSIXError(POSIXErrorCode(rawValue: e) ?? .EPERM)
-            }
-            let remaining = deadline.timeIntervalSinceNow
-            if remaining <= 0 {
-                // Go wraps the EWOULDBLOCK flock error into the timeout error.
-                throw POSIXError(.EWOULDBLOCK)
-            }
-            usleep(useconds_t(min(recencyLockRetry, remaining) * 1_000_000))
+            doc.visits = doc.visits.filter { $0.host != host || $0.sessionID != sessionID }
+            doc.visits.append(RecencyVisit(host: host, sessionID: sessionID, at: at))
+            sortRecency(&doc)
+            state[RaptorStateStore.sessionRecencyKey] = try JSONSerialization.jsonObject(with: encodeRecency(doc))
         }
-    }
-
-    static func saveRecencyFile(_ path: String, data: Data, replace: Bool) throws {
-        let dir = (path as NSString).deletingLastPathComponent
-        var pattern = (path as NSString).lastPathComponent
-        if replace {
-            pattern += ".tmp-"
-        }
-        let name = (dir as NSString).appendingPathComponent(pattern + UUID().uuidString)
-        let fd = open(name, O_CREAT | O_EXCL | O_WRONLY, mode_t(0o600))
-        guard fd >= 0 else {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EPERM)
-        }
-        var keep = false
-        defer {
-            close(fd)
-            if !keep {
-                remove(name)
-            }
-        }
-        let bytes = [UInt8](data)
-        var written = 0
-        while written < bytes.count {
-            let n = bytes.withUnsafeBufferPointer { buffer -> Int in
-                write(fd, buffer.baseAddress! + written, bytes.count - written)
-            }
-            if n <= 0 {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-            written += n
-        }
-        guard fsync(fd) == 0 else {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-        }
-        if replace {
-            guard rename(name, path) == 0 else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-            return
-        }
-        keep = true
     }
 
     static func encodeRecency(_ doc: RecencyDocument) -> Data {

@@ -4,8 +4,15 @@ import RaptorRex
 @testable import RaptorCatalog
 
 final class SessionOrderTests: XCTestCase {
+    private func isolateState() {
+        let home = testTempDir()
+        setenvTemp("HOME", home)
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: home) }
+        setenvTemp("XDG_CACHE_HOME", home + "/cache")
+    }
+
     func testSessionRecencyOrderingIsScopedStableAndPresentationBound() throws {
-        setenvTemp("XDG_CACHE_HOME", testTempDir())
+        isolateState()
         let now = Date()
         let visits: [(host: String, id: String)] = [
             ("", testRecentSessionID(2)), ("", testRecentSessionID(5)), ("hades", testRecentSessionID(3)),
@@ -53,7 +60,7 @@ final class SessionOrderTests: XCTestCase {
     }
 
     func testSessionRecencyIsFuzzySearchTieBreaker() throws {
-        setenvTemp("XDG_CACHE_HOME", testTempDir())
+        isolateState()
         try Rex.recordSessionVisit("", testRecentSessionID(2), Date(), false)
         var items = [
             LauncherItem(kind: "session", sessionID: testRecentSessionID(1), label: "work", host: "Mac", local: true),

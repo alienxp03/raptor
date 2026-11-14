@@ -41,7 +41,7 @@ On an empty-query open or reopen, select the current session, even below pinned 
 
 The rank snapshot stays fixed while the picker is open. Agent reports, title changes, and background work do not change recency. Search puts matching open sessions before directories. Within each group, exact names lead fuzzy matches, with recent-use order for ties. Each match stays within one name, path, or hostname. A leading dot does not prevent an exact folder match: `pi` finds `.pi` before scattered directory-path matches. Pins affect empty-query order only; search keeps relevance and recent-use tie order.
 
-History builds from observed visits, not inferred past activity. Up to 256 host/session timestamps persist in `$XDG_CACHE_HOME/raptor/session-recency.json`, or `~/Library/Caches/raptor/session-recency.json` by default. The file is private and atomically updated. Missing focus preferences do not clear history.
+History builds from observed visits, not inferred past activity. Up to 256 host/session timestamps and host-qualified session pins persist together in `~/Library/Application Support/raptor/state.json` (directory mode 0700, file mode 0600). Raptor migrates existing pins and recency history there on first access. Directory pins and user-editable settings remain in `~/.config/raptor/config.toml`. Missing focus preferences do not clear history.
 
 ## Last Session
 

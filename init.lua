@@ -258,15 +258,25 @@ function M.setup(options)
 		end,
 	})
 
-	-- Cache only resolved identities, never liveness. The backend owns slot and
-	-- host normalization; changed pin-file bytes invalidate every cached slot.
+	-- Cache only resolved identities, never liveness. Fingerprint just the pin
+	-- section so recency writes to the shared state file don't flush this cache.
 	local pin_source, pin_cache = nil, {}
 	local function read_pin_source()
-		local file = io.open(os.getenv("HOME") .. "/.config/raptor/session-pins.json", "rb")
+		local path = os.getenv("HOME") .. "/Library/Application Support/raptor/state.json"
+		local file = io.open(path, "rb")
 		if not file then return nil end
 		local contents = file:read("*a")
 		file:close()
-		return contents
+		local ok, state = pcall(rex.json.decode, contents)
+		if not ok or type(state) ~= "table" or type(state.session_pins) ~= "table" then return nil end
+		local pins = {}
+		for _, pin in ipairs(state.session_pins) do
+			if type(pin) == "table" then
+				local host, id = tostring(pin.host or ""), tostring(pin.sessionID or "")
+				pins[#pins + 1] = #host .. ":" .. host .. #id .. ":" .. id .. ":" .. tostring(pin.slot or 0)
+			end
+		end
+		return table.concat(pins, "\n")
 	end
 
 	-- Register actions only; user config owns the Rex-wide shortcuts.

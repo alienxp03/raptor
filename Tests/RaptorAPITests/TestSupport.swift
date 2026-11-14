@@ -73,6 +73,9 @@ class APITestCase: XCTestCase {
         // Disable it wholesale: exact-row assertions must not see the operator's
         // home directory. Set it through TestEnv so tearDown restores it.
         env.set("RAPTOR_DISABLE_DIR_SCAN", "1")
+        let home = makeTempDir()
+        env.set("HOME", home)
+        addTeardown { try? FileManager.default.removeItem(atPath: home) }
     }
 
     func addTeardown(_ block: @escaping () -> Void) {

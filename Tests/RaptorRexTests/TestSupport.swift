@@ -74,6 +74,7 @@ extension XCTestCase {
     @discardableResult
     func fakeRex() -> String {
         let dir = testTempDir()
+        setenvTemp("HOME", testTempDir())
         setenvTemp("XDG_CACHE_HOME", testTempDir())
         prependPATH(dir)
         let log = dir + "/calls"
