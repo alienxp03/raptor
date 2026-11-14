@@ -44,18 +44,32 @@ rex config reload
 | `⌃⌘1`–`⌃⌘9` | Jump to a pinned session, Rex-wide |
 | `⌃P`, then `H J K L` | Choose a pane split |
 
-In the picker, type to search; `↑`/`↓` or `Ctrl+J`/`Ctrl+K` moves through results. `Ctrl+O` changes the open target. `⌘/` shows searchable shortcuts.
+In the picker, type to search; `↑`/`↓` or `Ctrl+J`/`Ctrl+K` moves through results. `Ctrl+O` changes the open target. `⌘/` shows the searchable, context-sensitive shortcut list.
 
-## Worktrunk paths
+## Customize keybindings
 
-Worktrunk controls where Raptor creates worktrees. For example:
+`raptor init` adds these default Rex bindings. You can add alternatives or replace defaults in your Rex config (`~/.config/rex/init.lua`). Keep custom lines outside the `raptor` managed block so `raptor init` preserves them.
 
-```toml
-# ~/.config/worktrunk/config.toml
-worktree-path = "~/workspace/worktrees/{{ repo }}/{{ branch | sanitize }}"
+| Default key | Rex action | What it does |
+| --- | --- | --- |
+| `⇧⌘O` | `raptor` | Open the picker |
+| `⇧⌘C` | `raptor_pr_open` | Check out a pull request |
+| `⇧⌘N` | `raptor_worktree_new` | Open the create-worktree form |
+| `⌘⌥N` | `raptor_worktree_agent` | Create an instant Pi worktree |
+| `⌃⌘1`–`⌃⌘9` | `raptor_pin_1`–`raptor_pin_9` | Jump to a pinned session |
+
+To change what a key does, bind that same key again; the later binding wins, so no unbind is needed. To move Raptor to a new key and free the old one, add this after the managed block:
+
+```lua
+rex.unbind("shift+cmd+o", "raptor")
+rex.bind("ctrl+cmd+o", "raptor")
 ```
 
-Use `wt list` and `wt remove` to manage worktrees outside Raptor. Project setup hooks run visibly in the destination terminal.
+To keep the default and add an alternative, just add the new `rex.bind`. Reload with `rex config reload`. Other shortcuts in the picker are app-level; view the full current list with `⌘/`.
+
+## Worktree
+
+Raptor uses [Worktrunk](https://worktrunk.dev/) to create and manage worktrees. Configure worktree paths in [Worktrunk's config](https://worktrunk.dev/config/) and hooks in its [hook config](https://worktrunk.dev/hook/). Use `wt list` and `wt remove` to manage worktrees outside Raptor. Project setup hooks run visibly in the destination terminal.
 
 ## Development
 
