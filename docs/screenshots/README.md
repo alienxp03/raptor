@@ -1,14 +1,15 @@
 # Native macOS showcase
 
-Native Raptor views rendered at 2× with synthetic project names, paths, and data. The screenshots use demo-style backends; no live Rex sessions or Git worktrees were changed.
+Synthetic Raptor UI rendered at 2× for documentation. Project/session names, hosts, paths, branches, pull requests, and status output are fictional. Captures use the demo backend; they do not read live Rex sessions or modify Git worktrees.
 
-| Screenshot | Feature notes |
+| Screenshot | Feature |
 | --- | --- |
-| [Session launcher](directories.png) | Search live sessions and saved folders. The most-recent non-current session is selected by default. Ctrl+O changes the open target. |
-| [Pull request](pr.png) | Paste any GitHub PR URL. Raptor resolves metadata, previews the destination, and opens the worktree in a session or tab. |
-| [Split mode](split-mode.png) | Ctrl+P starts directional splitting. Use H/J/K/L or arrows; Escape cancels. |
-| [Create worktree](create-worktree.png) | Choose a branch and base, preview the destination, then create and open. Opening can be retried without creating again. |
+| [Session search](search.png) | Filter sessions and directories across hosts; open the selected result in the chosen target. |
+| [Pinned sessions](sessions.png) | Keep favorite sessions in fixed jump slots and see live activity at a glance. |
+| [Worktrunk worktrees](worktrees.png) | Browse the repo’s primary checkout and branches managed by Worktrunk. |
+| [Create worktree](worktree-create.png) | Preview branch, base, destination, open target, and optional agent launch. |
+| [Safe deletion review](delete-review.png) | Review verified worktrees, locked primary checkouts, and force warnings before removal. |
+| [Pull request checkout](pull-request.png) | Resolve a fictional PR and preview its branch and destination before opening. |
+| [Pane split](split-mode.png) | Choose a split direction with the keyboard. |
 
-The Mac UI uses system fonts, native glass, and keyboard controls. Mac and terminal interfaces share the same Go search, worktree creation, and Rex action logic.
-
-Open [index.html](index.html) locally for the gallery.
+Regenerate on macOS with `scripts/capture-showcase.sh`. Open [index.html](index.html) for the image gallery.

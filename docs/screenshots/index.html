@@ -8,13 +8,15 @@ body{margin:0;background:#202020;color:#ddd;font:14px/1.6 system-ui}main{max-wid
 </style>
 <main>
 <h1>Raptor · Native macOS showcase</h1>
-<p class="intro">System fonts and keyboard controls. Native views with synthetic project names, paths, and output.</p>
+<p class="intro">Fictional names and data, rendered with the demo backend. No live Rex sessions or Git worktrees were touched.</p>
 <div class="grid">
-<figure><img src="directories.png" alt="Session and directory launcher"><figcaption><h2>Sessions and directories</h2><p>Resume a session or open a project. The most-recent non-current session is selected by default.</p></figcaption></figure>
-<figure><img src="pr.png" alt="Open pull request form"><figcaption><h2>Pull requests</h2><p>Paste a GitHub PR URL; Raptor previews title, branch, and destination, then opens the worktree in a session or tab.</p></figcaption></figure>
-<figure><img src="split-mode.png" alt="Directional split selection"><figcaption><h2>Split mode</h2><p>Ctrl+P starts directional splitting. Use H/J/K/L or arrows; Escape cancels.</p></figcaption></figure>
-<figure><img src="create-worktree.png" alt="New worktree form"><figcaption><h2>Create worktree</h2><p>Choose a branch and base, preview the destination, then create and open. Opening can be retried without creating again.</p></figcaption></figure>
+<figure><img src="search.png" alt="Searching sessions and directories"><figcaption><h2>Search and switch</h2><p>Filter open sessions and project directories, then open the selected result in a new session or another target.</p></figcaption></figure>
+<figure><img src="sessions.png" alt="Pinned sessions and directories"><figcaption><h2>Pinned sessions</h2><p>Fixed shortcut slots make favorite sessions quick to reach across Rex.</p></figcaption></figure>
+<figure><img src="worktrees.png" alt="Worktrunk-managed worktrees"><figcaption><h2>Worktrunk worktrees</h2><p>Browse a repository’s primary checkout and its feature branches.</p></figcaption></figure>
+<figure><img src="worktree-create.png" alt="Create a worktree and choose an agent"><figcaption><h2>Create and launch</h2><p>Preview the branch and destination, choose where to open it, and optionally launch an agent.</p></figcaption></figure>
+<figure><img src="delete-review.png" alt="Safety review before deleting worktrees"><figcaption><h2>Safe deletion</h2><p>Review checks, primary checkout locks, and force warnings before confirming removal.</p></figcaption></figure>
+<figure><img src="pull-request.png" alt="Pull request checkout preview"><figcaption><h2>Pull requests</h2><p>Preview a PR’s branch and destination before opening it in a session.</p></figcaption></figure>
+<figure><img src="split-mode.png" alt="Keyboard pane split selection"><figcaption><h2>Pane splits</h2><p>Choose the split direction from the keyboard.</p></figcaption></figure>
 </div>
-<p>Mac and terminal interfaces share Go search, worktree creation, and Rex action logic. Synthetic renders do not change live sessions or Git worktrees.</p>
 </main>
 </html>

@@ -429,7 +429,7 @@ struct NativeChecks {
         try await pin("session:demo-1")
         try await pin("session:demo-2")
         try await pin("session:demo-1")
-        try await pin("session:demo-3", "Demo Host")
+        try await pin("session:demo-3", "Build Host")
         let rows = try await backend.request("sessions", params: [:]).items ?? []
         require(rows.first(where: { $0.path == "session:demo-2" })?.pinnedSessionShortcut == "⌃⌘2",
                 "Unpinning slot 1 must not renumber slot 2")
@@ -1297,7 +1297,7 @@ struct NativeChecks {
         model.start()
         try await wait { !model.loading }
         require(model.page == .worktrees && model.items.count == 3)
-        require(model.destinationRoot == "/Users/demo/Projects/example-kit-worktrees",
+        require(model.destinationRoot == "/Users/demo/Projects/orbit-web-worktrees",
                      "Default destination must come from shared backend before branch input")
         require(PickerStyle.width == 640 && PickerStyle.height(for: model) == 198,
                      "The picker must use a wider layout with compact, content-fitted height")
@@ -1340,7 +1340,7 @@ struct NativeChecks {
         require(PickerStyle.height(for: model) == 382, "Agent changes must not resize the section")
         model.branch = "feat/test"
         try await wait { model.previewReady }
-        require(model.canCreate && model.destination == "/Users/demo/Projects/example-kit-worktrees/feat-test")
+        require(model.canCreate && model.destination == "/Users/demo/Projects/orbit-web-worktrees/feat-test")
         model.create()
         model.create()
         try await wait { !model.busy }
@@ -1456,7 +1456,7 @@ struct NativeChecks {
                      "Internal browser helper must retain the selected repository")
         try await wait { !directoryCreate.loading }
         directoryCreate.beginCreate()
-        require(directoryCreate.page == .create && directoryCreate.repo == "/Users/demo/Projects/example-kit",
+        require(directoryCreate.page == .create && directoryCreate.repo == "/Users/demo/Projects/orbit-web",
                      "New from worktrees must open Create in the backend-resolved repository")
         try await wait { !directoryCreate.loading }
         directoryCreate.escape()
@@ -2720,14 +2720,14 @@ struct NativeChecks {
         require(model.view == .agents && !model.loading && model.canOpen)
         try await wait { !model.refreshing }
         require(model.items.count == 3 && Set(model.items.map(\.id)).count == 3)
-        model.query = "picker"
+        model.query = "atlas"
         try await wait { !model.refreshing }
         require(model.items.count == 2)
         model.selectedID = model.items[1].id; model.scrollID = model.items[1].id
         let selected = model.selectedID
         model.selectView(.sessions)
         model.selectView(.agents)
-        require(model.view == .agents && model.query == "picker" && model.selectedID == selected && model.scrollID == selected && model.canOpen)
+        require(model.view == .agents && model.query == "atlas" && model.selectedID == selected && model.scrollID == selected && model.canOpen)
         model.selectView(.agents)
         require(model.view == .agents, "Selecting the same internal view must not cycle")
         model.togglePin(); model.askRemove(); model.beginCreate(); model.showWorktrees(); model.toggleSplit()
@@ -2826,14 +2826,14 @@ struct NativeChecks {
         let pinned = PickerModel(options: try LaunchOptions(arguments: ["--demo"]), backend: pinsBackend)
         pinned.start()
         try await wait { !pinned.loading }
-        pinned.selectedID = pinned.items.first { $0.path == "/Users/demo/.dotfiles" }?.id
+        pinned.selectedID = pinned.items.first { $0.path == "/Users/demo/.config" }?.id
         pinned.togglePin()
         try await wait { !pinned.busy && !pinned.refreshing }
-        require(pinned.items.first { $0.path == "/Users/demo/.dotfiles" }?.isPinned == true,
+        require(pinned.items.first { $0.path == "/Users/demo/.config" }?.isPinned == true,
                      "Toggled pins must come back from the backend")
         let pinCount = await pinsBackend.count("pins.toggle")
         require(pinCount == 1, "Pinning must ask the backend once")
-        pinned.selectedID = pinned.items.first { $0.kind == "session" && $0.host == "Demo Host" }?.id
+        pinned.selectedID = pinned.items.first { $0.kind == "session" && $0.host == "Build Host" }?.id
         let sessionID = pinned.selectedID
         require(sessionID != nil && pinned.canPin, "Demo remote sessions must support pinning")
         pinned.togglePin()
@@ -2852,7 +2852,7 @@ struct NativeChecks {
         resident.start()
         try await wait { !resident.loading }
         let contexts = await backend.contextUpdateCount
-        await resident.reconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/Users/demo/Projects/example-kit"]))
+        await resident.reconfigure(try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/Users/demo/Projects/orbit-web"]))
         try await wait { !resident.loading }
         require(resident.page == .directories && resident.view == .sessions,
                      "Legacy wt reopen must normalize to Sessions")
@@ -3591,7 +3591,7 @@ struct NativeChecks {
         direct.submitBranch() // Loading Enter must not be queued.
         try await wait { direct.canCreate }
         require(direct.branch == "amber-falcon" && direct.base == "main" && direct.target == "session")
-        require(direct.destination == "/Users/demo/Projects/example-kit-worktrees/amber-falcon")
+        require(direct.destination == "/Users/demo/Projects/orbit-web-worktrees/amber-falcon")
         let before = await demo.count("worktrees.create")
         require(before == 0 && !direct.basePickerPresented)
         direct.submitBranch()
@@ -3601,9 +3601,9 @@ struct NativeChecks {
         require(creates == 1 && opens == 1, "One Enter creates and opens; repeated Enter cannot duplicate")
         let params = await demo.parameters("worktrees.create")
         if case .text("amber-falcon") = params["branch"], case .text("main") = params["base"],
-           case .text("/Users/demo/Projects/example-kit") = params["repo"] {} else { testFailure("Wrong default create params") }
+           case .text("/Users/demo/Projects/orbit-web") = params["repo"] {} else { testFailure("Wrong default create params") }
         let dispatch = await demo.parameters("dispatch")
-        if case .text("session") = dispatch["target"], case .text("/Users/demo/Projects/example-kit-worktrees/amber-falcon") = dispatch["path"] {} else { testFailure("Wrong default dispatch") }
+        if case .text("session") = dispatch["target"], case .text("/Users/demo/Projects/orbit-web-worktrees/amber-falcon") = dispatch["path"] {} else { testFailure("Wrong default dispatch") }
         direct.close()
 
         // Explicit metadata responses cover loading, early edits and authoritative collisions.

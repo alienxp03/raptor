@@ -3,11 +3,11 @@ import Foundation
 // Synthetic data only. This type never creates a Process or accesses the file system.
 actor DemoBackend: BackendClient {
     private var worktrees = [
-        PickerItem(path: "/Users/demo/Projects/example-kit", branch: "main", isMain: true, state: "blocked", working: true, updatedAt: ISO8601DateFormatter().string(from: Date())),
-        PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/native-picker", branch: "feat/native-picker", isMain: false, state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date())),
-        PickerItem(path: "/Users/demo/Projects/example-kit-worktrees/fix-focus", branch: "fix/focus", isMain: false, state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()))
+        PickerItem(path: "/Users/demo/Projects/orbit-web", branch: "main", isMain: true, state: "blocked", working: true, updatedAt: ISO8601DateFormatter().string(from: Date())),
+        PickerItem(path: "/Users/demo/Projects/orbit-web-worktrees/fast-search", branch: "feat/fast-search", isMain: false, state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date())),
+        PickerItem(path: "/Users/demo/Projects/orbit-web-worktrees/fix-focus", branch: "fix/focus", isMain: false, state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()))
     ]
-    private var pinned: Set<String> = ["/Users/demo/Workspace/Projects/raptor"]
+    private var pinned: Set<String> = ["/Users/demo/Workspace/Projects/orbit-web"]
     private var pinnedSessions: Set<String> = []
     private var pinSlots: [String: Int] = [:]
     private var contextUpdates = 0
@@ -17,20 +17,27 @@ actor DemoBackend: BackendClient {
     private var calls: [String] = []
     private var lastParams: [String: [String: APIValue]] = [:]
     private let agents = [
-        PickerItem(path: "agent:demo-1", label: "Native Agents view", kind: "agent", sessionID: "session:demo-1", sessionLabel: "dotfiles", app: "Pi", state: "working", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-120)), agentID: "pi-1", windowID: "window:demo-1a", windowLabel: "picker", blockID: "block:demo-left", active: true),
-        PickerItem(path: "agent:demo-2", label: "Backend API", kind: "agent", sessionID: "session:demo-1", sessionLabel: "dotfiles", app: "Codex", state: "blocked", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-20)), windowID: "window:demo-1a", windowLabel: "picker", blockID: "block:demo-right"),
-        PickerItem(path: "agent:demo-3", label: "Review tests", kind: "agent", sessionID: "session:demo-2", sessionLabel: "castty", app: "Claude", state: "idle", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)), windowID: "window:demo-2a", windowLabel: "research", blockID: "block:demo-review", unreadDone: true)
+        PickerItem(path: "agent:demo-1", label: "Atlas build", kind: "agent", sessionID: "session:demo-1", sessionLabel: "atlas-notes", app: "Pi", state: "working", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-120)), agentID: "pi-1", windowID: "window:demo-1a", windowLabel: "workspace", blockID: "block:demo-left", active: true),
+        PickerItem(path: "agent:demo-2", label: "API server", kind: "agent", sessionID: "session:demo-1", sessionLabel: "atlas-notes", app: "Codex", state: "blocked", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-20)), windowID: "window:demo-1a", windowLabel: "workspace", blockID: "block:demo-right"),
+        PickerItem(path: "agent:demo-3", label: "Review tests", kind: "agent", sessionID: "session:demo-2", sessionLabel: "cinder-labs", app: "Claude", state: "idle", updatedAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600)), windowID: "window:demo-2a", windowLabel: "research", blockID: "block:demo-review", unreadDone: true)
     ]
     private var sessionEntries: [PickerItem] = [
-        PickerItem(path: "session:demo-1", label: "dotfiles", kind: "session", sessionID: "session:demo-1", sessionLabel: "dotfiles", state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), active: true, isLocal: true, host: "This Mac"),
-        PickerItem(path: "session:demo-2", label: "castty", kind: "session", sessionID: "session:demo-2", sessionLabel: "castty", state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), isLocal: true, host: "This Mac", unreadDone: true),
-        PickerItem(path: "session:demo-3", label: "demo-app", kind: "session", sessionID: "session:demo-3", sessionLabel: "demo-app", state: "blocked", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), isLocal: false, host: "Demo Host")
+        PickerItem(path: "session:demo-1", label: "atlas-notes", kind: "session", sessionID: "session:demo-1", sessionLabel: "atlas-notes", state: "working", working: true, updatedAt: ISO8601DateFormatter().string(from: Date()), active: true, isLocal: true, host: "This Mac"),
+        PickerItem(path: "session:demo-2", label: "cinder-labs", kind: "session", sessionID: "session:demo-2", sessionLabel: "cinder-labs", state: "idle", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), isLocal: true, host: "This Mac", unreadDone: true),
+        PickerItem(path: "session:demo-3", label: "atlas-api", kind: "session", sessionID: "session:demo-3", sessionLabel: "atlas-api", state: "blocked", working: false, updatedAt: ISO8601DateFormatter().string(from: Date()), isLocal: false, host: "Build Host")
     ]
     private let sessionHosts: [HostHeader] = [
         HostHeader(label: "This Mac", local: true, reachable: true, error: nil),
-        HostHeader(label: "Demo Host", local: false, reachable: true, error: nil),
+        HostHeader(label: "Build Host", local: false, reachable: true, error: nil),
         HostHeader(label: "Offline Host", local: false, reachable: false, error: "ssh: host down")
     ]
+    init(showcase: Bool = false) {
+        if showcase {
+            pinnedSessions = ["This Mac\u{0}session:demo-1", "This Mac\u{0}session:demo-2"]
+            pinSlots = ["This Mac\u{0}session:demo-1": 1, "This Mac\u{0}session:demo-2": 2]
+        }
+    }
+
     nonisolated func close() {}
 
     func count(_ method: String) -> Int { calls.filter { $0 == method }.count }
@@ -45,11 +52,11 @@ actor DemoBackend: BackendClient {
         try await Task.sleep(for: .milliseconds(70))
         func text(_ key: String) -> String { if case let .text(value) = params[key] { return value }; return "" }
         let targets = ["session", "tab", "here", "pane_right", "pane_below"]
-        let repo = "/Users/demo/Projects/example-kit"
-        let branches = ["main", "develop", "feat/native-picker", "fix/focus"]
+        let repo = "/Users/demo/Projects/orbit-web"
+        let branches = ["main", "develop", "feat/fast-search", "fix/focus"]
         switch method {
         case "directories":
-            let items = [repo, "/Users/demo/Projects/sample-console", "/Users/demo/Projects/demo-sandbox", "/Users/demo/Work/demo-studio", "/Users/demo/Work/sample-notes"]
+            let items = [repo, "/Users/demo/Projects/cinder-labs", "/Users/demo/Projects/northstar-api", "/Users/demo/Work/bluebird-studio", "/Users/demo/Work/cedar-notes"]
                 .filter { text("query").isEmpty || $0.localizedCaseInsensitiveContains(text("query")) }
                 .map { path in
                     PickerItem(path: path, state: path == repo ? "blocked" : "working", working: true,
@@ -64,13 +71,13 @@ actor DemoBackend: BackendClient {
             // in hosts so their error remains visible.
             let query = text("query")
             let localDirs: [PickerItem] = [
-                PickerItem(path: "/Users/demo/.dotfiles", label: ".dotfiles", kind: "dir",
-                           isLocal: true, isPinned: pinned.contains("/Users/demo/.dotfiles"), host: "This Mac"),
-                PickerItem(path: "/Users/demo/Workspace/Projects/raptor", label: "raptor", kind: "dir", state: "working", working: true,
-                           isLocal: true, isPinned: pinned.contains("/Users/demo/Workspace/Projects/raptor"), host: "This Mac"),
+                PickerItem(path: "/Users/demo/.config", label: ".config", kind: "dir",
+                           isLocal: true, isPinned: pinned.contains("/Users/demo/.config"), host: "This Mac"),
+                PickerItem(path: "/Users/demo/Workspace/Projects/orbit-web", label: "orbit-web", kind: "dir", state: "working", working: true,
+                           isLocal: true, isPinned: pinned.contains("/Users/demo/Workspace/Projects/orbit-web"), host: "This Mac"),
             ]
             let remoteDirs: [PickerItem] = [
-                PickerItem(path: "/Volumes/Demo/Projects/demo-app", label: "demo-app", kind: "dir", isLocal: false, host: "Demo Host"),
+                PickerItem(path: "/Volumes/Build/Projects/northstar-api", label: "northstar-api", kind: "dir", isLocal: false, host: "Build Host"),
             ]
             let sessions = sessionEntries.map { item in
                 var item = item
@@ -129,7 +136,7 @@ actor DemoBackend: BackendClient {
             if text("repo").isEmpty { return APIResult(needsRepo: true) }
             return APIResult(items: method == "worktrees.form" ? [] : worktrees.filter {
                 text("query").isEmpty || $0.path.localizedCaseInsensitiveContains(text("query")) || ($0.branch ?? "").localizedCaseInsensitiveContains(text("query"))
-            }, targets: targets, target: "session", repo: repo, destinationRoot: "/Users/demo/Projects/example-kit-worktrees", needsRepo: false,
+            }, targets: targets, target: "session", repo: repo, destinationRoot: "/Users/demo/Projects/orbit-web-worktrees", needsRepo: false,
             branches: branches, baseBranch: "main", suggestedBranch: "amber-falcon",
             agent: "pi", agentModel: "glm-5.3", agentReasoning: "high", agents: ["pi", "codex"])
         case "agents.catalog":
@@ -199,10 +206,10 @@ actor DemoBackend: BackendClient {
             return APIResult(worktreeRemoved: true, branchRemoved: true, sessionClosed: true, deletedPaths: paths)
         case "worktrees.preview":
             let branch = text("branch")
-            return APIResult(path: "/Users/demo/Projects/example-kit-worktrees/" + branch.replacingOccurrences(of: "/", with: "-"),
+            return APIResult(path: "/Users/demo/Projects/orbit-web-worktrees/" + branch.replacingOccurrences(of: "/", with: "-"),
                              validationError: branch.isEmpty ? "Enter a branch name." : nil)
         case "worktrees.create":
-            let path = "/Users/demo/Projects/example-kit-worktrees/" + text("branch").replacingOccurrences(of: "/", with: "-")
+            let path = "/Users/demo/Projects/orbit-web-worktrees/" + text("branch").replacingOccurrences(of: "/", with: "-")
             worktrees.append(PickerItem(path: path, branch: text("branch"), isMain: false, state: "idle", working: false,
                                        updatedAt: ISO8601DateFormatter().string(from: Date())))
             return APIResult(path: path)
@@ -212,9 +219,9 @@ actor DemoBackend: BackendClient {
         case "pullrequests.resolve", "pullrequests.prepare":
             let input = text("input")
             let number = Int(input) ?? Int(input.split(separator: "/").last ?? "") ?? 123
-            return APIResult(repo: repo, path: "/Users/demo/workspace/worktrees/example-kit/feat-native-picker",
-                             input: input, url: "https://github.com/demo/example-kit/pull/\(number)", number: number,
-                             title: "Add native pull request workflow", branch: "feat/native-picker",
+            return APIResult(repo: repo, path: "/Users/demo/workspace/worktrees/orbit-web/feat-fast-search",
+                             input: input, url: "https://github.com/example-labs/orbit-web/pull/\(number)", number: number,
+                             title: "Add fast search to the workspace launcher", branch: "feat/fast-search",
                              cloneRequired: false, existing: false)
         case "pullrequests.open":
             return APIResult(path: text("path"), sessionID: "session:demo-pr", windowID: "window:demo-pr", blockID: "block:demo-pr")
@@ -232,7 +239,7 @@ actor DemoBackend: BackendClient {
             DeletionWorktree(repo: repo, path: item.path, branch: item.branch ?? "",
                              error: item.isMain == true ? "Cannot delete branch `\(item.branch ?? "")`." : nil,
                              isPrimary: item.isMain,
-                             needsForce: session == "session:demo-2" && item.branch == "feat/native-picker", checked: true, prepared: true)
+                             needsForce: session == "session:demo-2" && item.branch == "feat/fast-search", checked: true, prepared: true)
         }
     }
 }
