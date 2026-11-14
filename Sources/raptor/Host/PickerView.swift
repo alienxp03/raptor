@@ -195,6 +195,12 @@ struct PickerView: View {
         Group {
             if model.isForm {
                 HStack(spacing: 8) {
+                    Image(systemName: model.page == .pr ? "arrow.down.doc" : "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(PickerStyle.selection)
+                        .frame(width: 24, height: 24)
+                        .background(PickerStyle.selectionBackground, in: RoundedRectangle(cornerRadius: 7))
+                        .accessibilityHidden(true)
                     Text(model.page == .pr ? "Checkout pull request" : "New worktree")
                         .font(.system(size: PickerStyle.rowFontSize, weight: .semibold))
                     if model.options.demo { demoBadge }
@@ -628,11 +634,10 @@ struct PickerView: View {
                         Text(model.base.isEmpty ? "Choose a local branch…" : model.base)
                             .foregroundStyle(model.base.isEmpty ? PickerStyle.foreground.opacity(0.45) : PickerStyle.foreground)
                         Spacer()
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(PickerStyle.foreground.opacity(0.5))
+                        dropdownChevron(highlighted: field == .base || model.basePickerPresented)
                     }
-                    .padding(.horizontal, 9)
-                    .frame(height: PickerStyle.controlHeight)
-                    .modifier(PickerFormField(focused: field == .base))
+                    .font(.system(size: 12))
+                    .modifier(PickerDropdownControl(highlighted: field == .base || model.basePickerPresented))
                 }
                 .buttonStyle(.plain).focusable().focused($field, equals: .base)
                 .focusEffectDisabled()
@@ -675,15 +680,18 @@ struct PickerView: View {
 
     private var agentControls: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Divider().overlay(PickerStyle.foreground.opacity(0.08)).padding(.vertical, 3)
-            HStack {
+            Divider().overlay(PickerPalette.stroke).padding(.vertical, 3)
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(PickerStyle.selection)
                 Text("Agent launch").font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(PickerStyle.secondaryText)
                 Spacer()
                 Button("Save as default") { model.saveAgentDefaults() }
                     .buttonStyle(.plain)
                     .font(.system(size: 10))
-                    .foregroundStyle(PickerStyle.secondaryText)
+                    .foregroundStyle(PickerStyle.selection)
                     .disabled(model.busy || model.agentCatalogLoading)
                     .help("Save these agent, model, and reasoning values for new worktrees.")
                     .accessibilityIdentifier("save-agent-defaults")
@@ -782,6 +790,12 @@ struct PickerView: View {
         return parts.joined(separator: " · ")
     }
 
+    private func dropdownChevron(highlighted: Bool) -> some View {
+        Image(systemName: "chevron.down")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(highlighted ? PickerStyle.selection : PickerStyle.secondaryText)
+    }
+
     private func optionButton(_ title: String, presented: Bool, focused: Bool, identifier: String,
                               monospaced: Bool = false, action: @escaping () -> Void) -> some View {
         let highlighted = focused || presented
@@ -794,19 +808,10 @@ struct PickerView: View {
                 Text(title)
                     .font(.system(size: 12, weight: .regular, design: monospaced ? .monospaced : .default))
                     .lineLimit(1).truncationMode(.middle)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(PickerStyle.foreground.opacity(highlighted || hovered ? 0.7 : 0.4))
+                dropdownChevron(highlighted: highlighted || hovered)
             }
             .foregroundStyle(PickerStyle.foreground.opacity(0.9))
-            .padding(.horizontal, 8)
-            .frame(height: PickerStyle.controlHeight)
-            .background(PickerStyle.foreground.opacity(highlighted || hovered ? 0.06 : 0.025),
-                        in: RoundedRectangle(cornerRadius: 5))
-            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(
-                highlighted ? PickerStyle.selection.opacity(0.8) : PickerStyle.foreground.opacity(hovered ? 0.25 : 0.13),
-                lineWidth: 1))
-            .contentShape(Rectangle())
+            .modifier(PickerDropdownControl(highlighted: highlighted, hovered: hovered))
         }
         .buttonStyle(.plain)
         .focusable()
@@ -1063,17 +1068,13 @@ struct PickerView: View {
                 guard !model.targetPickerPresented else { return }
                 model.targetPickerPresented = true
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Text(PickerModel.targetLabel(model.target))
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+                    dropdownChevron(highlighted: field == .target || model.targetPickerPresented)
                 }
-                .font(.system(size: model.isForm ? PickerStyle.bodyFontSize : 11, weight: .medium))
-                .foregroundStyle(PickerStyle.foreground.opacity(0.85))
-                .padding(.horizontal, 8)
-                .frame(height: model.isForm ? PickerStyle.controlHeight : 22)
-                .background(PickerStyle.foreground.opacity(0.06), in: Capsule())
-                .overlay(Capsule().strokeBorder(field == .target ? PickerStyle.selection : Color.clear))
-                .contentShape(Rectangle())
+                .font(.system(size: model.isForm ? 12 : 11, weight: .medium))
+                .foregroundStyle(PickerStyle.foreground.opacity(0.9))
+                .modifier(PickerDropdownControl(highlighted: field == .target || model.targetPickerPresented))
             }
             .buttonStyle(.plain)
             .focusable().focused($field, equals: .target)
@@ -1133,15 +1134,32 @@ struct PickerView: View {
     }
 }
 
-// Use the search surface for every editable form control; amber only marks focus.
+// All selector triggers share one themed surface, radius, outline and focus state.
+private struct PickerDropdownControl: ViewModifier {
+    let highlighted: Bool
+    var hovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 9)
+            .frame(height: PickerStyle.controlHeight)
+            .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: PickerStyle.formControlRadius))
+            .overlay(RoundedRectangle(cornerRadius: PickerStyle.formControlRadius).strokeBorder(
+                highlighted ? PickerStyle.selection.opacity(0.85) : (hovered ? PickerStyle.foreground.opacity(0.25) : PickerPalette.stroke),
+                lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: PickerStyle.formControlRadius))
+    }
+}
+
+// Use the same search surface for editable form fields; the accent marks focus.
 private struct PickerFormField: ViewModifier {
     let focused: Bool
 
     func body(content: Content) -> some View {
         content
-            .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(focused ? PickerStyle.selection.opacity(0.7) : Color.clear))
+            .background(PickerStyle.fieldBackground, in: RoundedRectangle(cornerRadius: PickerStyle.formControlRadius))
+            .overlay(RoundedRectangle(cornerRadius: PickerStyle.formControlRadius)
+                .strokeBorder(focused ? PickerStyle.selection.opacity(0.85) : PickerPalette.stroke, lineWidth: 1))
     }
 }
 
