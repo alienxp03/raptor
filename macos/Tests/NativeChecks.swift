@@ -3141,6 +3141,7 @@ struct NativeChecks {
         // A hidden create must retain its committed path if opening fails.
         let backend = CachedListBackend()
         await backend.hold("worktrees.create")
+        await backend.hold("worktrees.preview")
         await backend.hold("dispatch")
         let createOptions = try LaunchOptions(arguments: ["--mode", "wt-create", "--repo", "/repo", "--session", "original", "--block", "B", "--client", "C", "--title", "Original"])
         let create = PickerModel(options: createOptions, backend: backend)
@@ -3151,7 +3152,9 @@ struct NativeChecks {
         await backend.reply("worktrees.form", APIResult(targets: ["tab"], target: "tab", repo: "/repo", branches: ["main"], baseBranch: "main"))
         try await wait { !create.loading }
         create.branch = "feat/new"
-        create.destination = "/repo-new"; create.previewReady = true
+        try await pending("worktrees.preview", backend)
+        await backend.reply("worktrees.preview", APIResult(path: "/repo-new"))
+        try await wait { create.canCreate }
         create.create()
         try await pending("worktrees.create", backend)
         create.escape(); create.dismiss(); create.create()
