@@ -118,7 +118,6 @@ struct RexReceiptChecks {
         // Writes separated by less than the debounce window form one update.
         for index in 0..<8 {
             try save(Data("burst-\(index)".utf8), atomic: true)
-            try await Task.sleep(for: .milliseconds(10))
         }
         try await wait { deliveries == 9 }
         try await settle()
