@@ -145,6 +145,7 @@ private actor CachedListBackend: BackendClient {
     nonisolated func close() {}
     func count(_ method: String) -> Int { calls.filter { $0 == method }.count }
     func waiting(_ method: String) -> Bool { !(pending[method] ?? []).isEmpty }
+    func pendingCount(_ method: String) -> Int { pending[method]?.count ?? 0 }
     func reply(_ method: String, _ result: APIResult) {
         guard waiting(method) else { testFailure("Reply for \(method) arrived with no pending call") }
         pending[method]!.removeFirst().resume(returning: result)
@@ -1989,7 +1990,11 @@ struct NativeChecks {
             testFailure("Backend must receive only the canonical PR URL")
         }
         model.prInput = "https://github.com/o/r/pull/13"
-        try await Task.sleep(for: .milliseconds(220))
+        for _ in 0..<750 {
+            if await backend.pendingCount("pullrequests.resolve") == 2 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        require(await backend.pendingCount("pullrequests.resolve") == 2, "Both PR resolves must be pending before replying to the latest")
         await backend.replyLatest("pullrequests.resolve", APIResult(repo: "/repo", path: "/wt13", title: "Latest", branch: "feat/latest", existing: true))
         try await wait { model.canOpenPullRequest }
         await backend.reply("pullrequests.resolve", APIResult(title: "Stale"))
