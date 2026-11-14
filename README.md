@@ -2,9 +2,13 @@
 
 A keyboard-first launcher for [Rex](https://www.superlogical.com/rex/docs). Find a session or project, then switch to it or open it where you want to work.
 
-| Search and switch | Pinned sessions | Worktrunk worktrees |
-| --- | --- | --- |
-| ![Search sessions and projects](docs/screenshots/search.png) | ![Pinned session shortcuts](docs/screenshots/sessions.png) | ![Worktrees managed by Worktrunk](docs/screenshots/worktrees.png) |
+| Search and switch | Pinned sessions |
+| --- | --- |
+| ![Search sessions and projects](docs/screenshots/search.png) | ![Pinned session shortcuts](docs/screenshots/sessions.png) |
+
+| Pull request form | Worktree form |
+| --- | --- |
+| ![Pull request checkout form](docs/screenshots/pull-request.png) | ![Create a Worktrunk worktree](docs/screenshots/worktree-create.png) |
 
 [More screenshots](docs/screenshots/README.md) · [Usage and design notes](docs/native-app.md) · [Session behavior](docs/sessions.md)
 
