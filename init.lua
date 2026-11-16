@@ -56,6 +56,7 @@ function M.setup(options)
 	local cfg = {
 		bounds = { x = 0.28, y = 0.14, w = 0.44, h = 0.40 },
 		bin = local_bin or brew_bin or standalone_bin,
+		open_animation = true,
 		-- Legacy options from the app era: accepted so existing configs keep
 		-- loading, and ignored — the bare host positions its own panel.
 		mobile_bounds = { x = 0.08, y = 0.15, w = 0.84, h = 0.60 },
@@ -148,6 +149,8 @@ function M.setup(options)
 		table.insert(panel_args, "panel")
 		table.insert(panel_args, "--mode")
 		table.insert(panel_args, mode)
+		table.insert(panel_args, "--open-animation")
+		table.insert(panel_args, tostring(cfg.open_animation))
 		local panel_result = panel_bin and rex.exec(panel_args, { timeout = 5 })
 		if panel_result ~= nil and panel_result.ok then
 			return { ui = "native" }

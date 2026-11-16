@@ -216,7 +216,7 @@ case "serve":
     // process chain so file-access grants are inherited.
     MainActor.assumeIsolated { HostMain.run() }
 case "panel":
-    let (values, _, _) = Flags.parse(sub, valueFlags: ["mode", "repo"])
+    let (values, _, _) = Flags.parse(sub, valueFlags: ["mode", "repo", "open-animation"])
     let req = RaptorPanel.Request(
         action: "open",
         mode: values["mode"] ?? "dirs",
@@ -224,7 +224,8 @@ case "panel":
         block: ctx.block,
         client: ctx.client,
         title: ctx.title,
-        repo: values["repo"] ?? ""
+        repo: values["repo"] ?? "",
+        openAnimation: values["open-animation"] != "false"
     )
     do {
         try Panel.open(req)

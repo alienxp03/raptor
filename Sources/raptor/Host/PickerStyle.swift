@@ -99,8 +99,8 @@ enum PickerStyle {
         }
     }
 
-    static func panelAnimationBehavior(reduceMotion: Bool) -> NSWindow.AnimationBehavior {
-        reduceMotion ? .none : .default
+    static func panelAnimationBehavior(reduceMotion: Bool, enabled: Bool = true) -> NSWindow.AnimationBehavior {
+        enabled && !reduceMotion ? .default : .none
     }
 
     static func panelFrame(in area: CGRect, height: CGFloat) -> CGRect {

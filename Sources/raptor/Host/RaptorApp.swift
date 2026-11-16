@@ -16,6 +16,7 @@ final class PickerPanel: NSPanel {
 
 @MainActor
 final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    private var openAnimation = true
     private var panel: PickerPanel?
     private var model: PickerModel?
     private var keyboardMonitor: Any?
@@ -96,6 +97,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             model.dismiss()
             return PanelReply(ok: true, error: nil)
         }
+        openAnimation = request.open_animation ?? true
         openResident(options)
         return PanelReply(ok: true, error: nil)
     }
@@ -161,9 +163,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func showResidentPanel() {
         guard let panel else { return }
-        panel.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        panel.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, enabled: openAnimation)
         NSApp.unhide(nil)
-        // AppKit supplies resh's panel fade; no custom delay or alpha animation.
+        // AppKit controls the optional fade; no custom alpha animation.
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
         model?.setPresented(true)
@@ -214,8 +216,8 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         picker.isOpaque = false
         picker.backgroundColor = .clear
         picker.hasShadow = true
-        // Match resh's system panel animation, unless Reduced Motion is enabled.
-        picker.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        // Apply the opening animation setting and Reduce Motion.
+        picker.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, enabled: openAnimation)
         picker.level = .floating
         picker.hidesOnDeactivate = false
         picker.isFloatingPanel = true
@@ -302,7 +304,7 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func bringForward(_ picker: NSPanel) {
-        picker.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        picker.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, enabled: openAnimation)
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
         picker.makeKeyAndOrderFront(nil)

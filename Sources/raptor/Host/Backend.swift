@@ -81,6 +81,7 @@ struct PanelRequest: Codable {
     var client: String?
     var title: String?
     var repo: String?
+    var open_animation: Bool?
 }
 
 struct PanelReply: Codable {

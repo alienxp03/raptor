@@ -1237,7 +1237,11 @@ struct NativeChecks {
         try await RexFocusChecks.run()
         try await searchLatencyChecks()
         require(PickerStyle.panelAnimationBehavior(reduceMotion: false) == .default,
-                     "Panel presentation must use resh's default AppKit animation")
+                     "Panel presentation must animate by default")
+        for reduceMotion in [false, true] {
+            require(PickerStyle.panelAnimationBehavior(reduceMotion: reduceMotion, enabled: false) == .none,
+                    "Disabled panel animation must not animate")
+        }
         require(PickerStyle.panelAnimationBehavior(reduceMotion: true) == .none,
                      "Reduced Motion must disable panel presentation animation")
         let options = try LaunchOptions(arguments: ["--demo", "--mode", "wt", "--repo", "/demo", "--session", "S", "--block", "B", "--client", "C", "--title", "A title"])

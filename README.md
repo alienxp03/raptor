@@ -69,6 +69,16 @@ rex.bind("ctrl+cmd+o", "raptor")
 
 To keep the default and add an alternative, just add the new `rex.bind`. Reload with `rex config reload`. Other shortcuts in the picker are app-level; view the full current list with `⌘/`.
 
+## Opening animation
+
+The Lua setup option `open_animation` defaults to `true`. To disable it:
+
+```lua
+dofile(os.getenv("HOME") .. "/.config/rex/raptor/init.lua").setup({ open_animation = false })
+```
+
+Run `rex config reload` after changes. Reduce Motion always disables the window animation. Row animations are unchanged.
+
 ## Worktree
 
 Raptor uses [Worktrunk](https://worktrunk.dev/) to create and manage worktrees. Configure worktree paths in [Worktrunk's config](https://worktrunk.dev/config/) and hooks in its [hook config](https://worktrunk.dev/hook/). Use `wt list` and `wt remove` to manage worktrees outside Raptor. Project setup hooks run visibly in the destination terminal.

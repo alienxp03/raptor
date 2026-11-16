@@ -16,9 +16,11 @@ public struct Request: Codable {
     public var client: String
     public var title: String
     public var repo: String
+    public var openAnimation: Bool
 
     enum CodingKeys: String, CodingKey {
         case action, mode, session, block, client, title, repo
+        case openAnimation = "open_animation"
     }
 
     public init(
@@ -28,7 +30,8 @@ public struct Request: Codable {
         block: String = "",
         client: String = "",
         title: String = "",
-        repo: String = ""
+        repo: String = "",
+        openAnimation: Bool = true
     ) {
         self.action = action
         self.mode = mode
@@ -37,6 +40,7 @@ public struct Request: Codable {
         self.client = client
         self.title = title
         self.repo = repo
+        self.openAnimation = openAnimation
     }
 
     public init(from decoder: Decoder) throws {
@@ -48,11 +52,13 @@ public struct Request: Codable {
         client = try c.decodeIfPresent(String.self, forKey: .client) ?? ""
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
         repo = try c.decodeIfPresent(String.self, forKey: .repo) ?? ""
+        openAnimation = try c.decodeIfPresent(Bool.self, forKey: .openAnimation) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(action, forKey: .action)
+        try c.encode(openAnimation, forKey: .openAnimation)
         // Go omitempty: empty strings stay off the wire.
         if !mode.isEmpty { try c.encode(mode, forKey: .mode) }
         if !session.isEmpty { try c.encode(session, forKey: .session) }
