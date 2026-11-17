@@ -16,6 +16,9 @@ final class PickerPanel: NSPanel {
 
 @MainActor
 final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    // Experimental: keep disabled until the trail matches Rex more closely.
+    private let caretFlight: CaretFlight? = nil
+    private var sourceCaret: CGPoint?
     private var openAnimation = true
     private var panel: PickerPanel?
     private var model: PickerModel?
@@ -129,6 +132,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let model else { return }
         let context = model.prepareReconfigure(options)
         let anchor = invocationAnchor()
+        if panel?.isVisible != true, let area = anchor?.area {
+            sourceCaret = CGPoint(x: area.minX + 18, y: area.minY + 38)
+        }
         if let panel {
             panel.title = model.heading
             if let (area, screen) = anchor {
@@ -161,13 +167,22 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    private var searchCaret: CGPoint? {
+        guard let panel else { return nil }
+        return CGPoint(x: panel.frame.minX + 36, y: panel.frame.maxY - PickerStyle.searchHeight / 2)
+    }
+
     private func showResidentPanel() {
         guard let panel else { return }
+        let wasVisible = panel.isVisible
         panel.animationBehavior = PickerStyle.panelAnimationBehavior(reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, enabled: openAnimation)
         NSApp.unhide(nil)
         // AppKit controls the optional fade; no custom alpha animation.
         panel.alphaValue = 1
         panel.makeKeyAndOrderFront(nil)
+        if !wasVisible, let sourceCaret, let searchCaret {
+            caretFlight?.play(from: sourceCaret, to: searchCaret, color: NSColor(PickerStyle.selection))
+        }
         model?.setPresented(true)
         receiptMonitor.start()
         startOutsideClickDismissal(for: panel)
@@ -199,6 +214,9 @@ final class RaptorDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func dismissResidentPanel() {
+        if panel?.isVisible == true, let sourceCaret, let searchCaret {
+            caretFlight?.play(from: searchCaret, to: sourceCaret, color: NSColor(PickerStyle.selection))
+        }
         receiptMonitor.stop()
         outsideClickMonitor.stop()
         model?.setPresented(false)
