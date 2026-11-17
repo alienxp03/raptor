@@ -34,7 +34,7 @@ for _, case in ipairs({
  local ok, result = pcall(run, { session_id = "session", block_id = "block", client_id = "client" })
  if case.native then
   assert(ok and result.ui == "native")
-  assert(table.concat(commands[1], "|") == "/demo/raptor|-session|session|-block|block|-client|client|panel|--mode|pr")
+  assert(table.concat(commands[1], "|") == "/demo/raptor|-session|session|-block|block|-client|client|panel|--mode|pr|--open-animation|true")
  else
   assert(not ok and tostring(result):find(case.error, 1, true), tostring(result))
  end
