@@ -4,6 +4,25 @@ import RaptorWorktree
 import RaptorRex
 
 extension Handler {
+    /// A missing launcher row alone is not proof of deletion. Check that host's
+    /// complete live listing before releasing any saved shortcut slots.
+    func releaseClosedPinSlots(on host: String) throws {
+        let pins = RaptorConfig.loadSessionPins().filter { $0.host == host }
+        guard !pins.isEmpty else { return }
+        let visible = Set((launcherItems() ?? []).filter { $0.kind == "session" && $0.host == host }
+            .map(\.sessionID))
+        let candidates = pins.filter { !visible.contains($0.sessionID) }
+        guard !candidates.isEmpty,
+              let output = try? Rex.runOn(Rex.apiNormalizeHost(host), "ls", "--json"),
+              let object = (try? JSONSerialization.jsonObject(with: Data(output.utf8))) as? [String: Any],
+              let sessions = object["sessions"] as? [[String: Any]] else { return }
+        // Malformed or partial replies must never free a slot.
+        let ids = sessions.compactMap { $0["session_id"] as? String }
+        guard ids.count == sessions.count, ids.allSatisfy({ !$0.isEmpty }) else { return }
+        let live = Set(ids)
+        try RaptorConfig.removeSessionPins(Set(candidates.filter { !live.contains($0.sessionID) }))
+    }
+
     /// Resolve and validate without calling the app. Lua actions must queue local
     /// selection after returning, rather than wait for their own blocked client.
     public func resolvePinnedSession(slot: Int) throws -> SessionPin {

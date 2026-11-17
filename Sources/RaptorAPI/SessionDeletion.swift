@@ -1,5 +1,6 @@
 import Foundation
 import RaptorCatalog
+import RaptorConfig
 import RaptorPaths
 import RaptorRex
 import RaptorWorktree
@@ -163,6 +164,12 @@ extension Handler {
     }
 
     func recordDeletedResources(_ host: String, _ sid: String, _ path: String, sessionClosed: Bool) {
+        if sessionClosed {
+            let removed = RaptorConfig.loadSessionPins().filter {
+                $0.sessionID == sid && Rex.apiNormalizeHost($0.host) == Rex.apiNormalizeHost(host)
+            }
+            try? RaptorConfig.removeSessionPins(Set(removed))
+        }
         cacheMu.lock()
         defer { cacheMu.unlock() }
         let file = URL(fileURLWithPath: deletionTombstonesPath())

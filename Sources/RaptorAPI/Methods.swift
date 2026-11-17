@@ -104,6 +104,7 @@ extension Handler {
                 if sessionID.isEmpty {
                     pinned = try RaptorConfig.togglePin(path)
                 } else {
+                    try releaseClosedPinSlots(on: host)
                     pinned = try RaptorConfig.toggleSessionPin(sessionID: sessionID, host: host)
                 }
             } catch {

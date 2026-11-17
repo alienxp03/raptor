@@ -97,6 +97,39 @@ final class PinsTests: APITestCase {
         XCTAssertEqual(restarted.launcherItems()?.first?.pinned, true)
     }
 
+    func testRepinReusesConfirmedDeletedSlot() throws {
+        let h = handler()
+        let root = makeTempDir()
+        env.set("PATH", root + ":" + (env.get("PATH") ?? ""))
+        try put(root + "/rex", """
+        #!/bin/sh
+        printf '%s\\n' '{"sessions":[{"session_id":"first"},{"session_id":"shared"}]}'
+        """)
+        for id in ["first", "deleted", "shared"] {
+            try RaptorConfig.toggleSessionPin(sessionID: id, host: "two")
+        }
+        try RaptorConfig.toggleSessionPin(sessionID: "deleted", host: "one")
+        XCTAssertFalse(try toggle(h, "{\"session_id\":\"shared\",\"host\":\"two\"}"))
+        XCTAssertTrue(try toggle(h, "{\"session_id\":\"shared\",\"host\":\"two\"}"))
+        let pins = RaptorConfig.loadSessionPins()
+        XCTAssertEqual(pins.first { $0.sessionID == "shared" }?.slot, 2)
+        XCTAssertEqual(pins.first { $0.sessionID == "first" }?.slot, 1)
+        XCTAssertTrue(pins.contains(SessionPin(sessionID: "deleted", host: "one")))
+        XCTAssertFalse(pins.contains(SessionPin(sessionID: "deleted", host: "two")))
+    }
+
+    func testUnavailableOrMalformedListingKeepsSlotsReserved() throws {
+        let h = handler()
+        let root = makeTempDir()
+        env.set("PATH", root + ":" + (env.get("PATH") ?? ""))
+        try RaptorConfig.toggleSessionPin(sessionID: "missing", host: "two")
+        for reply in ["exit 1", "echo '{}'", "echo '{\"sessions\":[{}]}'"] {
+            try put(root + "/rex", "#!/bin/sh\n" + reply + "\n")
+            try h.releaseClosedPinSlots(on: "two")
+            XCTAssertEqual(RaptorConfig.loadSessionPins().first?.slot, 1)
+        }
+    }
+
     func testValidation() {
         let h = handler()
         for params in ["{}", "{\"session_id\":\"shared\"}",

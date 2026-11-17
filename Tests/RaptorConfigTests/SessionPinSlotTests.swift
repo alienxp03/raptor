@@ -47,6 +47,19 @@ final class SessionPinSlotTests: XCTestCase {
         XCTAssertEqual(RaptorConfig.loadSessionPins().map(\.slot), [2, 1, nil, nil, nil, nil, nil, nil, nil, 3])
     }
 
+    func testClosedPinSlotIsReusedOnRepinWithoutRenumbering() throws {
+        _ = try isolate()
+        for id in ["first", "deleted", "third"] {
+            XCTAssertTrue(try RaptorConfig.toggleSessionPin(sessionID: id, host: "h"))
+        }
+        XCTAssertTrue(try RaptorConfig.toggleSessionPin(sessionID: "other-host", host: "remote"))
+        try RaptorConfig.removeSessionPins([SessionPin(sessionID: "deleted", host: "h")])
+        XCTAssertEqual(RaptorConfig.loadSessionPins().map(\.slot), [1, 3, 4])
+        XCTAssertFalse(try RaptorConfig.toggleSessionPin(sessionID: "third", host: "h"))
+        XCTAssertTrue(try RaptorConfig.toggleSessionPin(sessionID: "third", host: "h"))
+        XCTAssertEqual(RaptorConfig.loadSessionPins().map(\.slot), [1, 4, 2])
+    }
+
     func testHostIdentityAndHashIgnoreSlotMetadata() throws {
         _ = try isolate()
         let pin = SessionPin(sessionID: "shared", host: "one", slot: 7)

@@ -70,6 +70,17 @@ public extension RaptorConfig {
         }
     }
 
+    /// Remove only confirmed closed identities; keep other pins and slots stable.
+    static func removeSessionPins(_ removed: Set<SessionPin>) throws {
+        guard !removed.isEmpty else { return }
+        try RaptorStateStore.update { state, _, _ in
+            let pins = normalizedSessionPins(decodeSessionPins(state[RaptorStateStore.sessionPinsKey]))
+                .filter { !removed.contains($0) }
+            let data = try JSONEncoder().encode(pins)
+            state[RaptorStateStore.sessionPinsKey] = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        }
+    }
+
     private static func decodeSessionPins(_ value: Any?) -> [SessionPin] {
         guard let value,
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]),
