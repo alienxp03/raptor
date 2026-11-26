@@ -207,6 +207,42 @@ final class SessionsTests: APITestCase {
         }
     }
 
+    func testSessionsCreateCanDeferSelectionToLuaAction() throws {
+        env.set("XDG_CACHE_HOME", makeTempDir())
+        let dir = makeTempDir()
+        let log = dir + "/calls"
+        env.set("PATH", dir + ":" + (env.get("PATH") ?? ""))
+        env.set("REX_TEST_LOG", log)
+        try put(dir + "/rex", #"""
+        #!/bin/sh
+        printf '%s\n' "$*" >> "$REX_TEST_LOG"
+        case "$*" in
+          'ls --json') echo '{"sessions":[{"session_id":"existing","label":"raptor"}]}' ;;
+          *) exit 1 ;;
+        esac
+        """#)
+        let h = Handler(ctx: Ctx(client: "client"), cfg: .default())
+        let (result, error) = h.call("sessions.create", "{\"host\":\"\",\"dir\":\"/projects/raptor\",\"defer_select\":true}")
+        XCTAssertNil(error)
+        XCTAssertEqual(try jsonDict(result?.encode() ?? "{}")["session_id"] as? String, "existing")
+        XCTAssertEqual(try readFile(log), "ls --json\n")
+    }
+
+    func testResolveTypedDirectoryValidatesAndExpandsPath() throws {
+        let home = makeTempDir()
+        env.set("HOME", home)
+        try FileManager.default.createDirectory(atPath: home + "/project", withIntermediateDirectories: true)
+        let h = Handler(ctx: Ctx(), cfg: .default())
+        let (result, error) = h.call("directories.resolve", "{\"query\":\"~/project\"}")
+        XCTAssertNil(error)
+        let rows = try jsonDict(result?.encode() ?? "{}")["items"] as? [[String: Any]]
+        XCTAssertEqual(rows?.first?["path"] as? String, home + "/project")
+        for query in ["missing", "~/missing", ""] {
+            let (_, failure) = h.call("directories.resolve", JS.object(["query": .string(query)]).encode())
+            XCTAssertNotNil(failure)
+        }
+    }
+
     func testSessionsCreateOnRemoteHost() throws {
         env.set("XDG_CACHE_HOME", makeTempDir())
         // Prime the process-wide hostname cache first (Go's sync.Once fired in

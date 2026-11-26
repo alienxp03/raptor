@@ -34,6 +34,24 @@ rex config reload
 
 `raptor init` adds the plugin and default Rex bindings to your config.
 
+## Native Rex picker
+
+The main `raptor` action now opens Rex's native command palette. Search the
+shared session/project catalog and press Return to switch sessions or open a
+project as a session. You can also submit an existing directory path, including
+`~/…`. Rows retain host labels, pins and activity status from Raptor's backend.
+
+This first native version uses a snapshot, with up to 1,999 catalog rows; Rex
+handles filtering. Choose **Full Raptor picker…**, or run **Raptor: Full Picker**
+from Rex's command palette, for inline pinning, rename, cleanup, tabs and splits.
+Worktree and PR forms still use the rich Mac picker. Older Rex servers without
+`rex.ui.pick` keep using that picker automatically.
+
+Rex broadcasts native prompts to eligible connected apps: the first answer or
+cancellation wins. Native prompts must be called directly by a named action;
+custom wrappers using `rex.invoke("raptor")` cannot show them. Bind keys directly
+to `"raptor"` instead.
+
 ## Shortcuts
 
 | Key | Action |
@@ -46,7 +64,7 @@ rex config reload
 | `⌃⌘1`–`⌃⌘9` | Jump to a pinned session, Rex-wide |
 | `⌃P`, then `H J K L` | Choose a pane split |
 
-In the picker, type to search; `↑`/`↓` or `Ctrl+J`/`Ctrl+K` moves through results. `Ctrl+O` changes the open target. `⌘/` shows the searchable, context-sensitive shortcut list.
+In the full Mac picker, type to search; `↑`/`↓` or `Ctrl+J`/`Ctrl+K` moves through results. `Ctrl+O` changes the open target. `⌘/` shows the searchable, context-sensitive shortcut list.
 
 ## Customize keybindings
 

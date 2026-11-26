@@ -1,5 +1,5 @@
--- Raptor Rex plugin. The picker renders in a bare native host process
--- spawned under Rex (the resh model); keep key bindings in the user's
+-- Raptor Rex plugin. The main picker uses Rex's native command palette;
+-- rich forms use the bare Mac host. Keep key bindings in the user's
 -- init.lua.
 --
 --   dofile("/path/to/raptor/init.lua").setup{}  -- written by raptor init
@@ -162,6 +162,91 @@ function M.setup(options)
 			.. (panel_bin or cfg.bin) .. " serve and try again", 0)
 	end
 
+	-- Keep the catalog and navigation rules in the shared backend. Each request
+	-- closes stdin so the API process exits; no resident panel is needed.
+	local function api_request(ctx, method, params)
+		local command = base_cmd(ctx)
+		table.insert(command, "api")
+		local input = assert(rex.json.encode({ id = 1, method = method, params = params }))
+		local result, err = rex.exec(command, { stdin = input .. "\n", timeout = 30 })
+		if result == nil then error("raptor: " .. tostring(err), 0) end
+		if not result.ok then error("raptor: " .. (result.stderr or ""), 0) end
+		local reply = rex.json.decode(result.stdout)
+		if type(reply) ~= "table" or reply.id ~= 1 then error("raptor: invalid backend response", 0) end
+		if reply.error then error("raptor: " .. reply.error, 0) end
+		return reply.result
+	end
+
+	local function show_palette(ctx)
+		if not rex.ui or type(rex.ui.pick) ~= "function" then
+			return show_picker(ctx, "dirs")
+		end
+		local catalog = api_request(ctx, "sessions", { query = "" })
+		local items, rows = {}, {}
+		for index, entry in ipairs(catalog.items or {}) do
+			-- Reserve one of Rex's 2,000 rows for access to the richer UI.
+			if index > 1999 then break end
+			local id = "row:" .. index
+			rows[id] = entry
+			local details = {}
+			if entry.active then details[#details + 1] = "Current" end
+			if entry.is_pinned then details[#details + 1] = entry.pin_slot and ("Pin " .. entry.pin_slot) or "Pinned" end
+			if entry.state and entry.state ~= "" then details[#details + 1] = entry.state end
+			if entry.unread_done then details[#details + 1] = "Unread completion" end
+			local subtitle = entry.host or ""
+			if entry.kind == "dir" then subtitle = subtitle .. " · " .. entry.path end
+			items[#items + 1] = {
+				id = id, title = entry.label, subtitle = subtitle,
+				icon = entry.is_pinned and "star" or (entry.kind == "dir" and "folder" or "terminal"),
+				detail = table.concat(details, " · "),
+			}
+		end
+		items[#items + 1] = { id = "full-picker", title = "Full Raptor picker…",
+			subtitle = "Pins, rename, cleanup, tabs and splits", icon = "gear" }
+		local choice, why, detail = rex.ui.pick{
+			title = "Raptor", placeholder = "Find a session, project, or type a directory",
+			items = items, allow_other = true,
+		}
+		if choice == nil then
+			if why == "cancelled" then return end
+			error("raptor: " .. tostring(why) .. " " .. (detail or ""), 0)
+		end
+		if choice == "full-picker" then return show_picker(ctx, "dirs") end
+		local entry
+		if type(choice) == "table" then
+			-- Resolve typed paths through the same backend validation as the Mac UI.
+			local matches = api_request(ctx, "directories.resolve", { query = choice.text })
+			entry = matches.items and matches.items[1]
+			if entry then entry.kind, entry.is_local, entry.host = "dir", true, "" end
+		else
+			entry = rows[choice]
+		end
+		if not entry then error("raptor: unknown picker result", 0) end
+		if entry.kind == "session" then
+			if entry.is_local then
+				-- A nested CLI client action deadlocks while this action is running.
+				rex.client.queue("session.select", { session_id = entry.session_id })
+			else
+				api_request(ctx, "sessions.jump", { kind = "session", session_id = entry.session_id, host = entry.host })
+			end
+		else
+			local opened = api_request(ctx, "sessions.create", {
+				host = entry.host, dir = entry.path, defer_select = entry.is_local == true,
+			})
+			if opened.error then error("raptor: " .. opened.error, 0) end
+			if entry.is_local then rex.client.queue("session.select", { session_id = opened.session_id }) end
+		end
+		return { ui = "rex" }
+	end
+
+	rex.action({
+		name = "raptor_full_picker",
+		title = "Raptor: Full Picker",
+		description = "Open the rich Mac picker with pins, cleanup and alternate open targets.",
+		category = "Navigate",
+		run = function(ctx) return show_picker(resolve_context(ctx), "dirs") end,
+	})
+
 	rex.action({
 		name = "raptor",
 		title = "Raptor",
@@ -190,7 +275,7 @@ function M.setup(options)
 				return { target = args.target or "session", dir = args.dir }
 			end
 
-			return show_picker(ctx, "dirs")
+			return show_palette(resolve_context(ctx))
 		end,
 	})
 

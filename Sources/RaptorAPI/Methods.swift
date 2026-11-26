@@ -229,10 +229,11 @@ extension Handler {
             } catch {
                 return (nil, error)
             }
-            let hostParam: String, dir: String
+            let hostParam: String, dir: String, deferSelect: Bool
             do {
                 hostParam = try Params.string(obj, "host")
                 dir = try Params.string(obj, "dir")
+                deferSelect = try Params.bool(obj, "defer_select")
             } catch {
                 return (nil, error)
             }
@@ -254,7 +255,9 @@ extension Handler {
                 ("session_id", .string(sid)),
             ]
             do {
-                try apiSelectOnHost(host, sid, ctx.client)
+                if !deferSelect {
+                    try apiSelectOnHost(host, sid, ctx.client)
+                }
             } catch {
                 fields.append((
                     "error",
@@ -292,6 +295,18 @@ extension Handler {
                     try Rex.setWindowLabel(host, entry.sessionID, entry.id, p.label)
                 }
                 return .empty
+            }
+        case "directories.resolve":
+            do {
+                var parser = JSONParser(params)
+                let obj = try parser.parseTop().value
+                let query = try Params.string(obj, "query")
+                guard let directory = Catalog.typedPathDirectory(query, []) else {
+                    return (nil, MessageError("enter an existing directory path"))
+                }
+                return (.directories(items: [directory], targets: targets(), target: "session"), nil)
+            } catch {
+                return (nil, error)
             }
         case "directories":
             let obj: JSONValue
